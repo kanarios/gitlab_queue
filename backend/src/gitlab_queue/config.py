@@ -12,12 +12,16 @@ Example:
 
 from __future__ import annotations
 
+import hmac
 from enum import Enum
 from typing import Any
 from urllib.parse import urlparse
 
 import environ
 from environ import bool_var, var
+
+# Minimum length for JWT secret (256 bits / 8 = 32 bytes, hex-encoded = 64 chars)
+JWT_SECRET_MIN_LENGTH = 64
 
 
 class LogLevel(str, Enum):
@@ -77,11 +81,16 @@ class Secret:
         """Compare secrets using constant-time comparison to prevent timing attacks."""
         if not isinstance(other, Secret):
             return NotImplemented
-        import hmac
-
         self_value: str = object.__getattribute__(self, "_secret_value")
         other_value: str = object.__getattribute__(other, "_secret_value")
         return hmac.compare_digest(self_value, other_value)
+
+    def __getattribute__(self, name: str) -> Any:
+        """Block direct access to the secret value attribute."""
+        if name == "_secret_value":
+            msg = "Direct access to secret value is not allowed. Use get_secret_value()"
+            raise AttributeError(msg)
+        return object.__getattribute__(self, name)
 
     def __hash__(self) -> int:
         return hash(object.__getattribute__(self, "_secret_value"))
@@ -212,7 +221,8 @@ def _mask_database_url(self: Settings) -> str:
             if parsed.password:
                 masked = self.database_url.replace(f":{parsed.password}@", ":***@")
                 return masked
-        except Exception:
+        except (ValueError, AttributeError):
+            # URL parsing failed, return unmasked (safe for logging context)
             pass
     return self.database_url
 
@@ -270,8 +280,6 @@ Settings.__repr__ = _settings_repr  # type: ignore[assignment]
 
 class ConfigurationError(Exception):
     """Raised when configuration validation fails."""
-
-    pass
 
 
 def _validate_settings(settings: Settings) -> None:
@@ -343,9 +351,9 @@ def _validate_settings(settings: Settings) -> None:
             "Set GITLAB_QUEUE_WEBHOOK_SECRET or disable webhooks with GITLAB_QUEUE_WEBHOOK_ENABLED=false"
         )
 
-    # Validate JWT secret length (minimum 64 characters for 256-bit security)
+    # Validate JWT secret length
     jwt_secret_len = len(settings.jwt_secret)
-    if jwt_secret_len < 64:
+    if jwt_secret_len < JWT_SECRET_MIN_LENGTH:
         errors.append(
             f"jwt_secret must be at least 64 characters (256 bits) for security, "
             f"got {jwt_secret_len} characters. Generate with: openssl rand -hex 64"
@@ -401,6 +409,7 @@ def load_settings() -> Settings:
 
 
 __all__: list[str] = [
+    "JWT_SECRET_MIN_LENGTH",
     "ConfigurationError",
     "LogFormat",
     "LogLevel",
