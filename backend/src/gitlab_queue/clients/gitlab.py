@@ -38,8 +38,50 @@ if TYPE_CHECKING:
 log = get_logger(__name__)
 
 
+# Keys that may contain sensitive data and should be redacted from response bodies
+_SENSITIVE_KEYS = frozenset({
+    "token", "tokens", "access_token", "refresh_token", "private_token",
+    "password", "secret", "api_key", "apikey", "auth", "authorization",
+    "credential", "credentials", "key", "private_key", "secret_key",
+})
+
+
+def _sanitize_response_body(body: dict[str, Any] | str | None) -> dict[str, Any] | str | None:
+    """Sanitize response body by redacting sensitive keys.
+
+    Recursively processes dicts to replace values of sensitive keys with '***'.
+    This prevents accidental exposure of tokens/secrets in logs or error tracking.
+    """
+    if body is None or isinstance(body, str):
+        return body
+
+    def redact_dict(d: dict[str, Any]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in d.items():
+            key_lower = key.lower()
+            if any(sensitive in key_lower for sensitive in _SENSITIVE_KEYS):
+                result[key] = "***"
+            elif isinstance(value, dict):
+                result[key] = redact_dict(value)
+            elif isinstance(value, list):
+                result[key] = [
+                    redact_dict(item) if isinstance(item, dict) else item
+                    for item in value
+                ]
+            else:
+                result[key] = value
+        return result
+
+    return redact_dict(body)
+
+
 class GitLabAPIError(Exception):
-    """Base exception for GitLab API errors."""
+    """Base exception for GitLab API errors.
+
+    Response body is automatically sanitized to remove sensitive data before storage.
+    The __repr__ and __str__ methods never include the response body to prevent
+    accidental exposure in logs or error tracking systems.
+    """
 
     def __init__(
         self,
@@ -49,7 +91,23 @@ class GitLabAPIError(Exception):
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
-        self.response_body = response_body
+        # Sanitize response body before storing to remove sensitive data
+        self._response_body = _sanitize_response_body(response_body)
+
+    @property
+    def response_body(self) -> dict[str, Any] | str | None:
+        """Return sanitized response body."""
+        return self._response_body
+
+    def __repr__(self) -> str:
+        """Safe representation that excludes response body."""
+        return f"{self.__class__.__name__}({self.args[0]!r}, status_code={self.status_code})"
+
+    def __str__(self) -> str:
+        """Safe string representation."""
+        if self.status_code:
+            return f"{self.args[0]} (status: {self.status_code})"
+        return str(self.args[0])
 
 
 class GitLabNotFoundError(GitLabAPIError):
@@ -148,8 +206,14 @@ class GitLabClient:
 
         Returns:
             Full API path including project prefix.
+
+        Raises:
+            ValueError: If path contains traversal sequences.
         """
         path = path.lstrip("/")
+        # Prevent path traversal attacks
+        if ".." in path:
+            raise ValueError(f"Path traversal not allowed: {path}")
         return f"/projects/{self._project_id}/{path}"
 
     def _parse_rate_limit_headers(
