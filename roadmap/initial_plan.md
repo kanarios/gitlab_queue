@@ -677,7 +677,7 @@ def load_settings() -> Settings:
 
 ---
 
-#### Task 4: Database Setup (SQLite + SQLAlchemy)
+#### [DONE] Task 4: Database Setup (SQLite + SQLAlchemy)
 
 **Файлы:** `backend/src/gitlab_queue/db/database.py`
 
