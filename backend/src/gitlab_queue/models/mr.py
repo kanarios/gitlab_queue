@@ -1,0 +1,57 @@
+"""MergeRequest data model for GitLab Merge Queue Bot.
+
+Provides immutable dataclass representation of GitLab merge requests.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True, slots=True)
+class Author:
+    """MR author information."""
+
+    id: int
+    name: str
+    username: str
+    avatar_url: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class MergeRequest:
+    """GitLab Merge Request representation.
+
+    Immutable dataclass for MR data from GitLab API.
+    Uses frozen=True for hashability and slots=True for memory efficiency.
+
+    Attributes:
+        iid: Internal ID (project-scoped MR number)
+        title: MR title
+        state: Current state (opened, merged, closed)
+        labels: List of label names
+        sha: Current HEAD commit SHA
+        source_branch: Branch being merged from
+        target_branch: Branch being merged into
+        merge_status: Merge readiness status
+        author: Author information
+        has_conflicts: Whether MR has merge conflicts
+        rebase_in_progress: Whether rebase is currently running
+        web_url: URL to the MR in GitLab UI
+    """
+
+    iid: int
+    title: str
+    state: str
+    labels: list[str]
+    sha: str
+    source_branch: str
+    target_branch: str
+    merge_status: str
+    author: Author
+    has_conflicts: bool = False
+    rebase_in_progress: bool = False
+    web_url: str | None = None
+
+
+__all__: list[str] = ["Author", "MergeRequest"]
