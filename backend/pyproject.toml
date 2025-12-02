@@ -1,0 +1,112 @@
+[project]
+name = "gitlab-queue"
+version = "0.1.0"
+description = "GitLab Merge Queue Bot - manages merge request queue with auto-rebase"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Artem Kuznetsov" }]
+keywords = ["gitlab", "merge-queue", "ci-cd", "automation"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Version Control :: Git",
+]
+
+dependencies = [
+    "httpx>=0.27",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "aiosqlite>=0.20",
+    "sqlalchemy[asyncio]>=2.0",
+    "alembic>=1.13",
+    "pyjwt>=2.8",
+    "tenacity>=9.0",
+    "python-statemachine>=2.0",
+    "environ-config>=24.0",
+    "adaptix>=3.0.0b10",
+    "structlog>=24.0",
+    "apscheduler>=3.10",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "vedro>=1.12",
+    "jj>=2.13",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gitlab_queue"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "scenarios"]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+    "ARG",    # flake8-unused-arguments
+    "SIM",    # flake8-simplify
+    "TCH",    # flake8-type-checking
+    "PTH",    # flake8-use-pathlib
+    "RUF",    # Ruff-specific rules
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "B008",   # do not perform function calls in argument defaults (FastAPI Depends)
+    "B904",   # raise without from (sometimes intentional)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["gitlab_queue"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_configs = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = [
+    "vedro.*",
+    "jj.*",
+    "environ.*",
+    "adaptix.*",
+    "statemachine.*",
+    "apscheduler.*",
+]
+ignore_missing_imports = true
+
+[tool.vedro]
+plugins = []
