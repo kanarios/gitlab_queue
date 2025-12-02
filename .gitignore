@@ -205,3 +205,29 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Project specific
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Node.js (frontend)
+node_modules/
+.npm
+.pnpm-store/
+
+# Frontend build
+frontend/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
