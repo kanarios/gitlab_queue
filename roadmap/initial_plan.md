@@ -715,7 +715,7 @@ async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit
 
 ---
 
-#### Task 5: GitLab API Client - Base
+#### [INPROGRESS] Task 5: GitLab API Client - Base
 
 **Файлы:** `src/gitlab_queue/clients/gitlab.py`
 
