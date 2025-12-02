@@ -28,12 +28,14 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
+from gitlab_queue.models.retorts import parse_merge_request
 from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
     from types import TracebackType
 
     from gitlab_queue.config import Settings
+    from gitlab_queue.models.mr import MergeRequest
 
 log = get_logger(__name__)
 
@@ -518,6 +520,121 @@ class GitLabClient:
         await self._request(
             "DELETE", path, project_scoped=project_scoped, params=params
         )
+
+    # =========================================================================
+    # Merge Request Operations (Task 6)
+    # =========================================================================
+
+    async def get_mr(self, iid: int) -> MergeRequest:
+        """Get a merge request by its IID.
+
+        Args:
+            iid: Internal ID (project-scoped MR number).
+
+        Returns:
+            MergeRequest model with current MR data.
+
+        Raises:
+            GitLabNotFoundError: If MR with given IID does not exist.
+            GitLabAPIError: On other API errors.
+        """
+        log.debug("Fetching merge request", mr_iid=iid)
+        data = await self.get(f"/merge_requests/{iid}")
+        mr = parse_merge_request(data)
+        log.debug(
+            "Fetched merge request",
+            mr_iid=mr.iid,
+            state=mr.state,
+            merge_status=mr.merge_status,
+        )
+        return mr
+
+    async def list_mrs_with_label(
+        self,
+        label: str,
+        *,
+        state: str = "opened",
+    ) -> list[MergeRequest]:
+        """List merge requests with a specific label.
+
+        Args:
+            label: Label name to filter by.
+            state: MR state filter (opened, closed, merged, all).
+                Defaults to "opened".
+
+        Returns:
+            List of MergeRequest models matching the criteria.
+
+        Raises:
+            GitLabAPIError: On API errors.
+        """
+        log.debug("Listing merge requests with label", label=label, state=state)
+        data = await self.get_list(
+            "/merge_requests",
+            params={
+                "labels": label,
+                "state": state,
+                "per_page": 100,  # Max allowed by GitLab
+            },
+        )
+        mrs = [parse_merge_request(mr_data) for mr_data in data]
+        log.debug(
+            "Found merge requests with label",
+            label=label,
+            count=len(mrs),
+        )
+        return mrs
+
+    async def rebase_mr(self, iid: int) -> bool:
+        """Initiate a rebase operation for a merge request.
+
+        This is an async operation - it returns immediately and the rebase
+        runs in the background. Use check_rebase_status() to monitor progress.
+
+        Args:
+            iid: Internal ID of the merge request to rebase.
+
+        Returns:
+            True if rebase was initiated successfully.
+
+        Raises:
+            GitLabNotFoundError: If MR does not exist.
+            GitLabConflictError: If MR has conflicts that prevent rebase.
+            GitLabAPIError: On other API errors.
+        """
+        log.info("Initiating rebase", mr_iid=iid)
+        try:
+            await self.put(f"/merge_requests/{iid}/rebase")
+            log.info("Rebase initiated successfully", mr_iid=iid)
+            return True
+        except GitLabConflictError:
+            log.warning("Rebase failed due to conflicts", mr_iid=iid)
+            raise
+
+    async def check_rebase_status(self, iid: int) -> tuple[bool, bool]:
+        """Check the status of a rebase operation.
+
+        Args:
+            iid: Internal ID of the merge request.
+
+        Returns:
+            Tuple of (rebase_in_progress, has_conflicts).
+            - rebase_in_progress: True if rebase is still running.
+            - has_conflicts: True if merge conflicts were detected.
+
+        Raises:
+            GitLabNotFoundError: If MR does not exist.
+            GitLabAPIError: On other API errors.
+        """
+        log.debug("Checking rebase status", mr_iid=iid)
+        mr = await self.get_mr(iid)
+        log.debug(
+            "Rebase status",
+            mr_iid=iid,
+            rebase_in_progress=mr.rebase_in_progress,
+            has_conflicts=mr.has_conflicts,
+        )
+        return mr.rebase_in_progress, mr.has_conflicts
 
 
 __all__: list[str] = [
