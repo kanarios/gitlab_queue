@@ -1,7 +1,6 @@
 """Structured logging configuration for GitLab Queue Bot.
 
 Provides JSON and console logging formats using structlog with:
-- Non-blocking async logging via QueueHandler
 - Context variables for request/operation tracking
 - Automatic filtering of sensitive data (tokens, secrets)
 - Configurable log levels
@@ -16,14 +15,11 @@ Example:
 
 from __future__ import annotations
 
-import atexit
 import logging
-import queue
 import re
 import sys
 import threading
 from contextvars import ContextVar
-from logging.handlers import QueueHandler, QueueListener
 from typing import TYPE_CHECKING, Any
 
 import structlog
@@ -39,12 +35,8 @@ mr_iid_ctx: ContextVar[int | None] = ContextVar("mr_iid", default=None)
 operation_ctx: ContextVar[str | None] = ContextVar("operation", default=None)
 
 # Module-level state for cleanup (protected by lock for thread safety)
-_queue_listener: QueueListener | None = None
+_logging_configured: bool = False
 _logging_lock = threading.Lock()
-
-# Maximum number of log records to buffer before blocking.
-# Size chosen to handle 50 seconds of 1000 logs/sec bursts (~50MB memory).
-_LOG_QUEUE_MAX_SIZE = 50000
 
 # Patterns for sensitive data that should be masked
 _SENSITIVE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
@@ -154,12 +146,10 @@ def configure_logging(
 ) -> None:
     """Configure structured logging for the application.
 
-    Sets up structlog with appropriate processors for JSON or console output,
-    and configures a non-blocking queue handler to prevent logging from
-    blocking the async event loop.
+    Sets up structlog with appropriate processors for JSON or console output.
+    Uses synchronous logging for simplicity and compatibility.
 
     This function is idempotent - calling it multiple times is safe.
-    Previous queue listeners are stopped before new ones are started.
 
     Args:
         level: Minimum log level to output.
@@ -169,7 +159,7 @@ def configure_logging(
         >>> from gitlab_queue.config import LogLevel, LogFormat
         >>> configure_logging(LogLevel.DEBUG, LogFormat.CONSOLE)
     """
-    global _queue_listener
+    global _logging_configured
 
     # Import here to avoid circular imports: logging.py and config.py are closely
     # coupled, and config.py defines LogLevel/LogFormat enums which are needed by
@@ -177,15 +167,11 @@ def configure_logging(
     from gitlab_queue.config import LogFormat as LF
 
     with _logging_lock:
-        # Stop existing listener if reconfiguring (prevents resource leaks)
-        if _queue_listener is not None:
-            _queue_listener.stop()
-            _queue_listener = None
 
         # Choose renderer based on format
         renderer = _get_json_renderer() if log_format == LF.JSON else _get_console_renderer()
 
-        # Configure structlog
+        # Configure structlog with stdlib integration
         structlog.configure(
             processors=[
                 structlog.stdlib.filter_by_level,
@@ -206,29 +192,14 @@ def configure_logging(
             ],
         )
 
-        # Create non-blocking queue handler
-        log_queue: queue.Queue[logging.LogRecord] = queue.Queue(maxsize=_LOG_QUEUE_MAX_SIZE)
-        queue_handler = QueueHandler(log_queue)
-
-        # Create stream handler that will do the actual output
+        # Create stream handler (direct output, no queue)
         stream_handler = logging.StreamHandler(sys.stdout)
         stream_handler.setFormatter(formatter)
-
-        # Create and start queue listener in a background thread
-        _queue_listener = QueueListener(
-            log_queue,
-            stream_handler,
-            respect_handler_level=True,
-        )
-        _queue_listener.start()
-
-        # Register cleanup on exit
-        atexit.register(_shutdown_logging)
 
         # Configure root logger
         root_logger = logging.getLogger()
         root_logger.handlers.clear()
-        root_logger.addHandler(queue_handler)
+        root_logger.addHandler(stream_handler)
         root_logger.setLevel(level.value)
 
         # Also configure gitlab_queue logger
@@ -241,23 +212,18 @@ def configure_logging(
         logging.getLogger("uvicorn").setLevel(logging.INFO)
         logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
-
-def _shutdown_logging() -> None:
-    """Gracefully shutdown the queue listener."""
-    global _queue_listener
-    with _logging_lock:
-        if _queue_listener is not None:
-            _queue_listener.stop()
-            _queue_listener = None
+        _logging_configured = True
 
 
 def reset_logging() -> None:
     """Reset logging state for testing.
 
-    Stops the queue listener and clears all context variables.
+    Clears all context variables and resets configuration flag.
     Useful in tests to ensure clean state between test cases.
     """
-    _shutdown_logging()
+    global _logging_configured
+    with _logging_lock:
+        _logging_configured = False
     request_id_ctx.set(None)
     mr_iid_ctx.set(None)
     operation_ctx.set(None)

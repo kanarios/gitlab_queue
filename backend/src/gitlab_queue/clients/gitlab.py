@@ -28,14 +28,15 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
-from gitlab_queue.models.retorts import parse_merge_request
+from gitlab_queue.models.retorts import parse_job, parse_merge_request, parse_note, parse_pipeline
 from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
     from types import TracebackType
 
     from gitlab_queue.config import Settings
-    from gitlab_queue.models.mr import MergeRequest
+    from gitlab_queue.models.mr import MergeRequest, Note
+    from gitlab_queue.models.pipeline import Job, Pipeline
 
 log = get_logger(__name__)
 
@@ -635,6 +636,265 @@ class GitLabClient:
             has_conflicts=mr.has_conflicts,
         )
         return mr.rebase_in_progress, mr.has_conflicts
+
+    # =========================================================================
+    # Pipeline Operations (Task 7)
+    # =========================================================================
+
+    async def get_mr_pipelines(self, iid: int) -> list[Pipeline]:
+        """Get all pipelines for a merge request.
+
+        Args:
+            iid: Internal ID of the merge request.
+
+        Returns:
+            List of Pipeline models, ordered by creation date (newest first).
+
+        Raises:
+            GitLabNotFoundError: If MR does not exist.
+            GitLabAPIError: On other API errors.
+        """
+        log.debug("Fetching pipelines for MR", mr_iid=iid)
+        data = await self.get_list(f"/merge_requests/{iid}/pipelines")
+        pipelines = [parse_pipeline(p) for p in data]
+        log.debug(
+            "Fetched pipelines for MR",
+            mr_iid=iid,
+            count=len(pipelines),
+        )
+        return pipelines
+
+    async def get_latest_mr_pipeline(self, iid: int) -> Pipeline | None:
+        """Get the latest pipeline for a merge request.
+
+        Convenience method that returns only the most recent pipeline.
+
+        Args:
+            iid: Internal ID of the merge request.
+
+        Returns:
+            Latest Pipeline or None if no pipelines exist.
+
+        Raises:
+            GitLabNotFoundError: If MR does not exist.
+            GitLabAPIError: On other API errors.
+        """
+        pipelines = await self.get_mr_pipelines(iid)
+        if not pipelines:
+            log.debug("No pipelines found for MR", mr_iid=iid)
+            return None
+        # First pipeline is the latest (API returns newest first)
+        latest = pipelines[0]
+        log.debug(
+            "Latest pipeline for MR",
+            mr_iid=iid,
+            pipeline_id=latest.id,
+            status=latest.status,
+        )
+        return latest
+
+    async def get_pipeline_status(self, pipeline_id: int) -> Pipeline:
+        """Get a pipeline by its ID.
+
+        Args:
+            pipeline_id: Pipeline ID.
+
+        Returns:
+            Pipeline model with current status.
+
+        Raises:
+            GitLabNotFoundError: If pipeline does not exist.
+            GitLabAPIError: On other API errors.
+        """
+        log.debug("Fetching pipeline", pipeline_id=pipeline_id)
+        data = await self.get(f"/pipelines/{pipeline_id}")
+        pipeline = parse_pipeline(data)
+        log.debug(
+            "Fetched pipeline",
+            pipeline_id=pipeline.id,
+            status=pipeline.status,
+        )
+        return pipeline
+
+    async def retry_pipeline_job(self, job_id: int) -> Job:
+        """Retry a failed or canceled job.
+
+        Args:
+            job_id: Job ID to retry.
+
+        Returns:
+            Job model with updated status.
+
+        Raises:
+            GitLabNotFoundError: If job does not exist.
+            GitLabAPIError: On other API errors (e.g., job cannot be retried).
+        """
+        log.info("Retrying job", job_id=job_id)
+        data = await self.post(f"/jobs/{job_id}/retry")
+        job = parse_job(data)
+        log.info(
+            "Job retry initiated",
+            job_id=job.id,
+            name=job.name,
+            status=job.status,
+        )
+        return job
+
+    # =========================================================================
+    # Merge & Comment Operations (Task 8)
+    # =========================================================================
+
+    # Bot comment signature marker (invisible in rendered markdown)
+    BOT_COMMENT_SIGNATURE = "<!-- merge-queue-bot -->"
+
+    async def merge_mr(self, iid: int) -> MergeRequest:
+        """Merge a merge request using fast-forward strategy.
+
+        Checks merge_status before attempting merge to ensure MR is ready.
+
+        Args:
+            iid: Internal ID of the merge request to merge.
+
+        Returns:
+            MergeRequest model with updated state (should be 'merged').
+
+        Raises:
+            GitLabNotFoundError: If MR does not exist.
+            GitLabConflictError: If MR cannot be merged (conflicts, not ready).
+            GitLabAPIError: On other API errors.
+        """
+        log.info("Attempting to merge MR", mr_iid=iid)
+
+        # First check if MR is ready to merge
+        mr = await self.get_mr(iid)
+        if mr.merge_status != "can_be_merged":
+            log.warning(
+                "MR not ready for merge",
+                mr_iid=iid,
+                merge_status=mr.merge_status,
+                has_conflicts=mr.has_conflicts,
+            )
+            raise GitLabConflictError(
+                f"MR !{iid} cannot be merged: status is '{mr.merge_status}'",
+                status_code=409,
+            )
+
+        # Perform the merge with fast-forward strategy
+        try:
+            data = await self.put(
+                f"/merge_requests/{iid}/merge",
+                json={"merge_method": "ff"},  # Fast-forward merge
+            )
+            merged_mr = parse_merge_request(data)
+            log.info(
+                "MR merged successfully",
+                mr_iid=merged_mr.iid,
+                state=merged_mr.state,
+            )
+            return merged_mr
+        except GitLabAPIError:
+            log.exception("Failed to merge MR", mr_iid=iid)
+            raise
+
+    async def add_comment(self, iid: int, body: str) -> Note:
+        """Add a comment to a merge request.
+
+        Args:
+            iid: Internal ID of the merge request.
+            body: Comment body (supports markdown).
+
+        Returns:
+            Note model with the created comment.
+
+        Raises:
+            GitLabNotFoundError: If MR does not exist.
+            GitLabAPIError: On other API errors.
+        """
+        log.debug("Adding comment to MR", mr_iid=iid)
+        data = await self.post(
+            f"/merge_requests/{iid}/notes",
+            json={"body": body},
+        )
+        note = parse_note(data)
+        log.debug("Comment added", mr_iid=iid, note_id=note.id)
+        return note
+
+    async def update_comment(self, iid: int, note_id: int, body: str) -> Note:
+        """Update an existing comment on a merge request.
+
+        Args:
+            iid: Internal ID of the merge request.
+            note_id: ID of the note/comment to update.
+            body: New comment body (supports markdown).
+
+        Returns:
+            Note model with the updated comment.
+
+        Raises:
+            GitLabNotFoundError: If MR or note does not exist.
+            GitLabAPIError: On other API errors.
+        """
+        log.debug("Updating comment", mr_iid=iid, note_id=note_id)
+        data = await self.put(
+            f"/merge_requests/{iid}/notes/{note_id}",
+            json={"body": body},
+        )
+        note = parse_note(data)
+        log.debug("Comment updated", mr_iid=iid, note_id=note.id)
+        return note
+
+    async def _find_bot_comment(self, iid: int) -> Note | None:
+        """Find existing bot comment by signature marker.
+
+        Searches through MR notes for a comment containing the bot signature.
+
+        Args:
+            iid: Internal ID of the merge request.
+
+        Returns:
+            Note if bot comment exists, None otherwise.
+        """
+        log.debug("Searching for bot comment", mr_iid=iid)
+        notes_data = await self.get_list(f"/merge_requests/{iid}/notes")
+        for note_data in notes_data:
+            note = parse_note(note_data)
+            if self.BOT_COMMENT_SIGNATURE in note.body and not note.system:
+                log.debug("Found bot comment", mr_iid=iid, note_id=note.id)
+                return note
+        log.debug("No bot comment found", mr_iid=iid)
+        return None
+
+    async def add_or_update_pinned_comment(self, iid: int, body: str) -> Note:
+        """Add or update a single pinned bot comment on a merge request.
+
+        Uses a signature marker to identify the bot's comment. If a comment
+        with the marker exists, it is updated. Otherwise, a new comment is
+        created with the marker prepended.
+
+        This ensures only one bot comment exists per MR (pinned comment pattern).
+
+        Args:
+            iid: Internal ID of the merge request.
+            body: Comment body (supports markdown). Signature will be added.
+
+        Returns:
+            Note model with the created or updated comment.
+
+        Raises:
+            GitLabNotFoundError: If MR does not exist.
+            GitLabAPIError: On other API errors.
+        """
+        # Ensure body includes the signature marker
+        if self.BOT_COMMENT_SIGNATURE not in body:
+            body = f"{self.BOT_COMMENT_SIGNATURE}\n{body}"
+
+        existing_note = await self._find_bot_comment(iid)
+        if existing_note:
+            log.info("Updating existing bot comment", mr_iid=iid, note_id=existing_note.id)
+            return await self.update_comment(iid, existing_note.id, body)
+
+        log.info("Creating new bot comment", mr_iid=iid)
+        return await self.add_comment(iid, body)
 
 
 __all__: list[str] = [
