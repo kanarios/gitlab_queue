@@ -187,6 +187,13 @@ class Settings:
     pipeline_retry_count: int = var(default=1, converter=int)
     api_max_retries: int = var(default=5, converter=int)
 
+    # Webhook Retry Queue
+    webhook_retry_max_attempts: int = var(default=3, converter=int)
+    webhook_retry_base_delay_seconds: int = var(default=30, converter=int)
+    webhook_retry_max_delay_seconds: int = var(default=300, converter=int)
+    webhook_retry_poll_interval_seconds: int = var(default=10, converter=int)
+    webhook_dlq_retention_days: int = var(default=30, converter=int)
+
     # Database
     database_url: str = var(default="sqlite+aiosqlite:///data/queue.db")
 
@@ -246,6 +253,11 @@ def _settings_repr(self: Settings) -> str:
         "rebase_timeout_seconds",
         "pipeline_retry_count",
         "api_max_retries",
+        "webhook_retry_max_attempts",
+        "webhook_retry_base_delay_seconds",
+        "webhook_retry_max_delay_seconds",
+        "webhook_retry_poll_interval_seconds",
+        "webhook_dlq_retention_days",
         "database_url",
         "oauth_client_id",
         "oauth_client_secret",
@@ -330,6 +342,38 @@ def _validate_settings(settings: Settings) -> None:
     if settings.api_max_retries < 0:
         errors.append(
             f"api_max_retries cannot be negative, got: {settings.api_max_retries}"
+        )
+
+    # Validate webhook retry queue settings
+    if settings.webhook_retry_max_attempts < 1:
+        errors.append(
+            f"webhook_retry_max_attempts must be at least 1, got: {settings.webhook_retry_max_attempts}"
+        )
+
+    if settings.webhook_retry_base_delay_seconds <= 0:
+        errors.append(
+            f"webhook_retry_base_delay_seconds must be positive, got: {settings.webhook_retry_base_delay_seconds}"
+        )
+
+    if settings.webhook_retry_max_delay_seconds <= 0:
+        errors.append(
+            f"webhook_retry_max_delay_seconds must be positive, got: {settings.webhook_retry_max_delay_seconds}"
+        )
+
+    if settings.webhook_retry_max_delay_seconds < settings.webhook_retry_base_delay_seconds:
+        errors.append(
+            f"webhook_retry_max_delay_seconds ({settings.webhook_retry_max_delay_seconds}) "
+            f"must be >= webhook_retry_base_delay_seconds ({settings.webhook_retry_base_delay_seconds})"
+        )
+
+    if settings.webhook_retry_poll_interval_seconds <= 0:
+        errors.append(
+            f"webhook_retry_poll_interval_seconds must be positive, got: {settings.webhook_retry_poll_interval_seconds}"
+        )
+
+    if settings.webhook_dlq_retention_days < 1:
+        errors.append(
+            f"webhook_dlq_retention_days must be at least 1, got: {settings.webhook_dlq_retention_days}"
         )
 
     # Validate JWT expiration

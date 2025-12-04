@@ -751,7 +751,7 @@ async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit
 
 ---
 
-#### Task 7: GitLab Client - Pipeline Operations
+#### [DONE] Task 7: GitLab Client - Pipeline Operations
 
 **Файлы:** `src/gitlab_queue/clients/gitlab.py`
 
@@ -767,7 +767,7 @@ async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit
 
 ---
 
-#### Task 8: GitLab Client - Merge & Comment Operations
+#### [DONE] Task 8: GitLab Client - Merge & Comment Operations
 
 **Файлы:** `src/gitlab_queue/clients/gitlab.py`
 
@@ -785,7 +785,7 @@ async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit
 
 ---
 
-#### Task 9: Data Models (Dataclasses + Adaptix)
+#### [DONE] Task 9: Data Models (Dataclasses + Adaptix)
 
 **Файлы:** `src/gitlab_queue/models/mr.py`, `src/gitlab_queue/models/pipeline.py`, `src/gitlab_queue/models/retorts.py`
 
@@ -865,7 +865,7 @@ sqlite_retort = Retort(
 
 ---
 
-#### Task 10: Queue Manager - Core Operations
+#### [DONE] Task 10: Queue Manager - Core Operations
 
 **Файлы:** `backend/src/gitlab_queue/core/queue.py`
 
@@ -901,7 +901,7 @@ LIMIT 1;
 
 ---
 
-#### Task 11: Queue Manager - State Operations
+#### [DONE] Task 11: Queue Manager - State Operations
 
 **Файлы:** `backend/src/gitlab_queue/core/queue.py`
 
@@ -939,7 +939,7 @@ WHERE finished_at < datetime('now', '-90 days');
 
 ---
 
-#### Task 12: State Machine Implementation (с обязательными нотификациями)
+#### [DONE] Task 12: State Machine Implementation (с обязательными нотификациями)
 
 **Файлы:** `src/gitlab_queue/core/state_machine.py`
 
@@ -982,7 +982,7 @@ class MRStateMachine:
 
 ---
 
-#### Task 13: Main Processor Loop
+#### [DONE] Task 13: Main Processor Loop
 
 **Файлы:** `src/gitlab_queue/core/processor.py`
 
@@ -1003,7 +1003,7 @@ class MRStateMachine:
 
 ---
 
-#### Task 14: Graceful Shutdown
+#### [DONE] Task 14: Graceful Shutdown
 
 **Файлы:** `src/gitlab_queue/utils/shutdown.py`, `src/gitlab_queue/main.py`
 
@@ -1022,7 +1022,7 @@ class MRStateMachine:
 
 ---
 
-#### Task 15: Application Entry Point
+#### [DONE] Task 15: Application Entry Point
 
 **Файлы:** `src/gitlab_queue/main.py`
 
@@ -1043,7 +1043,7 @@ class MRStateMachine:
 
 ### Phase 2: Webhook Integration (Tasks 16-22)
 
-#### Task 16: FastAPI Application Setup
+#### [DONE] Task 16: FastAPI Application Setup
 
 **Файлы:** `src/gitlab_queue/webhooks/router.py`
 
@@ -1060,7 +1060,7 @@ class MRStateMachine:
 
 ---
 
-#### Task 17: Webhook Event Models (Dataclasses + Adaptix)
+#### [DONE] Task 17: Webhook Event Models (Dataclasses + Adaptix)
 
 **Файлы:** `src/gitlab_queue/models/events.py`
 
@@ -1123,7 +1123,7 @@ webhook_retort = Retort(
 
 ---
 
-#### Task 18: Webhook Handlers - MR Events
+#### [DONE] Task 18: Webhook Handlers - MR Events
 
 **Файлы:** `src/gitlab_queue/webhooks/handlers.py`
 
@@ -1143,7 +1143,7 @@ webhook_retort = Retort(
 
 ---
 
-#### Task 19: Webhook Handlers - Pipeline Events
+#### [DONE] Task 19: Webhook Handlers - Pipeline Events
 
 **Файлы:** `src/gitlab_queue/webhooks/handlers.py`
 
@@ -1160,7 +1160,7 @@ webhook_retort = Retort(
 
 ---
 
-#### Task 20: Integrate Webhook Server with Processor
+#### [DONE] Task 20: Integrate Webhook Server with Processor
 
 **Файлы:** `src/gitlab_queue/main.py`
 
@@ -1170,13 +1170,13 @@ webhook_retort = Retort(
 - Обеспечить thread-safe queue operations
 
 **Acceptance Criteria:**
-- [ ] Webhook и processor работают параллельно
-- [ ] Webhook события обрабатываются немедленно
-- [ ] Нет race conditions на queue operations
+- [x] Webhook и processor работают параллельно
+- [x] Webhook события обрабатываются немедленно
+- [x] Нет race conditions на queue operations
 
 ---
 
-#### Task 21: Webhook Retry Queue
+#### [DONE] Task 21: Webhook Retry Queue
 
 **Файлы:** `src/gitlab_queue/webhooks/handlers.py`
 
@@ -1192,7 +1192,7 @@ webhook_retort = Retort(
 
 ---
 
-#### Task 22: Polling Fallback
+#### [DONE] Task 22: Polling Fallback
 
 **Файлы:** `src/gitlab_queue/core/scheduler.py`
 
