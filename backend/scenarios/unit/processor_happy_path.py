@@ -68,8 +68,11 @@ async def process_mr_successfully():
             "source_branch": "feature/test",
             "sha": "abc123",
             "labels": ["merge_queue"],
-            "author": {"name": "Test User", "username": "testuser"},
+            "author": {"id": 1, "name": "Test User", "username": "testuser"},
             "web_url": "https://gitlab.com/test/project/-/merge_requests/42",
+            "merge_status": "can_be_merged",
+            "has_conflicts": False,
+            "rebase_in_progress": False,
         }
 
         pipeline_data = {
@@ -102,6 +105,10 @@ async def process_mr_successfully():
         comment_matcher = jj.match("POST", "/api/v4/projects/123/merge_requests/42/notes")
         comment_response = jj.Response(status=201, json={"id": 1, "body": "Processing started"})
 
+        # GET notes - needed for _find_bot_comment
+        get_notes_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/42/notes")
+        get_notes_response = jj.Response(status=200, json=[])
+
         # Settings with mock URL
         settings = Settings(
             gitlab_url=mock_url,
@@ -124,6 +131,7 @@ async def process_mr_successfully():
         mocked(rebase_matcher, rebase_response),
         mocked(pipelines_matcher, pipelines_response),
         mocked(merge_matcher, merge_response) as merge_mock,
+        mocked(get_notes_matcher, get_notes_response),
         mocked(comment_matcher, comment_response) as comment_mock,
     ):
         with when("processor runs one processing cycle"):
@@ -153,7 +161,7 @@ async def process_mr_successfully():
 
             # Verify queue state
             mr_state = await queue.get_mr_state(42)
-            assert mr_state == "merged", f"MR should be merged, got {mr_state}"
+            assert mr_state["status"] == "merged", f"MR should be merged, got {mr_state}"
 
             # Verify at least one comment was posted
             comment_history = await comment_mock.fetch_history()
@@ -202,6 +210,13 @@ async def process_mr_with_async_rebase():
             "state": "opened",
             "sha": "def456",
             "labels": ["merge_queue"],
+            "source_branch": "feature/async",
+            "target_branch": "main",
+            "merge_status": "can_be_merged",
+            "has_conflicts": False,
+            "rebase_in_progress": False,
+            "author": {"id": 1, "name": "Test User", "username": "testuser"},
+            "web_url": "https://gitlab.com/test/project/-/merge_requests/43",
         }
 
         pipeline_data = {
@@ -234,6 +249,10 @@ async def process_mr_with_async_rebase():
         comment_matcher = jj.match("POST", "/api/v4/projects/123/merge_requests/43/notes")
         comment_response = jj.Response(status=201, json={"id": 2})
 
+        # GET notes - needed for _find_bot_comment
+        get_notes_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/43/notes")
+        get_notes_response = jj.Response(status=200, json=[])
+
         settings = Settings(
             gitlab_url=mock_url,
             gitlab_project_id=123,
@@ -253,6 +272,7 @@ async def process_mr_with_async_rebase():
         mocked(rebase_check_matcher, rebase_check_response),
         mocked(pipelines_matcher, pipelines_response),
         mocked(merge_matcher, merge_response) as merge_mock,
+        mocked(get_notes_matcher, get_notes_response),
         mocked(comment_matcher, comment_response),
     ):
         with when("processor handles async rebase"):
@@ -281,7 +301,7 @@ async def process_mr_with_async_rebase():
 
             # Verify final state
             mr_state = await queue.get_mr_state(43)
-            assert mr_state == "merged"
+            assert mr_state["status"] == "merged"
 
 
 __all__ = [
