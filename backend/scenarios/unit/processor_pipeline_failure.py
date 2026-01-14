@@ -12,7 +12,6 @@ from __future__ import annotations
 import jj
 from jj.mock import mocked
 from scenarios.contexts.jj_gitlab_mock import get_mock_url
-from scenarios.contexts.sqlite_client import test_database
 from vedro import given, scenario, then, when
 
 from gitlab_queue.clients.gitlab import GitLabClient
@@ -20,6 +19,7 @@ from gitlab_queue.config import Settings
 from gitlab_queue.core.notifier import MRNotifier
 from gitlab_queue.core.processor import MergeProcessor, ProcessingResult
 from gitlab_queue.core.queue import QueueManager
+from gitlab_queue.db.database import Database
 from gitlab_queue.models.mr import Author, MergeRequest
 
 
@@ -28,8 +28,10 @@ async def process_mr_with_pipeline_failure_and_retry():
     """Test MR processing with pipeline failure that succeeds on retry."""
 
     with given("MR with failing pipeline that succeeds on retry"):
-        async with test_database() as db:
-            queue = QueueManager(db)
+        db = Database(database_url="sqlite+aiosqlite:///:memory:")
+        await db.initialize()
+        queue = QueueManager(db)
+        await queue.ensure_schema()
 
         test_mr = MergeRequest(
             iid=50,
@@ -115,7 +117,8 @@ async def process_mr_with_pipeline_failure_and_retry():
             target_branch="main",
             queue_label="merge_queue",
             hotfix_label="hotfix",
-            db_path=":memory:",
+            jwt_secret="a" * 64,
+            webhook_secret="test-webhook-secret",
             pipeline_retry_count=2,  # Allow retries
             poll_interval_seconds=0.1,  # Fast polling for tests
             pipeline_timeout_seconds=300,
@@ -125,49 +128,46 @@ async def process_mr_with_pipeline_failure_and_retry():
     async with (
         mocked(get_mr_matcher, get_mr_response),
         mocked(rebase_matcher, rebase_response_1) as rebase_mock_1,
-        mocked(pipelines_matcher, pipelines_response_1) as pipelines_mock_1,
+        mocked(pipelines_matcher, pipelines_response_1),
         mocked(jobs_matcher, jobs_response) as jobs_mock,
+        mocked(rebase_matcher, rebase_response_2) as rebase_mock_2,
+        mocked(pipelines_matcher, pipelines_response_2),
+        mocked(merge_matcher, merge_response) as merge_mock,
+        mocked(comment_matcher, comment_response),
     ):
-        # After first pipeline fails, we setup retry mocks
-        async with (
-            mocked(rebase_matcher, rebase_response_2) as rebase_mock_2,
-            mocked(pipelines_matcher, pipelines_response_2) as pipelines_mock_2,
-            mocked(merge_matcher, merge_response) as merge_mock,
-            mocked(comment_matcher, comment_response),
-        ):
-            with when("processor handles pipeline failure with retry"):
-                gitlab_client = GitLabClient(settings)
-                notifier = MRNotifier(gitlab_client=gitlab_client, project_id=123)
-                processor = MergeProcessor(
-                    gitlab_client=gitlab_client,
-                    queue_manager=queue,
-                    notifier=notifier,
-                    settings=settings,
-                )
+        with when("processor handles pipeline failure with retry"):
+            gitlab_client = GitLabClient(settings)
+            notifier = MRNotifier(gitlab_client=gitlab_client, project_id=123)
+            processor = MergeProcessor(
+                gitlab_client=gitlab_client,
+                queue_manager=queue,
+                notifier=notifier,
+                settings=settings,
+            )
 
-                queue_item = await queue.get_next_mr()
-                result = await processor._process_mr(queue_item)
+            queue_item = await queue.get_next_mr()
+            result = await processor._process_mr(queue_item)
 
-            with then("MR is merged after successful retry"):
-                assert result == ProcessingResult.SUCCESS
+        with then("MR is merged after successful retry"):
+            assert result == ProcessingResult.SUCCESS
 
-                # Verify rebases were attempted (initial + retry)
-                initial_rebase_history = await rebase_mock_1.fetch_history()
-                retry_rebase_history = await rebase_mock_2.fetch_history()
-                assert len(initial_rebase_history) >= 1, "Initial rebase should be called"
-                assert len(retry_rebase_history) >= 1, "Retry rebase should be called"
+            # Verify rebases were attempted (initial + retry)
+            initial_rebase_history = await rebase_mock_1.fetch_history()
+            retry_rebase_history = await rebase_mock_2.fetch_history()
+            assert len(initial_rebase_history) >= 1, "Initial rebase should be called"
+            assert len(retry_rebase_history) >= 1, "Retry rebase should be called"
 
-                # Verify failed jobs were fetched
-                jobs_history = await jobs_mock.fetch_history()
-                assert len(jobs_history) >= 1, "Failed jobs should be fetched"
+            # Verify failed jobs were fetched
+            jobs_history = await jobs_mock.fetch_history()
+            assert len(jobs_history) >= 1, "Failed jobs should be fetched"
 
-                # Verify merge was eventually called
-                merge_history = await merge_mock.fetch_history()
-                assert len(merge_history) == 1, "Merge should be called after retry"
+            # Verify merge was eventually called
+            merge_history = await merge_mock.fetch_history()
+            assert len(merge_history) == 1, "Merge should be called after retry"
 
-                # Verify final state
-                mr_state = await queue.get_mr_state(50)
-                assert mr_state == "merged"
+            # Verify final state
+            mr_state = await queue.get_mr_state(50)
+            assert mr_state == "merged"
 
 
 @scenario()
@@ -175,8 +175,10 @@ async def process_mr_with_pipeline_failure_max_retries():
     """Test MR processing when pipeline fails after max retries."""
 
     with given("MR with consistently failing pipeline"):
-        async with test_database() as db:
-            queue = QueueManager(db)
+        db = Database(database_url="sqlite+aiosqlite:///:memory:")
+        await db.initialize()
+        queue = QueueManager(db)
+        await queue.ensure_schema()
 
         test_mr = MergeRequest(
             iid=51,
@@ -241,7 +243,8 @@ async def process_mr_with_pipeline_failure_max_retries():
             target_branch="main",
             queue_label="merge_queue",
             hotfix_label="hotfix",
-            db_path=":memory:",
+            jwt_secret="a" * 64,
+            webhook_secret="test-webhook-secret",
             pipeline_retry_count=2,  # Allow 2 retries (3 total attempts)
             poll_interval_seconds=0.1,
         )
@@ -254,9 +257,9 @@ async def process_mr_with_pipeline_failure_max_retries():
     async with (
         mocked(get_mr_matcher, get_mr_response),
         mocked(rebase_matcher, rebase_response) as rebase_mock,
-        pipeline_mocks[0] as p1,
-        pipeline_mocks[1] as p2,
-        pipeline_mocks[2] as p3,
+        pipeline_mocks[0],
+        pipeline_mocks[1],
+        pipeline_mocks[2],
         mocked(jobs_matcher, jobs_response) as jobs_mock,
         mocked(comment_matcher, comment_response) as comment_mock,
     ):
@@ -300,8 +303,10 @@ async def process_mr_with_canceled_pipeline():
     """Test MR processing when pipeline is canceled."""
 
     with given("MR with canceled pipeline"):
-        async with test_database() as db:
-            queue = QueueManager(db)
+        db = Database(database_url="sqlite+aiosqlite:///:memory:")
+        await db.initialize()
+        queue = QueueManager(db)
+        await queue.ensure_schema()
 
         test_mr = MergeRequest(
             iid=52,
@@ -363,7 +368,8 @@ async def process_mr_with_canceled_pipeline():
             target_branch="main",
             queue_label="merge_queue",
             hotfix_label="hotfix",
-            db_path=":memory:",
+            jwt_secret="a" * 64,
+            webhook_secret="test-webhook-secret",
             pipeline_retry_count=1,  # Allow 1 retry
             poll_interval_seconds=0.1,
         )

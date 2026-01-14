@@ -10,11 +10,11 @@ This scenario tests how the processor handles:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 
 import jj
 from jj.mock import mocked
 from scenarios.contexts.jj_gitlab_mock import get_mock_url
-from scenarios.contexts.sqlite_client import test_database
 from vedro import given, scenario, then, when
 
 from gitlab_queue.clients.gitlab import GitLabClient
@@ -22,6 +22,7 @@ from gitlab_queue.config import Settings
 from gitlab_queue.core.notifier import MRNotifier
 from gitlab_queue.core.processor import MergeProcessor, ProcessingResult
 from gitlab_queue.core.queue import QueueManager
+from gitlab_queue.db.database import Database
 from gitlab_queue.models.mr import Author, MergeRequest
 
 
@@ -30,8 +31,10 @@ async def graceful_shutdown_with_no_processing():
     """Test graceful shutdown when no MR is being processed."""
 
     with given("processor running with empty queue"):
-        async with test_database() as db:
-            queue = QueueManager(db)
+        db = Database(database_url="sqlite+aiosqlite:///:memory:")
+        await db.initialize()
+        queue = QueueManager(db)
+        await queue.ensure_schema()
 
         mock_url = get_mock_url()
 
@@ -42,7 +45,8 @@ async def graceful_shutdown_with_no_processing():
             target_branch="main",
             queue_label="merge_queue",
             hotfix_label="hotfix",
-            db_path=":memory:",
+            jwt_secret="a" * 64,
+            webhook_secret="test-webhook-secret",
             poll_interval_seconds=10,  # Long poll to test interruption
         )
 
@@ -71,10 +75,8 @@ async def graceful_shutdown_with_no_processing():
         # Cancel the task if still running
         if not processor_task.done():
             processor_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await processor_task
-            except asyncio.CancelledError:
-                pass
 
     with then("processor shuts down cleanly"):
         assert shutdown_complete, "Shutdown should complete within timeout"
@@ -88,8 +90,10 @@ async def graceful_shutdown_during_rebase():
     """Test graceful shutdown while rebase is in progress."""
 
     with given("MR being rebased when shutdown requested"):
-        async with test_database() as db:
-            queue = QueueManager(db)
+        db = Database(database_url="sqlite+aiosqlite:///:memory:")
+        await db.initialize()
+        queue = QueueManager(db)
+        await queue.ensure_schema()
 
         test_mr = MergeRequest(
             iid=70,
@@ -138,7 +142,8 @@ async def graceful_shutdown_during_rebase():
             target_branch="main",
             queue_label="merge_queue",
             hotfix_label="hotfix",
-            db_path=":memory:",
+            jwt_secret="a" * 64,
+            webhook_secret="test-webhook-secret",
             rebase_timeout_seconds=60,  # Long timeout
             poll_interval_seconds=1,
         )
@@ -205,8 +210,10 @@ async def processor_state_recovery_after_shutdown():
     """Test that processor correctly recovers state after shutdown."""
 
     with given("MRs in various states after shutdown"):
-        async with test_database() as db:
-            queue = QueueManager(db)
+        db = Database(database_url="sqlite+aiosqlite:///:memory:")
+        await db.initialize()
+        queue = QueueManager(db)
+        await queue.ensure_schema()
 
         # Add MRs in different states
         mrs_data = [
@@ -219,8 +226,7 @@ async def processor_state_recovery_after_shutdown():
         for mr_iid, initial_state in mrs_data:
             test_mr = MergeRequest(
                 iid=mr_iid,
-                title=f"MR {mr_iid}",
-                description=f"In {initial_state} state",
+                title=f"MR {mr_iid} - In {initial_state} state",
                 state="opened",
                 target_branch="main",
                 source_branch=f"feature/{mr_iid}",
@@ -248,10 +254,9 @@ async def processor_state_recovery_after_shutdown():
                 "labels": ["merge_queue"],
             }
 
-            get_mr_matcher = jj.match("GET", f"/api/v4/projects/123/merge_requests/{mr_iid}")
-            get_mr_response = jj.Response(status=200, json=mr_data)
-
-            # We'll mock these individually in the context manager
+            # Variables created for mocking each MR individually below
+            _ = jj.match("GET", f"/api/v4/projects/123/merge_requests/{mr_iid}")
+            _ = jj.Response(status=200, json=mr_data)
 
         # Mock list MRs for sync
         list_mrs_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests")
@@ -270,7 +275,8 @@ async def processor_state_recovery_after_shutdown():
             target_branch="main",
             queue_label="merge_queue",
             hotfix_label="hotfix",
-            db_path=":memory:",
+            jwt_secret="a" * 64,
+            webhook_secret="test-webhook-secret",
         )
 
     # Mock all MR GET endpoints
@@ -333,8 +339,10 @@ async def shutdown_timeout_handling():
     """Test handling of shutdown timeout when processor doesn't stop quickly."""
 
     with given("processor that takes time to shutdown"):
-        async with test_database() as db:
-            queue = QueueManager(db)
+        db = Database(database_url="sqlite+aiosqlite:///:memory:")
+        await db.initialize()
+        queue = QueueManager(db)
+        await queue.ensure_schema()
 
         mock_url = get_mock_url()
 
@@ -345,7 +353,8 @@ async def shutdown_timeout_handling():
             target_branch="main",
             queue_label="merge_queue",
             hotfix_label="hotfix",
-            db_path=":memory:",
+            jwt_secret="a" * 64,
+            webhook_secret="test-webhook-secret",
             poll_interval_seconds=10,
         )
 
@@ -373,10 +382,8 @@ async def shutdown_timeout_handling():
 
         # Clean up
         processor_task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await processor_task
-        except asyncio.CancelledError:
-            pass
 
     with then("timeout is handled properly"):
         assert not shutdown_complete, "Shutdown should timeout"
@@ -388,8 +395,10 @@ async def concurrent_processing_during_shutdown():
     """Test behavior when shutdown is requested while actively processing."""
 
     with given("active MR processing when shutdown requested"):
-        async with test_database() as db:
-            queue = QueueManager(db)
+        db = Database(database_url="sqlite+aiosqlite:///:memory:")
+        await db.initialize()
+        queue = QueueManager(db)
+        await queue.ensure_schema()
 
         test_mr = MergeRequest(
             iid=75,
@@ -438,7 +447,8 @@ async def concurrent_processing_during_shutdown():
             target_branch="main",
             queue_label="merge_queue",
             hotfix_label="hotfix",
-            db_path=":memory:",
+            jwt_secret="a" * 64,
+            webhook_secret="test-webhook-secret",
             poll_interval_seconds=0.5,
         )
 

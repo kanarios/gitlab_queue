@@ -10,13 +10,13 @@ import jj
 import vedro
 from jj.mock import mocked
 from scenarios.contexts.jj_gitlab_mock import get_mock_url
-from scenarios.contexts.sqlite_client import test_database
 
 from gitlab_queue.clients.gitlab import GitLabClient
 from gitlab_queue.config import Settings
 from gitlab_queue.core.notifier import MRNotifier
 from gitlab_queue.core.processor import MergeProcessor, ProcessingResult
 from gitlab_queue.core.queue import QueueManager
+from gitlab_queue.db.database import Database
 from gitlab_queue.models.mr import Author, MergeRequest
 
 
@@ -33,8 +33,8 @@ class ProcessMRSuccessfully(vedro.Scenario):
     async def given_mr_in_queue_and_api_mocked(self):
         """Setup MR in queue and GitLab API mocks."""
         # Setup test database
-        self._db_context = test_database()
-        self.db = await self._db_context.__aenter__()
+        self.db = Database(database_url="sqlite+aiosqlite:///:memory:")
+        await self.db.initialize()
         self.queue = QueueManager(db=self.db)
         await self.queue.ensure_schema()
 
@@ -79,7 +79,8 @@ class ProcessMRSuccessfully(vedro.Scenario):
             target_branch="main",
             queue_label="merge_queue",
             hotfix_label="hotfix",
-            db_path=":memory:",
+            jwt_secret="a" * 64,
+            webhook_secret="test-webhook-secret",
             poll_interval_seconds=0.1,
             rebase_timeout_seconds=60,
             pipeline_timeout_seconds=300,
@@ -145,5 +146,5 @@ class ProcessMRSuccessfully(vedro.Scenario):
 
     async def cleanup(self):
         """Clean up test resources."""
-        if self._db_context:
-            await self._db_context.__aexit__(None, None, None)
+        if self.db:
+            await self.db.close()
