@@ -102,6 +102,39 @@ export const handlers = [
     });
   }),
 
+  http.post('/auth/token', ({ request }) => {
+    const url = new URL(request.url);
+    const code = url.searchParams.get('code');
+    const state = url.searchParams.get('state');
+
+    if (!code || !state) {
+      return HttpResponse.json(
+        { detail: 'Missing code or state parameter' },
+        { status: 400 }
+      );
+    }
+
+    if (code === 'invalid-code') {
+      return HttpResponse.json(
+        { detail: 'Invalid authorization code' },
+        { status: 400 }
+      );
+    }
+
+    if (state === 'invalid-state') {
+      return HttpResponse.json(
+        { detail: 'Invalid state parameter' },
+        { status: 400 }
+      );
+    }
+
+    return HttpResponse.json({
+      access_token: 'mock-jwt-token',
+      token_type: 'bearer',
+      user: mockUser,
+    });
+  }),
+
   // Queue endpoints
   http.get('/api/queue', () => {
     return HttpResponse.json([mockMergeRequest]);
@@ -119,10 +152,12 @@ export const handlers = [
 
     return HttpResponse.json({
       items: [mockHistoryItem],
-      total: 1,
-      page,
-      per_page: perPage,
-      pages: 1,
+      pagination: {
+        page,
+        per_page: perPage,
+        total: 1,
+        total_pages: 1,
+      },
     });
   }),
 

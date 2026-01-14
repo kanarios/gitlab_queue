@@ -22,9 +22,9 @@ describe('api/history', () => {
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.data.items).toEqual([mockHistoryItem]);
-        expect(result.data.total).toBe(1);
-        expect(result.data.page).toBe(1);
-        expect(result.data.pages).toBe(1);
+        expect(result.data.pagination.total).toBe(1);
+        expect(result.data.pagination.page).toBe(1);
+        expect(result.data.pagination.total_pages).toBe(1);
       }
     });
 
@@ -36,10 +36,12 @@ describe('api/history', () => {
           capturedPage = url.searchParams.get('page');
           return HttpResponse.json({
             items: [],
-            total: 0,
-            page: 2,
-            per_page: 10,
-            pages: 0,
+            pagination: {
+              total: 0,
+              page: 2,
+              per_page: 10,
+              total_pages: 0,
+            },
           });
         })
       );
@@ -57,10 +59,12 @@ describe('api/history', () => {
           capturedPerPage = url.searchParams.get('per_page');
           return HttpResponse.json({
             items: [],
-            total: 0,
-            page: 1,
-            per_page: 20,
-            pages: 0,
+            pagination: {
+              total: 0,
+              page: 1,
+              per_page: 20,
+              total_pages: 0,
+            },
           });
         })
       );
@@ -78,10 +82,12 @@ describe('api/history', () => {
           capturedStatus = url.searchParams.get('status');
           return HttpResponse.json({
             items: [],
-            total: 0,
-            page: 1,
-            per_page: 10,
-            pages: 0,
+            pagination: {
+              total: 0,
+              page: 1,
+              per_page: 10,
+              total_pages: 0,
+            },
           });
         })
       );
@@ -99,10 +105,12 @@ describe('api/history', () => {
           capturedSearch = url.searchParams.get('search');
           return HttpResponse.json({
             items: [],
-            total: 0,
-            page: 1,
-            per_page: 10,
-            pages: 0,
+            pagination: {
+              total: 0,
+              page: 1,
+              per_page: 10,
+              total_pages: 0,
+            },
           });
         })
       );
@@ -125,10 +133,12 @@ describe('api/history', () => {
           };
           return HttpResponse.json({
             items: [],
-            total: 0,
-            page: 1,
-            per_page: 10,
-            pages: 0,
+            pagination: {
+              total: 0,
+              page: 1,
+              per_page: 10,
+              total_pages: 0,
+            },
           });
         })
       );

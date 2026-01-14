@@ -30,6 +30,7 @@ const { TestMockWebSocket, getCurrentWebSocket, setCurrentWebSocket } =
 
       constructor(url: string) {
         this.url = url;
+        // eslint-disable-next-line @typescript-eslint/no-this-alias
         currentWebSocket = this;
         // Simulate async connection
         setTimeout(() => {

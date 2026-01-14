@@ -13,7 +13,7 @@ import {
   logout,
   getAuthHeader,
 } from '../../auth/api';
-import { setToken, clearToken } from '../../auth/storage';
+import { setToken } from '../../auth/storage';
 
 describe('auth/api', () => {
   beforeEach(() => {
@@ -81,7 +81,7 @@ describe('auth/api', () => {
 
     it('returns network error on fetch failure', async () => {
       server.use(
-        http.get('/auth/callback', () => {
+        http.post('/auth/token', () => {
           return HttpResponse.error();
         })
       );
