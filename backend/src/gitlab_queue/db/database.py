@@ -19,7 +19,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
@@ -150,7 +150,7 @@ class Database:
             # Note: In-memory databases use StaticPool which doesn't accept pool config
             is_memory_db = ":memory:" in self.database_url
 
-            engine_kwargs: dict = {
+            engine_kwargs: dict[str, Any] = {
                 "connect_args": {
                     "check_same_thread": False,
                     "timeout": 30.0,  # SQLite connection timeout

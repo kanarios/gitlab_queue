@@ -493,7 +493,7 @@ class WebhookHandler:
 
             self.notifier = MRNotifier(
                 gitlab_client=self.gitlab_client,
-                project_id=self.settings.gitlab_project_id,
+                settings=self.settings,
             )
 
         event = parse_webhook_event(webhook_payload)
@@ -532,7 +532,7 @@ class WebhookHandler:
 
         # Validate project ID
         project_id = payload.get("project", {}).get("id")
-        return project_id == self.settings.gitlab_project_id
+        return bool(project_id == self.settings.gitlab_project_id)
 
 
 __all__: list[str] = [
