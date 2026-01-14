@@ -150,9 +150,7 @@ class WebhookRetryProcessor:
 
         except Exception as e:
             # Failed - schedule next retry or move to DLQ
-            moved_to_dlq = await self.retry_manager.mark_retry_failed(
-                item.id, str(e)
-            )
+            moved_to_dlq = await self.retry_manager.mark_retry_failed(item.id, str(e))
 
             if moved_to_dlq:
                 log.warning(

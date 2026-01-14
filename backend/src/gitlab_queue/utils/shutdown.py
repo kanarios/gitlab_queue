@@ -134,9 +134,7 @@ class ShutdownManager:
             self._shutdown_reason = reason
             self._shutdown_event.set()
 
-    def _create_sync_handler(
-        self, sig: signal.Signals
-    ) -> Callable[[int, Any], None]:
+    def _create_sync_handler(self, sig: signal.Signals) -> Callable[[int, Any], None]:
         """Create synchronous signal handler for Windows.
 
         The handler schedules the async shutdown on the event loop.
@@ -202,9 +200,7 @@ class ShutdownManager:
         self._components.append((name, cleanup_func))
         log.debug("Registered component for cleanup", component=name)
 
-    def request_shutdown(
-        self, reason: ShutdownReason = ShutdownReason.PROGRAMMATIC
-    ) -> None:
+    def request_shutdown(self, reason: ShutdownReason = ShutdownReason.PROGRAMMATIC) -> None:
         """Request graceful shutdown.
 
         Thread-safe method to initiate shutdown from any context.

@@ -9,13 +9,13 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 WORKDIR /app
 
 # Copy dependency files and README (needed by hatchling for project metadata)
-COPY pyproject.toml uv.lock README.md ./
+COPY backend/pyproject.toml backend/uv.lock backend/README.md ./
 
 # Install dependencies (no dev dependencies, frozen lockfile)
 RUN uv sync --frozen --no-dev --no-install-project
 
 # Copy source code and install the project
-COPY src/ ./src/
+COPY backend/src/ ./src/
 RUN uv sync --frozen --no-dev
 
 
@@ -41,8 +41,8 @@ COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/src  /app/src
 
 # Copy alembic configuration and migrations
-COPY alembic.ini ./
-COPY migrations/ ./migrations/
+COPY backend/alembic.ini ./
+COPY backend/migrations/ ./migrations/
 
 
 # Create data directory for SQLite with correct permissions
