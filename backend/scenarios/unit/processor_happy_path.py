@@ -15,7 +15,6 @@ from datetime import UTC, datetime
 import jj
 from jj.mock import mocked
 from scenarios.contexts.jj_gitlab_mock import get_mock_url
-from scenarios.contexts.sqlite_client import test_database
 from vedro import given, scenario, then, when
 
 from gitlab_queue.clients.gitlab import GitLabClient
@@ -23,6 +22,7 @@ from gitlab_queue.config import Settings
 from gitlab_queue.core.notifier import MRNotifier
 from gitlab_queue.core.processor import MergeProcessor, ProcessingResult
 from gitlab_queue.core.queue import QueueManager
+from gitlab_queue.db.database import Database
 from gitlab_queue.models.mr import Author, MergeRequest
 
 
@@ -32,25 +32,27 @@ async def process_mr_successfully():
 
     with given("MR in queue and GitLab API mocked for success flow"):
         # Setup test database and queue
-        async with test_database() as db:
-            queue = QueueManager(db)
+        db = Database(database_url="sqlite+aiosqlite:///:memory:")
+        await db.initialize()
+        queue = QueueManager(db)
+        await queue.ensure_schema()
 
-            # Create test MR
-            test_mr = MergeRequest(
-                iid=42,
-                title="Test MR",
-                state="opened",
-                target_branch="main",
-                source_branch="feature/test",
-                sha="abc123",
-                labels=["merge_queue"],
-                author=Author(id=1, name="Test User", username="testuser"),
-                merge_status="can_be_merged",
-                web_url="https://gitlab.com/test/project/-/merge_requests/42",
-            )
+        # Create test MR
+        test_mr = MergeRequest(
+            iid=42,
+            title="Test MR",
+            state="opened",
+            target_branch="main",
+            source_branch="feature/test",
+            sha="abc123",
+            labels=["merge_queue"],
+            author=Author(id=1, name="Test User", username="testuser"),
+            merge_status="can_be_merged",
+            web_url="https://gitlab.com/test/project/-/merge_requests/42",
+        )
 
-            # Add MR to queue
-            await queue.add_to_queue(test_mr, is_hotfix=False)
+        # Add MR to queue
+        await queue.add_to_queue(test_mr, is_hotfix=False)
 
         # Setup JJ mocks for the full flow
         mock_url = get_mock_url()
@@ -108,7 +110,8 @@ async def process_mr_successfully():
             target_branch="main",
             queue_label="merge_queue",
             hotfix_label="hotfix",
-            db_path=":memory:",  # Use in-memory DB for tests
+            jwt_secret="a" * 64,
+            webhook_secret="test-webhook-secret",
             poll_interval_seconds=1,
             rebase_timeout_seconds=60,
             pipeline_timeout_seconds=300,
@@ -167,25 +170,27 @@ async def process_mr_with_async_rebase():
 
     with given("MR in queue with async rebase scenario"):
         # Setup test database and queue
-        async with test_database() as db:
-            queue = QueueManager(db)
+        db = Database(database_url="sqlite+aiosqlite:///:memory:")
+        await db.initialize()
+        queue = QueueManager(db)
+        await queue.ensure_schema()
 
-            # Create test MR
-            test_mr = MergeRequest(
-                iid=43,
-                title="Test MR with Async Rebase",
-                state="opened",
-                target_branch="main",
-                source_branch="feature/async",
-                sha="def456",
-                labels=["merge_queue"],
-                author=Author(id=1, name="Test User", username="testuser"),
-                merge_status="can_be_merged",
-                web_url="https://gitlab.com/test/project/-/merge_requests/43",
-            )
+        # Create test MR
+        test_mr = MergeRequest(
+            iid=43,
+            title="Test MR with Async Rebase",
+            state="opened",
+            target_branch="main",
+            source_branch="feature/async",
+            sha="def456",
+            labels=["merge_queue"],
+            author=Author(id=1, name="Test User", username="testuser"),
+            merge_status="can_be_merged",
+            web_url="https://gitlab.com/test/project/-/merge_requests/43",
+        )
 
-            # Add MR to queue
-            await queue.add_to_queue(test_mr, is_hotfix=False)
+        # Add MR to queue
+        await queue.add_to_queue(test_mr, is_hotfix=False)
 
         mock_url = get_mock_url()
 
@@ -236,7 +241,8 @@ async def process_mr_with_async_rebase():
             target_branch="main",
             queue_label="merge_queue",
             hotfix_label="hotfix",
-            db_path=":memory:",
+            jwt_secret="a" * 64,
+            webhook_secret="test-webhook-secret",
             poll_interval_seconds=1,
             rebase_timeout_seconds=60,
         )

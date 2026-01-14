@@ -11,7 +11,6 @@ from __future__ import annotations
 import jj
 from jj.mock import mocked
 from scenarios.contexts.jj_gitlab_mock import get_mock_url
-from scenarios.contexts.sqlite_client import test_database
 from vedro import given, scenario, then, when
 
 from gitlab_queue.clients.gitlab import GitLabClient
@@ -19,6 +18,7 @@ from gitlab_queue.config import Settings
 from gitlab_queue.core.notifier import MRNotifier
 from gitlab_queue.core.processor import MergeProcessor, ProcessingResult
 from gitlab_queue.core.queue import QueueManager
+from gitlab_queue.db.database import Database
 from gitlab_queue.models.mr import Author, MergeRequest
 
 
@@ -28,8 +28,10 @@ async def process_mr_with_immediate_conflict():
 
     with given("MR in queue and GitLab returns rebase conflict"):
         # Setup test database and queue
-        async with test_database() as db:
-            queue = QueueManager(db)
+        db = Database(database_url="sqlite+aiosqlite:///:memory:")
+        await db.initialize()
+        queue = QueueManager(db)
+        await queue.ensure_schema()
 
         # Create test MR
         test_mr = MergeRequest(
@@ -96,7 +98,8 @@ async def process_mr_with_immediate_conflict():
             target_branch="main",
             queue_label="merge_queue",
             hotfix_label="hotfix",
-            db_path=":memory:",
+            jwt_secret="a" * 64,
+            webhook_secret="test-webhook-secret",
         )
 
     async with (
@@ -153,8 +156,10 @@ async def process_mr_with_conflict_during_rebase():
     """Test MR processing when conflict is discovered during rebase polling."""
 
     with given("MR starts rebase but conflict is discovered during polling"):
-        async with test_database() as db:
-            queue = QueueManager(db)
+        db = Database(database_url="sqlite+aiosqlite:///:memory:")
+        await db.initialize()
+        queue = QueueManager(db)
+        await queue.ensure_schema()
 
         test_mr = MergeRequest(
             iid=45,
@@ -221,7 +226,8 @@ async def process_mr_with_conflict_during_rebase():
             target_branch="main",
             queue_label="merge_queue",
             hotfix_label="hotfix",
-            db_path=":memory:",
+            jwt_secret="a" * 64,
+            webhook_secret="test-webhook-secret",
             rebase_timeout_seconds=60,
         )
 
@@ -266,8 +272,10 @@ async def process_mr_with_conflict_after_multiple_mrs():
     """Test conflict handling doesn't affect other MRs in queue."""
 
     with given("Multiple MRs in queue, one has conflict"):
-        async with test_database() as db:
-            queue = QueueManager(db)
+        db = Database(database_url="sqlite+aiosqlite:///:memory:")
+        await db.initialize()
+        queue = QueueManager(db)
+        await queue.ensure_schema()
 
         # Add first MR (will have conflict)
         conflict_mr = MergeRequest(
@@ -278,7 +286,7 @@ async def process_mr_with_conflict_after_multiple_mrs():
             source_branch="feature/conflict",
             sha="conflict789",
             labels=["merge_queue"],
-            author={"name": "User1", "username": "user1"},
+            author=Author(id=1, name="User1", username="user1"),
             merge_status="can_be_merged",
             web_url="https://gitlab.com/test/project/-/merge_requests/46",
         )
@@ -292,7 +300,7 @@ async def process_mr_with_conflict_after_multiple_mrs():
             source_branch="feature/good",
             sha="good123",
             labels=["merge_queue"],
-            author={"name": "User2", "username": "user2"},
+            author=Author(id=2, name="User2", username="user2"),
             merge_status="can_be_merged",
             web_url="https://gitlab.com/test/project/-/merge_requests/47",
         )
@@ -332,7 +340,8 @@ async def process_mr_with_conflict_after_multiple_mrs():
             target_branch="main",
             queue_label="merge_queue",
             hotfix_label="hotfix",
-            db_path=":memory:",
+            jwt_secret="a" * 64,
+            webhook_secret="test-webhook-secret",
         )
 
     async with (

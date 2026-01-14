@@ -9,12 +9,9 @@ This scenario tests how the processor handles:
 
 from __future__ import annotations
 
-import asyncio
-
 import jj
 from jj.mock import mocked
 from scenarios.contexts.jj_gitlab_mock import get_mock_url
-from scenarios.contexts.sqlite_client import test_database
 from vedro import given, scenario, then, when
 
 from gitlab_queue.clients.gitlab import GitLabClient
@@ -22,6 +19,7 @@ from gitlab_queue.config import Settings
 from gitlab_queue.core.notifier import MRNotifier
 from gitlab_queue.core.processor import MergeProcessor, ProcessingResult
 from gitlab_queue.core.queue import QueueManager
+from gitlab_queue.db.database import Database
 from gitlab_queue.models.mr import Author, MergeRequest
 
 
@@ -30,8 +28,10 @@ async def process_mr_with_rebase_timeout():
     """Test MR processing when rebase operation times out."""
 
     with given("MR with rebase that never completes"):
-        async with test_database() as db:
-            queue = QueueManager(db)
+        db = Database(database_url="sqlite+aiosqlite:///:memory:")
+        await db.initialize()
+        queue = QueueManager(db)
+        await queue.ensure_schema()
 
         test_mr = MergeRequest(
             iid=60,
@@ -81,7 +81,8 @@ async def process_mr_with_rebase_timeout():
             target_branch="main",
             queue_label="merge_queue",
             hotfix_label="hotfix",
-            db_path=":memory:",
+            jwt_secret="a" * 64,
+            webhook_secret="test-webhook-secret",
             rebase_timeout_seconds=1,  # Very short timeout for testing
             poll_interval_seconds=0.1,
         )
@@ -126,8 +127,10 @@ async def process_mr_with_pipeline_timeout():
     """Test MR processing when pipeline check times out."""
 
     with given("MR with pipeline that never completes"):
-        async with test_database() as db:
-            queue = QueueManager(db)
+        db = Database(database_url="sqlite+aiosqlite:///:memory:")
+        await db.initialize()
+        queue = QueueManager(db)
+        await queue.ensure_schema()
 
         test_mr = MergeRequest(
             iid=61,
@@ -183,7 +186,8 @@ async def process_mr_with_pipeline_timeout():
             target_branch="main",
             queue_label="merge_queue",
             hotfix_label="hotfix",
-            db_path=":memory:",
+            jwt_secret="a" * 64,
+            webhook_secret="test-webhook-secret",
             pipeline_timeout_seconds=2,  # Short timeout for testing
             poll_interval_seconds=0.1,
         )
@@ -236,8 +240,10 @@ async def process_mr_with_merge_timeout():
     """Test MR processing when merge operation times out."""
 
     with given("MR where merge operation hangs"):
-        async with test_database() as db:
-            queue = QueueManager(db)
+        db = Database(database_url="sqlite+aiosqlite:///:memory:")
+        await db.initialize()
+        queue = QueueManager(db)
+        await queue.ensure_schema()
 
         test_mr = MergeRequest(
             iid=62,
@@ -280,21 +286,8 @@ async def process_mr_with_merge_timeout():
         pipelines_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/62/pipelines")
         pipelines_response = jj.Response(status=200, json=[success_pipeline])
 
-        # Merge endpoint with artificial delay to trigger timeout
-        merge_matcher = jj.match("PUT", "/api/v4/projects/123/merge_requests/62/merge")
-
-        # Create a slow response handler
-        async def slow_merge_handler(request):
-            # Sleep longer than the merge timeout (30s default, but we'll use a short timeout in settings)
-            await asyncio.sleep(35)  # This will be interrupted by the timeout
-            return jj.Response(status=200, json={**mr_data, "state": "merged"})
-
-        merge_response = jj.Response(
-            status=200,
-            json={**mr_data, "state": "merged"},
-            # JJ doesn't support async handlers directly, so we simulate with a normal response
-            # The timeout will occur on the client side
-        )
+        # Merge endpoint - not mocked to simulate timeout/connection error
+        # JJ doesn't support async handlers, so timeout occurs on client side
 
         comment_matcher = jj.match("POST", "/api/v4/projects/123/merge_requests/62/notes")
         comment_response = jj.Response(status=201, json={"id": 32})
@@ -306,7 +299,8 @@ async def process_mr_with_merge_timeout():
             target_branch="main",
             queue_label="merge_queue",
             hotfix_label="hotfix",
-            db_path=":memory:",
+            jwt_secret="a" * 64,
+            webhook_secret="test-webhook-secret",
             poll_interval_seconds=0.1,
         )
 
@@ -372,8 +366,10 @@ async def process_mr_with_label_removed_during_timeout():
     """Test MR processing when queue label is removed during a timeout scenario."""
 
     with given("MR where label is removed while waiting"):
-        async with test_database() as db:
-            queue = QueueManager(db)
+        db = Database(database_url="sqlite+aiosqlite:///:memory:")
+        await db.initialize()
+        queue = QueueManager(db)
+        await queue.ensure_schema()
 
         test_mr = MergeRequest(
             iid=63,
@@ -441,7 +437,8 @@ async def process_mr_with_label_removed_during_timeout():
             target_branch="main",
             queue_label="merge_queue",
             hotfix_label="hotfix",
-            db_path=":memory:",
+            jwt_secret="a" * 64,
+            webhook_secret="test-webhook-secret",
             pipeline_timeout_seconds=10,
             poll_interval_seconds=0.1,
         )
@@ -450,39 +447,36 @@ async def process_mr_with_label_removed_during_timeout():
         mocked(get_mr_matcher_1, get_mr_response_1),
         mocked(rebase_matcher, rebase_response),
         mocked(pipelines_matcher, pipelines_response),
+        mocked(get_mr_matcher_2, get_mr_response_2) as get_mr_mock_2,
+        mocked(comment_matcher, comment_response) as comment_mock,
     ):
-        # After initial checks, label is removed
-        async with (
-            mocked(get_mr_matcher_2, get_mr_response_2) as get_mr_mock_2,
-            mocked(comment_matcher, comment_response) as comment_mock,
-        ):
-            with when("label is removed during pipeline wait"):
-                gitlab_client = GitLabClient(settings)
-                notifier = MRNotifier(gitlab_client=gitlab_client, project_id=123)
-                processor = MergeProcessor(
-                    gitlab_client=gitlab_client,
-                    queue_manager=queue,
-                    notifier=notifier,
-                    settings=settings,
-                )
+        with when("label is removed during pipeline wait"):
+            gitlab_client = GitLabClient(settings)
+            notifier = MRNotifier(gitlab_client=gitlab_client, project_id=123)
+            processor = MergeProcessor(
+                gitlab_client=gitlab_client,
+                queue_manager=queue,
+                notifier=notifier,
+                settings=settings,
+            )
 
-                queue_item = await queue.get_next_mr()
-                result = await processor._process_mr(queue_item)
+            queue_item = await queue.get_next_mr()
+            result = await processor._process_mr(queue_item)
 
-            with then("MR is marked as removed"):
-                assert result == ProcessingResult.REMOVED
+        with then("MR is marked as removed"):
+            assert result == ProcessingResult.REMOVED
 
-                # Verify MR status was checked
-                get_mr_history = await get_mr_mock_2.fetch_history()
-                assert len(get_mr_history) >= 1, "MR status should be checked during processing"
+            # Verify MR status was checked
+            get_mr_history = await get_mr_mock_2.fetch_history()
+            assert len(get_mr_history) >= 1, "MR status should be checked during processing"
 
-                # Verify removal notification
-                comment_history = await comment_mock.fetch_history()
-                assert len(comment_history) >= 1, "Removal comment should be posted"
+            # Verify removal notification
+            comment_history = await comment_mock.fetch_history()
+            assert len(comment_history) >= 1, "Removal comment should be posted"
 
-                # Verify state
-                mr_state = await queue.get_mr_state(63)
-                assert mr_state == "removed"
+            # Verify state
+            mr_state = await queue.get_mr_state(63)
+            assert mr_state == "removed"
 
 
 __all__ = [
