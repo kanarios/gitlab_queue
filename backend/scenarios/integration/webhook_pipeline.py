@@ -121,7 +121,7 @@ async def webhook_pipeline_success_triggers_merge():
     ):
         with when("pipeline success webhook is received"):
             gitlab_client = GitLabClient(settings)
-            notifier = MRNotifier(gitlab_client=gitlab_client, project_id=123)
+            notifier = MRNotifier(gitlab_client=gitlab_client, settings=settings)
 
             webhook_handler = WebhookHandler(
                 queue_manager=queue,
@@ -143,7 +143,7 @@ async def webhook_pipeline_success_triggers_merge():
             # Process should continue with merge
             queue_item = await queue.get_next_mr()
             if queue_item and queue_item.state == "testing":
-                result = await processor._continue_from_testing(queue_item)
+                await processor._continue_from_testing(queue_item)
 
         with then("MR is merged after pipeline success"):
             # Verify merge was triggered
@@ -387,7 +387,7 @@ async def webhook_concurrent_pipeline_events():
         ), f"MR should be in valid state, got {mr_state}"
 
         # Check for race conditions in state transitions
-        state_history = await queue.get_state_history(202)
+        _ = await queue.get_state_history(202)
         # Verify no invalid state transitions occurred
 
 

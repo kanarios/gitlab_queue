@@ -95,7 +95,7 @@ async def process_mr_with_rebase_timeout():
     ):
         with when("processor waits for rebase that never completes"):
             gitlab_client = GitLabClient(settings)
-            notifier = MRNotifier(gitlab_client=gitlab_client, project_id=123)
+            notifier = MRNotifier(gitlab_client=gitlab_client, settings=settings)
             processor = MergeProcessor(
                 gitlab_client=gitlab_client,
                 queue_manager=queue,
@@ -200,7 +200,7 @@ async def process_mr_with_pipeline_timeout():
     ):
         with when("processor waits for pipeline that never completes"):
             gitlab_client = GitLabClient(settings)
-            notifier = MRNotifier(gitlab_client=gitlab_client, project_id=123)
+            notifier = MRNotifier(gitlab_client=gitlab_client, settings=settings)
             processor = MergeProcessor(
                 gitlab_client=gitlab_client,
                 queue_manager=queue,
@@ -315,7 +315,7 @@ async def process_mr_with_merge_timeout():
         # Don't mock the merge endpoint to simulate timeout
         with when("merge operation times out"):
             gitlab_client = GitLabClient(settings)
-            notifier = MRNotifier(gitlab_client=gitlab_client, project_id=123)
+            notifier = MRNotifier(gitlab_client=gitlab_client, settings=settings)
             processor = MergeProcessor(
                 gitlab_client=gitlab_client,
                 queue_manager=queue,
@@ -452,7 +452,7 @@ async def process_mr_with_label_removed_during_timeout():
     ):
         with when("label is removed during pipeline wait"):
             gitlab_client = GitLabClient(settings)
-            notifier = MRNotifier(gitlab_client=gitlab_client, project_id=123)
+            notifier = MRNotifier(gitlab_client=gitlab_client, settings=settings)
             processor = MergeProcessor(
                 gitlab_client=gitlab_client,
                 queue_manager=queue,

@@ -137,7 +137,7 @@ async def process_mr_with_pipeline_failure_and_retry():
     ):
         with when("processor handles pipeline failure with retry"):
             gitlab_client = GitLabClient(settings)
-            notifier = MRNotifier(gitlab_client=gitlab_client, project_id=123)
+            notifier = MRNotifier(gitlab_client=gitlab_client, settings=settings)
             processor = MergeProcessor(
                 gitlab_client=gitlab_client,
                 queue_manager=queue,
@@ -265,7 +265,7 @@ async def process_mr_with_pipeline_failure_max_retries():
     ):
         with when("processor exhausts all retries"):
             gitlab_client = GitLabClient(settings)
-            notifier = MRNotifier(gitlab_client=gitlab_client, project_id=123)
+            notifier = MRNotifier(gitlab_client=gitlab_client, settings=settings)
             processor = MergeProcessor(
                 gitlab_client=gitlab_client,
                 queue_manager=queue,
@@ -383,7 +383,7 @@ async def process_mr_with_canceled_pipeline():
     ):
         with when("processor encounters canceled pipeline"):
             gitlab_client = GitLabClient(settings)
-            notifier = MRNotifier(gitlab_client=gitlab_client, project_id=123)
+            notifier = MRNotifier(gitlab_client=gitlab_client, settings=settings)
             processor = MergeProcessor(
                 gitlab_client=gitlab_client,
                 queue_manager=queue,

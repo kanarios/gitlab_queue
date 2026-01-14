@@ -52,7 +52,7 @@ async def graceful_shutdown_with_no_processing():
 
     with when("shutdown is requested with empty queue"):
         gitlab_client = GitLabClient(settings)
-        notifier = MRNotifier(gitlab_client=gitlab_client, project_id=123)
+        notifier = MRNotifier(gitlab_client=gitlab_client, settings=settings)
         processor = MergeProcessor(
             gitlab_client=gitlab_client,
             queue_manager=queue,
@@ -156,7 +156,7 @@ async def graceful_shutdown_during_rebase():
     ):
         with when("shutdown requested during rebase"):
             gitlab_client = GitLabClient(settings)
-            notifier = MRNotifier(gitlab_client=gitlab_client, project_id=123)
+            notifier = MRNotifier(gitlab_client=gitlab_client, settings=settings)
             processor = MergeProcessor(
                 gitlab_client=gitlab_client,
                 queue_manager=queue,
@@ -303,7 +303,7 @@ async def processor_state_recovery_after_shutdown():
     ):
         with when("processor starts after shutdown"):
             gitlab_client = GitLabClient(settings)
-            notifier = MRNotifier(gitlab_client=gitlab_client, project_id=123)
+            notifier = MRNotifier(gitlab_client=gitlab_client, settings=settings)
             processor = MergeProcessor(
                 gitlab_client=gitlab_client,
                 queue_manager=queue,
@@ -360,7 +360,7 @@ async def shutdown_timeout_handling():
 
     with when("shutdown wait times out"):
         gitlab_client = GitLabClient(settings)
-        notifier = MRNotifier(gitlab_client=gitlab_client, project_id=123)
+        notifier = MRNotifier(gitlab_client=gitlab_client, settings=settings)
         processor = MergeProcessor(
             gitlab_client=gitlab_client,
             queue_manager=queue,
@@ -460,7 +460,7 @@ async def concurrent_processing_during_shutdown():
     ):
         with when("shutdown during active processing"):
             gitlab_client = GitLabClient(settings)
-            notifier = MRNotifier(gitlab_client=gitlab_client, project_id=123)
+            notifier = MRNotifier(gitlab_client=gitlab_client, settings=settings)
             processor = MergeProcessor(
                 gitlab_client=gitlab_client,
                 queue_manager=queue,
