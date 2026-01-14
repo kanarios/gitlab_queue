@@ -70,19 +70,6 @@ jobs:
     defaults:
       run:
         working-directory: backend
-    services:
-      jj-mock:
-        image: vedrouniverse/jj:2.10.0
-        env:
-          PORT: "8080"
-        ports:
-          - 8080:8080
-        options: >-
-          --health-cmd "curl -f http://localhost:8080/__jj__/health || exit 1"
-          --health-interval 10s
-          --health-timeout 10s
-          --health-retries 10
-          --health-start-period 30s
     env:
       JJ_MOCK_URL: http://localhost:8080
     steps:
@@ -98,6 +85,12 @@ jobs:
       
       - name: Install dependencies
         run: uv sync --frozen --extra dev
+      
+      - name: Start JJ mock server
+        run: |
+          uv run jj --port 8080 &
+          sleep 3
+          curl -f http://localhost:8080/__jj__/health || exit 1
       
       - name: Run unit tests
         run: uv run vedro run scenarios/unit/ --verbose
