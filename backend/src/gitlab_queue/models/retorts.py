@@ -26,14 +26,15 @@ from gitlab_queue.models.queue_item import QueueItem
 
 
 def _extract_labels(labels: list[Any]) -> list[str]:
-    """Extract label names from GitLab API response.
+    """Extract label names from GitLab API response or webhook payload.
 
-    GitLab API can return labels as either:
+    GitLab can return labels in different formats:
     - List of strings: ["label1", "label2"]
-    - List of objects: [{"name": "label1"}, {"name": "label2"}]
+    - List of objects from API: [{"name": "label1"}, {"name": "label2"}]
+    - List of objects from webhooks: [{"title": "label1"}, {"title": "label2"}]
 
     Args:
-        labels: Labels from API response
+        labels: Labels from API response or webhook payload
 
     Returns:
         List of label name strings
@@ -42,7 +43,8 @@ def _extract_labels(labels: list[Any]) -> list[str]:
         return []
     first = labels[0]
     if isinstance(first, dict):
-        return [str(label["name"]) for label in labels]
+        # Handle both API format (name) and webhook format (title)
+        return [str(label.get("name") or label.get("title", "")) for label in labels]
     return [str(label) for label in labels]
 
 

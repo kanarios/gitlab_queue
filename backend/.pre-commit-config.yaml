@@ -21,3 +21,11 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
+
+      - id: backend-tests
+        name: backend tests
+        entry: bash -c 'cd backend && ./scripts/run-tests.sh'
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [pre-commit]

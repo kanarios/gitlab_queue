@@ -454,8 +454,16 @@ class MRStateMachine(StateMachine):
         log.info("Triggering timeout", mr_iid=self.mr_iid, max_wait_hours=max_wait_hours)
         self._context["failure_reason"] = "timeout"
         self._context["max_wait_hours"] = max_wait_hours
-        # Use pipeline_failed transition to go to failed state
-        await self.pipeline_failed()
+        # Use appropriate transition based on current state
+        current = self.current_state.id
+        if current == "rebasing":
+            await self.rebase_failed()
+        elif current == "testing":
+            await self.pipeline_failed()
+        elif current == "merging":
+            await self.merge_failed()
+        else:
+            log.error("Timeout in unexpected state", mr_iid=self.mr_iid, state=current)
 
     # =========================================================================
     # Special Notification Methods (no state change)

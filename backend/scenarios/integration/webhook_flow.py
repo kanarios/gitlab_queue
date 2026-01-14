@@ -12,7 +12,6 @@ from __future__ import annotations
 import jj
 from jj.mock import mocked
 from scenarios.contexts.jj_gitlab_mock import get_mock_url
-from scenarios.contexts.sqlite_client import test_database
 from vedro import given, scenario, then, when
 
 from gitlab_queue.clients.gitlab import GitLabClient
@@ -20,8 +19,9 @@ from gitlab_queue.config import Settings
 from gitlab_queue.core.notifier import MRNotifier
 from gitlab_queue.core.processor import MergeProcessor
 from gitlab_queue.core.queue import QueueManager
+from gitlab_queue.db.database import Database
 from gitlab_queue.models.mr import Author, MergeRequest
-from gitlab_queue.webhooks.router import WebhookHandler
+from gitlab_queue.webhooks.handlers import WebhookHandler
 
 
 @scenario()
@@ -29,9 +29,10 @@ async def webhook_mr_labeled_flow():
     """Test complete flow when MR is labeled with merge_queue label."""
 
     with given("webhook handler and processor configured"):
-        async with test_database() as db:
-            queue = QueueManager(db)
-            await queue.ensure_schema()
+        db = Database(database_url="sqlite+aiosqlite:///:memory:")
+        await db.initialize()
+        queue = QueueManager(db)
+        await queue.ensure_schema()
 
         mock_url = get_mock_url()
 
@@ -42,12 +43,12 @@ async def webhook_mr_labeled_flow():
             target_branch="main",
             queue_label="merge_queue",
             hotfix_label="hotfix",
-            db_path=":memory:",
+            jwt_secret="a" * 64,
             webhook_secret="test-secret",
             poll_interval_seconds=0.5,
         )
 
-        # Webhook payload for MR labeled event
+        # Webhook payload for MR labeled event - action must be "labeled"
         webhook_payload = {
             "object_kind": "merge_request",
             "event_type": "merge_request",
@@ -62,12 +63,7 @@ async def webhook_mr_labeled_flow():
                 "source_branch": "feature/webhook",
                 "target_branch": "main",
                 "last_commit": {"id": "webhook123"},
-                "labels": [
-                    {"title": "merge_queue"},
-                    {"title": "feature"},
-                ],
-                "action": "update",
-                "oldrev": "old123",
+                "action": "labeled",  # Must be "labeled" for add to queue
             },
             "labels": [
                 {"title": "merge_queue"},
@@ -93,6 +89,8 @@ async def webhook_mr_labeled_flow():
             "labels": ["merge_queue", "feature"],
             "author": {"id": 10, "name": "Webhook User", "username": "webhook_user"},
             "merge_status": "can_be_merged",
+            "has_conflicts": False,
+            "rebase_in_progress": False,
             "web_url": "https://gitlab.com/test/project/-/merge_requests/100",
         }
 
@@ -118,12 +116,17 @@ async def webhook_mr_labeled_flow():
         comment_matcher = jj.match("POST", "/api/v4/projects/123/merge_requests/100/notes")
         comment_response = jj.Response(status=201, json={"id": 50})
 
+        # GET notes - needed for _find_bot_comment in MRNotifier
+        get_notes_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/100/notes")
+        get_notes_response = jj.Response(status=200, json=[])
+
     async with (
         mocked(get_mr_matcher, get_mr_response),
         mocked(rebase_matcher, rebase_response),
         mocked(pipelines_matcher, pipelines_response),
         mocked(merge_matcher, merge_response) as merge_mock,
         mocked(comment_matcher, comment_response),
+        mocked(get_notes_matcher, get_notes_response),
     ):
         with when("webhook receives MR labeled event and processor runs"):
             gitlab_client = GitLabClient(settings)
@@ -145,7 +148,7 @@ async def webhook_mr_labeled_flow():
             await webhook_handler.handle_merge_request_event(webhook_payload)
 
             # Verify MR was added to queue
-            queue_state = await queue.get_queue_state()
+            queue_state = await queue.get_active_queue()
             assert len(queue_state) == 1, "MR should be in queue"
             assert queue_state[0].mr_iid == 100
 
@@ -162,7 +165,10 @@ async def webhook_mr_labeled_flow():
 
             # Verify final state
             mr_state = await queue.get_mr_state(100)
-            assert mr_state == "merged"
+            assert mr_state["status"] == "merged"
+
+    # Cleanup
+    await db.close()
 
 
 @scenario()
@@ -170,24 +176,25 @@ async def webhook_mr_unlabeled_flow():
     """Test flow when MR is unlabeled (removed from queue)."""
 
     with given("MR in queue and webhook for unlabel event"):
-        async with test_database() as db:
-            queue = QueueManager(db)
-            await queue.ensure_schema()
+        db = Database(database_url="sqlite+aiosqlite:///:memory:")
+        await db.initialize()
+        queue = QueueManager(db)
+        await queue.ensure_schema()
 
-            # Add MR to queue first
-            test_mr = MergeRequest(
-                iid=101,
-                title="To Be Removed",
-                state="opened",
-                target_branch="main",
-                source_branch="feature/remove",
-                sha="remove123",
-                labels=["merge_queue"],
-                author=Author(id=11, name="Test User", username="testuser"),
-                merge_status="can_be_merged",
-                web_url="https://gitlab.com/test/project/-/merge_requests/101",
-            )
-            await queue.add_to_queue(test_mr, is_hotfix=False)
+        # Add MR to queue first
+        test_mr = MergeRequest(
+            iid=101,
+            title="To Be Removed",
+            state="opened",
+            target_branch="main",
+            source_branch="feature/remove",
+            sha="remove123",
+            labels=["merge_queue"],
+            author=Author(id=11, name="Test User", username="testuser"),
+            merge_status="can_be_merged",
+            web_url="https://gitlab.com/test/project/-/merge_requests/101",
+        )
+        await queue.add_to_queue(test_mr, is_hotfix=False)
 
         mock_url = get_mock_url()
 
@@ -198,11 +205,11 @@ async def webhook_mr_unlabeled_flow():
             target_branch="main",
             queue_label="merge_queue",
             hotfix_label="hotfix",
-            db_path=":memory:",
+            jwt_secret="a" * 64,
             webhook_secret="test-secret",
         )
 
-        # Webhook payload for MR unlabeled event
+        # Webhook payload for MR unlabeled event - action must be "unlabeled"
         webhook_payload = {
             "object_kind": "merge_request",
             "event_type": "merge_request",
@@ -211,8 +218,9 @@ async def webhook_mr_unlabeled_flow():
                 "iid": 101,
                 "title": "To Be Removed",
                 "state": "opened",
-                "labels": [],  # No more merge_queue label
-                "action": "update",
+                "source_branch": "feature/remove",
+                "target_branch": "main",
+                "action": "unlabeled",  # Must be "unlabeled" for removal
             },
             "labels": [],
             "changes": {
@@ -236,12 +244,15 @@ async def webhook_mr_unlabeled_flow():
 
     with then("MR is removed from queue"):
         # Verify MR was removed from queue
-        queue_state = await queue.get_queue_state()
+        queue_state = await queue.get_active_queue()
         assert len(queue_state) == 0, "Queue should be empty"
 
         # Verify MR state
         mr_state = await queue.get_mr_state(101)
-        assert mr_state is None or mr_state == "removed"
+        assert mr_state is None or mr_state["status"] == "removed"
+
+    # Cleanup
+    await db.close()
 
 
 @scenario()
@@ -249,24 +260,25 @@ async def webhook_mr_closed_flow():
     """Test flow when MR is closed via webhook."""
 
     with given("MR in queue and webhook for close event"):
-        async with test_database() as db:
-            queue = QueueManager(db)
-            await queue.ensure_schema()
+        db = Database(database_url="sqlite+aiosqlite:///:memory:")
+        await db.initialize()
+        queue = QueueManager(db)
+        await queue.ensure_schema()
 
-            # Add MR to queue
-            test_mr = MergeRequest(
-                iid=102,
-                title="To Be Closed",
-                state="opened",
-                target_branch="main",
-                source_branch="feature/close",
-                sha="close123",
-                labels=["merge_queue"],
-                author=Author(id=12, name="Test User", username="testuser"),
-                merge_status="can_be_merged",
-                web_url="https://gitlab.com/test/project/-/merge_requests/102",
-            )
-            await queue.add_to_queue(test_mr, is_hotfix=False)
+        # Add MR to queue
+        test_mr = MergeRequest(
+            iid=102,
+            title="To Be Closed",
+            state="opened",
+            target_branch="main",
+            source_branch="feature/close",
+            sha="close123",
+            labels=["merge_queue"],
+            author=Author(id=12, name="Test User", username="testuser"),
+            merge_status="can_be_merged",
+            web_url="https://gitlab.com/test/project/-/merge_requests/102",
+        )
+        await queue.add_to_queue(test_mr, is_hotfix=False)
 
         mock_url = get_mock_url()
 
@@ -277,7 +289,7 @@ async def webhook_mr_closed_flow():
             target_branch="main",
             queue_label="merge_queue",
             hotfix_label="hotfix",
-            db_path=":memory:",
+            jwt_secret="a" * 64,
             webhook_secret="test-secret",
         )
 
@@ -290,9 +302,11 @@ async def webhook_mr_closed_flow():
                 "iid": 102,
                 "title": "To Be Closed",
                 "state": "closed",
-                "labels": [{"title": "merge_queue"}],
+                "source_branch": "feature/close",
+                "target_branch": "main",
                 "action": "close",
             },
+            "labels": [{"title": "merge_queue"}],
         }
 
     with when("webhook receives MR closed event"):
@@ -308,12 +322,15 @@ async def webhook_mr_closed_flow():
 
     with then("MR is removed from queue"):
         # Verify MR was removed from queue
-        queue_state = await queue.get_queue_state()
+        queue_state = await queue.get_active_queue()
         assert len(queue_state) == 0, "Queue should be empty after MR closed"
 
         # Verify MR state
         mr_state = await queue.get_mr_state(102)
-        assert mr_state is None or mr_state == "closed"
+        assert mr_state is None or mr_state["status"] == "removed"
+
+    # Cleanup
+    await db.close()
 
 
 @scenario()
@@ -321,24 +338,25 @@ async def webhook_hotfix_priority_flow():
     """Test webhook flow with hotfix priority."""
 
     with given("regular MR in queue and hotfix webhook received"):
-        async with test_database() as db:
-            queue = QueueManager(db)
-            await queue.ensure_schema()
+        db = Database(database_url="sqlite+aiosqlite:///:memory:")
+        await db.initialize()
+        queue = QueueManager(db)
+        await queue.ensure_schema()
 
-            # Add regular MR to queue
-            regular_mr = MergeRequest(
-                iid=103,
-                title="Regular Feature",
-                state="opened",
-                target_branch="main",
-                source_branch="feature/regular",
-                sha="regular123",
-                labels=["merge_queue"],
-                author=Author(id=13, name="Regular User", username="regular"),
-                merge_status="can_be_merged",
-                web_url="https://gitlab.com/test/project/-/merge_requests/103",
-            )
-            await queue.add_to_queue(regular_mr, is_hotfix=False)
+        # Add regular MR to queue
+        regular_mr = MergeRequest(
+            iid=103,
+            title="Regular Feature",
+            state="opened",
+            target_branch="main",
+            source_branch="feature/regular",
+            sha="regular123",
+            labels=["merge_queue"],
+            author=Author(id=13, name="Regular User", username="regular"),
+            merge_status="can_be_merged",
+            web_url="https://gitlab.com/test/project/-/merge_requests/103",
+        )
+        await queue.add_to_queue(regular_mr, is_hotfix=False)
 
         mock_url = get_mock_url()
 
@@ -349,11 +367,11 @@ async def webhook_hotfix_priority_flow():
             target_branch="main",
             queue_label="merge_queue",
             hotfix_label="hotfix",
-            db_path=":memory:",
+            jwt_secret="a" * 64,
             webhook_secret="test-secret",
         )
 
-        # Webhook payload for hotfix MR
+        # Webhook payload for hotfix MR - action must be "labeled"
         webhook_payload = {
             "object_kind": "merge_request",
             "event_type": "merge_request",
@@ -365,11 +383,7 @@ async def webhook_hotfix_priority_flow():
                 "source_branch": "hotfix/critical",
                 "target_branch": "main",
                 "last_commit": {"id": "hotfix123"},
-                "labels": [
-                    {"title": "merge_queue"},
-                    {"title": "hotfix"},
-                ],
-                "action": "update",
+                "action": "labeled",  # Must be "labeled" for add to queue
             },
             "labels": [
                 {"title": "merge_queue"},
@@ -395,6 +409,8 @@ async def webhook_hotfix_priority_flow():
             "labels": ["merge_queue", "hotfix"],
             "author": {"id": 14, "name": "Hotfix User", "username": "hotfix_user"},
             "merge_status": "can_be_merged",
+            "has_conflicts": False,
+            "rebase_in_progress": False,
             "web_url": "https://gitlab.com/test/project/-/merge_requests/104",
         }
 
@@ -415,7 +431,7 @@ async def webhook_hotfix_priority_flow():
 
         with then("hotfix MR gets priority in queue"):
             # Verify queue order - hotfix should be first
-            queue_state = await queue.get_queue_state()
+            queue_state = await queue.get_active_queue()
             assert len(queue_state) == 2, "Both MRs should be in queue"
 
             # Get next MR should return hotfix (104) not regular (103)
@@ -429,15 +445,19 @@ async def webhook_hotfix_priority_flow():
             assert next_mr is not None
             assert next_mr.mr_iid == 103, "Regular MR should still be in queue"
 
+    # Cleanup
+    await db.close()
+
 
 @scenario()
 async def webhook_authentication_validation():
     """Test webhook authentication and validation."""
 
     with given("webhook handler with secret configured"):
-        async with test_database() as db:
-            queue = QueueManager(db)
-            await queue.ensure_schema()
+        db = Database(database_url="sqlite+aiosqlite:///:memory:")
+        await db.initialize()
+        queue = QueueManager(db)
+        await queue.ensure_schema()
 
         mock_url = get_mock_url()
 
@@ -448,7 +468,7 @@ async def webhook_authentication_validation():
             target_branch="main",
             queue_label="merge_queue",
             hotfix_label="hotfix",
-            db_path=":memory:",
+            jwt_secret="a" * 64,
             webhook_secret="correct-secret",
         )
 
@@ -461,7 +481,8 @@ async def webhook_authentication_validation():
                 "iid": 105,
                 "title": "Test Auth",
                 "state": "opened",
-                "labels": [{"title": "merge_queue"}],
+                "source_branch": "feature/auth",
+                "target_branch": "main",
                 "action": "update",
             },
         }
@@ -475,7 +496,8 @@ async def webhook_authentication_validation():
                 "iid": 106,
                 "title": "Wrong Project",
                 "state": "opened",
-                "labels": [{"title": "merge_queue"}],
+                "source_branch": "feature/wrong",
+                "target_branch": "main",
             },
         }
 
@@ -506,6 +528,9 @@ async def webhook_authentication_validation():
         assert valid_result is True, "Valid webhook should be accepted"
         assert invalid_secret_result is False, "Wrong secret should be rejected"
         assert invalid_project_result is False, "Wrong project should be rejected"
+
+    # Cleanup
+    await db.close()
 
 
 __all__ = [
