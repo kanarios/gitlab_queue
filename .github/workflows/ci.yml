@@ -70,6 +70,20 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    services:
+      jj-mock:
+        image: vedrouniverse/jj:2.10.0
+        env:
+          PORT: "8080"
+        ports:
+          - 8080:8080
+        options: >-
+          --health-cmd "curl -f http://localhost:8080/__jj__/health || exit 1"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    env:
+      JJ_MOCK_URL: http://localhost:8080
     steps:
       - uses: actions/checkout@v4
       

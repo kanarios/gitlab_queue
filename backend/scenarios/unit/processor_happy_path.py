@@ -129,7 +129,7 @@ async def process_mr_successfully():
         with when("processor runs one processing cycle"):
             # Create processor components
             gitlab_client = GitLabClient(settings)
-            notifier = MRNotifier(gitlab_client=gitlab_client, project_id=123)
+            notifier = MRNotifier(gitlab_client=gitlab_client, settings=settings)
             processor = MergeProcessor(
                 gitlab_client=gitlab_client,
                 queue_manager=queue,
@@ -257,7 +257,7 @@ async def process_mr_with_async_rebase():
     ):
         with when("processor handles async rebase"):
             gitlab_client = GitLabClient(settings)
-            notifier = MRNotifier(gitlab_client=gitlab_client, project_id=123)
+            notifier = MRNotifier(gitlab_client=gitlab_client, settings=settings)
             processor = MergeProcessor(
                 gitlab_client=gitlab_client,
                 queue_manager=queue,

@@ -110,7 +110,7 @@ async def process_mr_with_immediate_conflict():
     ):
         with when("processor attempts to rebase MR"):
             gitlab_client = GitLabClient(settings)
-            notifier = MRNotifier(gitlab_client=gitlab_client, project_id=123)
+            notifier = MRNotifier(gitlab_client=gitlab_client, settings=settings)
             processor = MergeProcessor(
                 gitlab_client=gitlab_client,
                 queue_manager=queue,
@@ -240,7 +240,7 @@ async def process_mr_with_conflict_during_rebase():
     ):
         with when("processor polls rebase status and finds conflict"):
             gitlab_client = GitLabClient(settings)
-            notifier = MRNotifier(gitlab_client=gitlab_client, project_id=123)
+            notifier = MRNotifier(gitlab_client=gitlab_client, settings=settings)
             processor = MergeProcessor(
                 gitlab_client=gitlab_client,
                 queue_manager=queue,
@@ -352,7 +352,7 @@ async def process_mr_with_conflict_after_multiple_mrs():
     ):
         with when("first MR has conflict"):
             gitlab_client = GitLabClient(settings)
-            notifier = MRNotifier(gitlab_client=gitlab_client, project_id=123)
+            notifier = MRNotifier(gitlab_client=gitlab_client, settings=settings)
             processor = MergeProcessor(
                 gitlab_client=gitlab_client,
                 queue_manager=queue,

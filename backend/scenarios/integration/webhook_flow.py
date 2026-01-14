@@ -127,7 +127,7 @@ async def webhook_mr_labeled_flow():
     ):
         with when("webhook receives MR labeled event and processor runs"):
             gitlab_client = GitLabClient(settings)
-            notifier = MRNotifier(gitlab_client=gitlab_client, project_id=123)
+            notifier = MRNotifier(gitlab_client=gitlab_client, settings=settings)
             processor = MergeProcessor(
                 gitlab_client=gitlab_client,
                 queue_manager=queue,

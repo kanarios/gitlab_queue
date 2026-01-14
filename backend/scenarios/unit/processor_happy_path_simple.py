@@ -63,6 +63,13 @@ class ProcessMRSuccessfully(vedro.Scenario):
             "state": "opened",
             "sha": "abc123",
             "labels": ["merge_queue"],
+            "source_branch": "feature/test",
+            "target_branch": "main",
+            "merge_status": "can_be_merged",
+            "has_conflicts": False,
+            "rebase_in_progress": False,
+            "author": {"id": 42, "name": "Test User", "username": "testuser"},
+            "web_url": "https://gitlab.com/test/project/-/merge_requests/42",
         }
 
         self.pipeline_data = {
@@ -101,19 +108,24 @@ class ProcessMRSuccessfully(vedro.Scenario):
         merge_matcher = jj.match("PUT", "/api/v4/projects/123/merge_requests/42/merge")
         merge_response = jj.Response(status=200, json={**self.mr_data, "state": "merged"})
 
+        # GET notes - needed for _find_bot_comment
+        get_notes_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/42/notes")
+        get_notes_response = jj.Response(status=200, json=[])
+
         comment_matcher = jj.match("POST", "/api/v4/projects/123/merge_requests/42/notes")
-        comment_response = jj.Response(status=201, json={"id": 1})
+        comment_response = jj.Response(status=201, json={"id": 1, "body": "test"})
 
         async with (
             mocked(get_mr_matcher, get_mr_response),
             mocked(rebase_matcher, rebase_response) as self.rebase_mock,
             mocked(pipelines_matcher, pipelines_response),
             mocked(merge_matcher, merge_response) as self.merge_mock,
+            mocked(get_notes_matcher, get_notes_response),
             mocked(comment_matcher, comment_response) as self.comment_mock,
         ):
             # Create processor
             gitlab_client = GitLabClient(self.settings)
-            notifier = MRNotifier(gitlab_client=gitlab_client, project_id=123)
+            notifier = MRNotifier(gitlab_client=gitlab_client, settings=self.settings)
             processor = MergeProcessor(
                 gitlab_client=gitlab_client,
                 queue_manager=self.queue,
@@ -127,22 +139,24 @@ class ProcessMRSuccessfully(vedro.Scenario):
 
             self.result = await processor._process_mr(queue_item)
 
+            # Capture mock histories before exiting context
+            self.merge_history = await self.merge_mock.fetch_history()
+            self.comment_history = await self.comment_mock.fetch_history()
+
     async def then_mr_is_successfully_merged(self):
         """Verify MR was successfully processed and merged."""
         # Check processing result
         assert self.result == ProcessingResult.SUCCESS
 
         # Verify merge was called
-        history = await self.merge_mock.fetch_history()
-        assert len(history) == 1, "Merge should have been called once"
+        assert len(self.merge_history) == 1, "Merge should have been called once"
 
         # Verify queue state
         mr_state = await self.queue.get_mr_state(42)
-        assert mr_state == "merged", f"MR should be merged, got {mr_state}"
+        assert mr_state["status"] == "merged", f"MR should be merged, got {mr_state}"
 
         # Verify at least one comment was posted
-        comment_history = await self.comment_mock.fetch_history()
-        assert len(comment_history) >= 1, "At least one comment should be posted"
+        assert len(self.comment_history) >= 1, "At least one comment should be posted"
 
     async def cleanup(self):
         """Clean up test resources."""

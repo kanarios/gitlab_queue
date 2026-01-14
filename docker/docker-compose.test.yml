@@ -5,12 +5,15 @@
 
 services:
   jj-mock:
-    image: ghcr.io/jj-mock/jj:latest
+    image: vedrouniverse/jj:2.10.0
     container_name: jj-mock-server
+    environment:
+      JJ_LOG_FORMAT: "-> $$req_method $$req_path?$$req_query\n<- $$res_code $$res_reason\n"
+      PORT: "8080"
     ports:
-      - "8080:80"
+      - "8080:8080"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80/__jj__/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/__jj__/health"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -25,9 +28,9 @@ services:
       jj-mock:
         condition: service_healthy
     environment:
-      - JJ_MOCK_URL=http://jj-mock:80
+      - JJ_MOCK_URL=http://jj-mock:8080
       - DATABASE_URL="sqlite+aiosqlite:///:memory:"
-      - GITLAB_QUEUE_GITLAB_URL=http://jj-mock:80
+      - GITLAB_QUEUE_GITLAB_URL=http://jj-mock:8080
       - GITLAB_QUEUE_GITLAB_TOKEN=test-token
       - GITLAB_QUEUE_GITLAB_PROJECT_ID=123
       - GITLAB_QUEUE_JWT_SECRET=test-secret

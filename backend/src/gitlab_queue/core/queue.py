@@ -752,9 +752,14 @@ class QueueManager:
         if isinstance(finished_at, str):
             finished_at = datetime.fromisoformat(finished_at)
 
-        labels = row.get("labels", "[]")
-        if isinstance(labels, str):
-            labels = json.loads(labels) if labels else []
+        labels_raw = row.get("labels")
+        labels: list[str]
+        if labels_raw is None:
+            labels = []
+        elif isinstance(labels_raw, str):
+            labels = json.loads(labels_raw) if labels_raw else []
+        else:
+            labels = labels_raw
 
         return QueueItem(
             mr_iid=row["iid"],
