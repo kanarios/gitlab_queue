@@ -289,6 +289,70 @@ async def create_application(settings: Settings) -> Application:
     )
 
 
+async def _stop_task_gracefully(
+    task: asyncio.Task[None] | None,
+    name: str,
+    timeout: float = 10.0,
+) -> None:
+    """Stop an asyncio task gracefully with timeout.
+
+    Args:
+        task: Task to stop (can be None).
+        name: Human-readable task name for logging.
+        timeout: Maximum seconds to wait before cancelling.
+    """
+    if task is None:
+        return
+
+    try:
+        await asyncio.wait_for(task, timeout=timeout)
+        log.info(f"{name} stopped gracefully")
+    except TimeoutError:
+        log.warning(f"{name} shutdown timeout, cancelling task")
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+    except Exception as e:
+        log.warning(f"{name} error during shutdown", error=str(e))
+
+
+def _create_webhook_server(app: Application) -> tuple[uvicorn.Server, asyncio.Task[None]]:
+    """Create and start the webhook server.
+
+    Args:
+        app: Application instance.
+
+    Returns:
+        Tuple of (uvicorn server, server task).
+    """
+    websocket_manager = WebSocketManager()
+
+    webhook_state = WebhookAppState(
+        settings=app.settings,
+        database=app.database,
+        gitlab_client=app.gitlab_client,
+        queue_manager=app.queue_manager,
+        notifier=app.notifier,
+        retry_manager=app.retry_manager,
+        health=app.health,
+        websocket_manager=websocket_manager,
+    )
+    app.health.webhook_server_running = True
+    webhook_app = create_webhook_app(webhook_state)
+
+    config = uvicorn.Config(
+        webhook_app,
+        host=app.settings.webhook_host,
+        port=app.settings.webhook_port,
+        log_level="warning",
+        access_log=False,
+    )
+    server = uvicorn.Server(config)
+    task = asyncio.create_task(server.serve())
+
+    return server, task
+
+
 async def run_application(app: Application) -> int:
     """Run the main application loop.
 
@@ -298,7 +362,6 @@ async def run_application(app: Application) -> int:
     Returns:
         Exit code (0 for success).
     """
-    # Register signal handlers
     app.shutdown_manager.register_signals()
 
     log.info(
@@ -306,26 +369,19 @@ async def run_application(app: Application) -> int:
         poll_interval=app.settings.poll_interval_seconds,
     )
 
-    # Track background tasks for proper cleanup
     webhook_server_task: asyncio.Task[None] | None = None
-    retry_processor_task: asyncio.Task[None] | None = None
-    scheduler_task: asyncio.Task[None] | None = None
-    analytics_processor_task: asyncio.Task[None] | None = None
 
     try:
-        # Run processor in background task
+        # Start all background processors
         processor_task = asyncio.create_task(app.processor.run())
         app.health.processor_running = True
 
-        # Run scheduler in background task for polling fallback
         log.info("Starting queue scheduler for polling fallback")
         scheduler_task = asyncio.create_task(app.scheduler.run())
 
-        # Run retry processor in background task
         log.info("Starting webhook retry processor")
         retry_processor_task = asyncio.create_task(app.retry_processor.run())
 
-        # Run analytics job processor in background task
         log.info("Starting analytics job processor")
         analytics_processor_task = asyncio.create_task(app.analytics_processor.run())
 
@@ -336,117 +392,39 @@ async def run_application(app: Application) -> int:
                 host=app.settings.webhook_host,
                 port=app.settings.webhook_port,
             )
-
-            # Create WebSocket manager for real-time dashboard updates
-            websocket_manager = WebSocketManager()
-
-            webhook_state = WebhookAppState(
-                settings=app.settings,
-                database=app.database,
-                gitlab_client=app.gitlab_client,
-                queue_manager=app.queue_manager,
-                notifier=app.notifier,
-                retry_manager=app.retry_manager,
-                health=app.health,
-                websocket_manager=websocket_manager,
-            )
-            app.health.webhook_server_running = True
-            webhook_app = create_webhook_app(webhook_state)
-
-            config = uvicorn.Config(
-                webhook_app,
-                host=app.settings.webhook_host,
-                port=app.settings.webhook_port,
-                log_level="warning",  # Suppress uvicorn logs, use structlog
-                access_log=False,
-            )
-            uvicorn_server = uvicorn.Server(config)
-
-            # Register server shutdown with manager
-            app.shutdown_manager.register_component(
-                "webhook_server",
-                uvicorn_server.shutdown,
-            )
-
-            # Start server in background
-            webhook_server_task = asyncio.create_task(uvicorn_server.serve())
+            uvicorn_server, webhook_server_task = _create_webhook_server(app)
+            app.shutdown_manager.register_component("webhook_server", uvicorn_server.shutdown)
 
         # Wait for shutdown signal
         reason = await app.shutdown_manager.wait_for_shutdown()
-
         log.info("Shutdown initiated", reason=reason.value)
 
-        # Signal processors to stop
+        # Signal all processors to stop
         app.processor.request_shutdown()
         app.scheduler.request_shutdown()
         app.retry_processor.request_shutdown()
         app.analytics_processor.request_shutdown()
 
-        # Wait for processors to finish current iteration with timeout
-        try:
-            await asyncio.wait_for(processor_task, timeout=app.shutdown_manager.shutdown_timeout)
-            log.info("Processor stopped gracefully")
-        except TimeoutError:
-            log.warning("Processor shutdown timeout, cancelling task")
-            processor_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await processor_task
-
-        # Wait for scheduler to finish
-        if scheduler_task is not None:
-            try:
-                await asyncio.wait_for(scheduler_task, timeout=10.0)
-                log.info("Scheduler stopped gracefully")
-            except TimeoutError:
-                log.warning("Scheduler shutdown timeout, cancelling task")
-                scheduler_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await scheduler_task
-
-        # Wait for retry processor to finish
-        if retry_processor_task is not None:
-            try:
-                await asyncio.wait_for(retry_processor_task, timeout=10.0)
-                log.info("Retry processor stopped gracefully")
-            except TimeoutError:
-                log.warning("Retry processor shutdown timeout, cancelling task")
-                retry_processor_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await retry_processor_task
-
-        # Wait for analytics processor to finish
-        if analytics_processor_task is not None:
-            try:
-                await asyncio.wait_for(analytics_processor_task, timeout=10.0)
-                log.info("Analytics processor stopped gracefully")
-            except TimeoutError:
-                log.warning("Analytics processor shutdown timeout, cancelling task")
-                analytics_processor_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await analytics_processor_task
+        # Stop all tasks gracefully
+        await _stop_task_gracefully(
+            processor_task, "Processor", app.shutdown_manager.shutdown_timeout
+        )
+        await _stop_task_gracefully(scheduler_task, "Scheduler")
+        await _stop_task_gracefully(retry_processor_task, "Retry processor")
+        await _stop_task_gracefully(analytics_processor_task, "Analytics processor")
 
         # Cleanup all components (including webhook server via registered shutdown)
         success = await app.shutdown_manager.shutdown(reason)
 
-        # Wait for webhook server task to complete after shutdown was triggered
-        if webhook_server_task is not None:
-            try:
-                await asyncio.wait_for(webhook_server_task, timeout=5.0)
-                log.debug("Webhook server stopped gracefully")
-            except TimeoutError:
-                log.warning("Webhook server shutdown timeout, cancelling task")
-                webhook_server_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await webhook_server_task
-            except Exception as e:
-                log.warning("Webhook server error during shutdown", error=str(e))
+        # Wait for webhook server task after shutdown was triggered
+        await _stop_task_gracefully(webhook_server_task, "Webhook server", timeout=5.0)
 
         if success:
             log.info("Application shutdown complete")
-            return EXIT_SUCCESS
+        else:
+            log.warning("Application shutdown completed with warnings")
 
-        log.warning("Application shutdown completed with warnings")
-        return EXIT_SUCCESS  # Still success, just logged warnings
+        return EXIT_SUCCESS
 
     except Exception as e:
         log.exception("Unexpected error in main loop", error=str(e))

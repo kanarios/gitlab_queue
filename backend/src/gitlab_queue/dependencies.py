@@ -141,32 +141,17 @@ DbTransaction = Annotated[AsyncSession, Depends(get_db_transaction)]
 # =============================================================================
 
 
-async def get_current_user(
-    authorization: str | None = Header(default=None),
-) -> dict[str, Any]:
-    """FastAPI dependency to get the current authenticated user.
-
-    Extracts the JWT token from the Authorization header, validates it,
-    and returns the user information from the token payload.
+def _extract_bearer_token(authorization: str | None) -> str:
+    """Extract bearer token from Authorization header.
 
     Args:
-        authorization: The Authorization header value (Bearer <token>).
+        authorization: Authorization header value.
 
     Returns:
-        User information dictionary from the JWT payload.
+        Token string.
 
     Raises:
-        HTTPException: 401 if no token, expired token, or invalid token.
-
-    Example:
-        ```python
-        from fastapi import Depends
-        from gitlab_queue.dependencies import CurrentUser
-
-        @app.get("/protected")
-        async def protected_endpoint(user: CurrentUser):
-            return {"message": f"Hello, {user['username']}!"}
-        ```
+        HTTPException: If header is missing or invalid.
     """
     if not authorization:
         raise HTTPException(
@@ -175,7 +160,6 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Validate Bearer token format
     parts = authorization.split()
     if len(parts) != 2 or parts[0].lower() != "bearer":
         raise HTTPException(
@@ -184,7 +168,14 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    token = parts[1]
+    return parts[1]
+
+
+async def get_current_user(
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """FastAPI dependency to get the current authenticated user."""
+    token = _extract_bearer_token(authorization)
     settings = get_settings()
 
     try:

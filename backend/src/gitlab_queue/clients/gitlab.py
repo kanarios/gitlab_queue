@@ -386,87 +386,69 @@ class GitLabClient:
             text = response.text
             return text if text else None
 
+    def _extract_error_message(self, body: dict[str, Any] | str | None, reason_phrase: str) -> str:
+        """Extract error message from response body."""
+        if isinstance(body, dict):
+            return str(body.get("message") or body.get("error") or body)
+        return body or reason_phrase
+
+    def _raise_rate_limit_error(
+        self, response: httpx.Response, body: dict[str, Any] | str | None, error_msg: str
+    ) -> None:
+        """Raise rate limit error with logging."""
+        retry_after = self._parse_retry_after(response)
+        limit, remaining, reset = self._parse_rate_limit_headers(response)
+
+        log.warning(
+            "Rate limit hit",
+            retry_after=retry_after,
+            rate_limit=limit,
+            rate_remaining=remaining,
+            rate_reset=reset,
+        )
+
+        raise GitLabRateLimitError(
+            f"Rate limit exceeded: {error_msg}",
+            status_code=429,
+            response_body=body,
+            retry_after=retry_after,
+        )
+
     def _handle_error_response(self, response: httpx.Response) -> None:
-        """Handle error responses and raise appropriate exceptions.
-
-        Args:
-            response: HTTP response to check.
-
-        Raises:
-            GitLabNotFoundError: For 404 responses.
-            GitLabConflictError: For 409 responses.
-            GitLabRateLimitError: For 429 responses.
-            GitLabServerError: For 5xx responses.
-            GitLabAPIError: For other 4xx responses.
-        """
+        """Handle error responses and raise appropriate exceptions."""
         if response.is_success:
             return
 
         status_code = response.status_code
         body = self._parse_response_body(response)
-        method = response.request.method
-        url = str(response.request.url)
-
-        # Extract error message from body if available
-        if isinstance(body, dict):
-            error_msg = body.get("message") or body.get("error") or str(body)
-        else:
-            error_msg = body or response.reason_phrase
+        error_msg = self._extract_error_message(body, response.reason_phrase)
 
         log.warning(
             "GitLab API error",
             status_code=status_code,
-            method=method,
-            url=url,
+            method=response.request.method,
+            url=str(response.request.url),
             error=error_msg,
         )
 
-        if status_code == 404:
-            raise GitLabNotFoundError(
-                f"Resource not found: {error_msg}",
-                status_code=status_code,
-                response_body=body,
-            )
+        error_map: dict[int, tuple[type[GitLabAPIError], str]] = {
+            404: (GitLabNotFoundError, "Resource not found"),
+            409: (GitLabConflictError, "Conflict"),
+        }
 
-        if status_code == 409:
-            raise GitLabConflictError(
-                f"Conflict: {error_msg}",
-                status_code=status_code,
-                response_body=body,
-            )
+        if status_code in error_map:
+            error_class, prefix = error_map[status_code]
+            raise error_class(f"{prefix}: {error_msg}", status_code=status_code, response_body=body)
 
         if status_code == 429:
-            retry_after = self._parse_retry_after(response)
-            limit, remaining, reset = self._parse_rate_limit_headers(response)
-
-            log.warning(
-                "Rate limit hit",
-                retry_after=retry_after,
-                rate_limit=limit,
-                rate_remaining=remaining,
-                rate_reset=reset,
-            )
-
-            raise GitLabRateLimitError(
-                f"Rate limit exceeded: {error_msg}",
-                status_code=status_code,
-                response_body=body,
-                retry_after=retry_after,
-            )
+            self._raise_rate_limit_error(response, body, error_msg)
 
         if 500 <= status_code < 600:
             raise GitLabServerError(
-                f"Server error: {error_msg}",
-                status_code=status_code,
-                response_body=body,
+                f"Server error: {error_msg}", status_code=status_code, response_body=body
             )
 
-        # Other 4xx errors
-        raise GitLabAPIError(
-            f"API error: {error_msg}",
-            status_code=status_code,
-            response_body=body,
-        )
+        raise GitLabAPIError(f"API error: {error_msg}", status_code=status_code, response_body=body)
 
     async def _handle_rate_limit(self, error: GitLabRateLimitError) -> None:
         """Wait for rate limit to reset.
@@ -597,14 +579,29 @@ class GitLabClient:
             path=full_path,
         )
 
-        # Check circuit breaker BEFORE attempting request
+        await self._check_circuit_breaker(method, full_path)
+        await self._apply_rate_limit_throttle()
+
+        normalized_path = normalize_endpoint(full_path)
+
+        try:
+            return await self._execute_with_retry(method, full_path, normalized_path, **kwargs)
+        except RetryError as e:
+            last_exc = e.last_attempt.exception()
+            if last_exc is not None:
+                await self._circuit_breaker.record_failure(last_exc)
+                raise last_exc from e
+            raise GitLabAPIError("Request failed after retries") from e
+
+    async def _check_circuit_breaker(self, method: str, path: str) -> None:
+        """Check circuit breaker state before request."""
         try:
             await self._circuit_breaker.before_call()
         except CircuitOpenError as e:
             log.warning(
                 "Request blocked by circuit breaker",
                 method=method,
-                path=full_path,
+                path=path,
                 retry_after=e.retry_after,
             )
             raise GitLabCircuitOpenError(
@@ -612,54 +609,55 @@ class GitLabClient:
                 retry_after=e.retry_after,
             ) from e
 
-        # Apply adaptive throttling before making request
-        await self._apply_rate_limit_throttle()
+    async def _execute_with_retry(
+        self,
+        method: str,
+        full_path: str,
+        normalized_path: str,
+        **kwargs: Any,
+    ) -> httpx.Response:
+        """Execute HTTP request with retry logic."""
+        async for attempt in AsyncRetrying(
+            retry=retry_if_exception_type((GitLabServerError, GitLabRateLimitError)),
+            stop=stop_after_attempt(self._max_retries),
+            wait=wait_exponential_jitter(initial=1, max=30, jitter=5),
+            before_sleep=log_before_retry,
+            after=log_after_retry,
+            reraise=True,
+        ):
+            with attempt:
+                response = await self._execute_single_request(
+                    method, full_path, normalized_path, **kwargs
+                )
+                return response
 
-        # Normalize endpoint for metrics (replace IDs with placeholders)
-        normalized_path = normalize_endpoint(full_path)
+        raise AssertionError("Unreachable: retry loop completed without return or exception")
+
+    async def _execute_single_request(
+        self,
+        method: str,
+        full_path: str,
+        normalized_path: str,
+        **kwargs: Any,
+    ) -> httpx.Response:
+        """Execute a single HTTP request with metrics."""
+        start_time = time.monotonic()
+        try:
+            response = await self._client.request(method, full_path, **kwargs)
+        finally:
+            duration = time.monotonic() - start_time
+            API_LATENCY.labels(method=method, endpoint=normalized_path).observe(duration)
+
+        await self._update_rate_limit_state(response)
 
         try:
-            async for attempt in AsyncRetrying(
-                retry=retry_if_exception_type((GitLabServerError, GitLabRateLimitError)),
-                stop=stop_after_attempt(self._max_retries),
-                wait=wait_exponential_jitter(initial=1, max=30, jitter=5),
-                before_sleep=log_before_retry,
-                after=log_after_retry,
-                reraise=True,
-            ):
-                with attempt:
-                    try:
-                        # Track API latency
-                        start_time = time.monotonic()
-                        try:
-                            response = await self._client.request(method, full_path, **kwargs)
-                        finally:
-                            duration = time.monotonic() - start_time
-                            API_LATENCY.labels(method=method, endpoint=normalized_path).observe(
-                                duration
-                            )
+            self._handle_error_response(response)
+        except GitLabRateLimitError as e:
+            await self._handle_rate_limit(e)
+            raise
 
-                        # Update rate limit state from ALL responses
-                        await self._update_rate_limit_state(response)
-
-                        self._handle_error_response(response)
-                        # Record success with circuit breaker
-                        await self._circuit_breaker.record_success()
-                        return response
-                    except GitLabRateLimitError as e:
-                        await self._handle_rate_limit(e)
-                        raise
-        except RetryError as e:
-            # All retries exhausted - record failure with circuit breaker
-            last_exc = e.last_attempt.exception()
-            if last_exc is not None:
-                await self._circuit_breaker.record_failure(last_exc)
-                raise last_exc from e
-            raise GitLabAPIError("Request failed after retries") from e
-
-        # This should never be reached, but needed for type checker
-        msg = "Unexpected code path in _request"
-        raise RuntimeError(msg)
+        await self._circuit_breaker.record_success()
+        return response
 
     async def get(
         self,
