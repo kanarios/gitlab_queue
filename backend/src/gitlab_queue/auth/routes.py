@@ -103,6 +103,47 @@ async def login(request: Request) -> RedirectResponse:
     return response
 
 
+def _validate_oauth_params(
+    code: str | None,
+    state: str | None,
+    oauth_state: str | None,
+    error: str | None,
+    error_description: str | None,
+) -> None:
+    """Validate OAuth callback parameters.
+
+    Args:
+        code: Authorization code from GitLab.
+        state: State parameter for CSRF validation.
+        oauth_state: State from cookie for validation.
+        error: Error code if authorization failed.
+        error_description: Human-readable error description.
+
+    Raises:
+        HTTPException: If validation fails.
+    """
+    if error:
+        log.warning(
+            "OAuth authorization failed",
+            error=error,
+            error_description=error_description,
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=f"OAuth error: {error_description or error}",
+        )
+
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing authorization code")
+
+    if not state:
+        raise HTTPException(status_code=400, detail="Missing state parameter")
+
+    if oauth_state is None or not secrets.compare_digest(state, oauth_state):
+        log.warning("OAuth state mismatch - possible CSRF attack")
+        raise HTTPException(status_code=400, detail="Invalid state parameter")
+
+
 @auth_router.post("/token")
 async def exchange_token(
     request: Request,
@@ -117,20 +158,6 @@ async def exchange_token(
     Validates the state parameter, exchanges the authorization code
     for an access token, fetches user info from GitLab, and issues
     a JWT for the dashboard.
-
-    Args:
-        request: FastAPI request object.
-        code: Authorization code from GitLab.
-        state: State parameter for CSRF validation.
-        error: Error code if authorization failed.
-        error_description: Human-readable error description.
-        oauth_state: State from cookie for validation.
-
-    Returns:
-        JSONResponse with JWT token and user info.
-
-    Raises:
-        HTTPException: Various error codes for different failure scenarios.
     """
     app_state = cast("WebhookAppState", request.app.state.webhook_state)
     oauth_config = get_oauth_config(app_state.settings)
@@ -138,34 +165,10 @@ async def exchange_token(
     if oauth_config is None:
         raise HTTPException(status_code=503, detail="OAuth not configured")
 
-    # Handle OAuth error response
-    if error:
-        log.warning(
-            "OAuth authorization failed",
-            error=error,
-            error_description=error_description,
-        )
-        raise HTTPException(
-            status_code=400,
-            detail=f"OAuth error: {error_description or error}",
-        )
+    _validate_oauth_params(code, state, oauth_state, error, error_description)
 
-    # Validate required parameters
-    if not code:
-        raise HTTPException(status_code=400, detail="Missing authorization code")
-
-    if not state:
-        raise HTTPException(status_code=400, detail="Missing state parameter")
-
-    # Validate state for CSRF protection
-    if oauth_state is None or not secrets.compare_digest(state, oauth_state):
-        log.warning("OAuth state mismatch - possible CSRF attack")
-        raise HTTPException(status_code=400, detail="Invalid state parameter")
-
-    # Exchange code for access token
-    access_token = await _exchange_code_for_token(oauth_config, code)
-
-    # Fetch user info from GitLab
+    # Exchange code for access token (code is validated above)
+    access_token = await _exchange_code_for_token(oauth_config, code)  # type: ignore[arg-type]
     user_info = await _fetch_user_info(oauth_config, access_token)
 
     # Validate project access
@@ -187,10 +190,7 @@ async def exchange_token(
             detail="Access denied: you don't have access to this project",
         )
 
-    # Add project_id to user info for JWT claims
     user_info["project_id"] = app_state.settings.gitlab_project_id
-
-    # Create JWT token
     jwt_token = create_access_token(user_info, app_state.settings)
 
     log.info(
@@ -200,7 +200,6 @@ async def exchange_token(
         project_id=app_state.settings.gitlab_project_id,
     )
 
-    # Create response and clear state cookie
     response = JSONResponse(
         content={
             "access_token": jwt_token,
@@ -219,26 +218,18 @@ async def exchange_token(
     return response
 
 
-@auth_router.get("/me")
-async def get_current_user(request: Request) -> dict[str, Any]:
-    """Get current authenticated user information.
-
-    Extracts and validates the JWT from the Authorization header
-    and returns the user information embedded in the token.
+def _extract_bearer_token(auth_header: str | None) -> str:
+    """Extract bearer token from Authorization header.
 
     Args:
-        request: FastAPI request object.
+        auth_header: Authorization header value.
 
     Returns:
-        User information from the JWT payload.
+        Token string.
 
     Raises:
-        HTTPException: 401 if no token, token expired, or invalid token.
+        HTTPException: If header is missing or invalid.
     """
-    state = cast("WebhookAppState", request.app.state.webhook_state)
-
-    # Extract token from Authorization header
-    auth_header = request.headers.get("Authorization")
     if not auth_header:
         raise HTTPException(
             status_code=401,
@@ -246,7 +237,6 @@ async def get_current_user(request: Request) -> dict[str, Any]:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Validate Bearer token format
     parts = auth_header.split()
     if len(parts) != 2 or parts[0].lower() != "bearer":
         raise HTTPException(
@@ -255,9 +245,16 @@ async def get_current_user(request: Request) -> dict[str, Any]:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    token = parts[1]
+    return parts[1]
 
-    # Decode and validate token
+
+@auth_router.get("/me")
+async def get_current_user(request: Request) -> dict[str, Any]:
+    """Get current authenticated user information."""
+    state = cast("WebhookAppState", request.app.state.webhook_state)
+
+    token = _extract_bearer_token(request.headers.get("Authorization"))
+
     try:
         payload = decode_token(token, state.settings)
     except TokenExpiredError:

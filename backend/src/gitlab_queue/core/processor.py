@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from gitlab_queue.config import Settings
     from gitlab_queue.core.notifier import MRNotifier
     from gitlab_queue.core.queue import QueueManager
+    from gitlab_queue.models.pipeline import Pipeline
     from gitlab_queue.models.queue_item import QueueItem
 
 log = get_logger(__name__)
@@ -379,15 +380,66 @@ class MergeProcessor:
     # Pipeline Step
     # =========================================================================
 
-    async def _wait_for_pipeline(self, ctx: ProcessingContext) -> ProcessingResult:
-        """Poll pipeline status until success/failure or timeout.
-
-        Args:
-            ctx: Processing context.
+    async def _handle_pipeline_failure_retry(
+        self,
+        ctx: ProcessingContext,
+        pipeline: Pipeline,
+        failed_jobs: list[str],
+        retry_count: int,
+        max_retries: int,
+    ) -> tuple[bool, datetime | None]:
+        """Handle pipeline failure with potential retry.
 
         Returns:
-            ProcessingResult indicating outcome.
+            Tuple of (should_continue, new_start_time). If should_continue is True,
+            the pipeline wait loop should continue with the new start time.
         """
+        mr_iid = ctx.mr_iid
+        sm = ctx.state_machine
+
+        if retry_count >= max_retries:
+            await sm.trigger_pipeline_failed(
+                failed_jobs=failed_jobs,
+                retry_count=retry_count,
+                error_message=f"Pipeline {pipeline.status}",
+            )
+            return False, None
+
+        log.info("Retrying pipeline", mr_iid=mr_iid, retry_count=retry_count + 1)
+
+        old_pipeline_id = pipeline.id
+        old_pipeline_url = self.notifier.build_pipeline_url(old_pipeline_id)
+
+        try:
+            await self.gitlab_client.rebase_mr(mr_iid)
+            await self._wait_for_rebase_quick(ctx)
+        except (GitLabConflictError, GitLabAPIError) as e:
+            log.exception("Retry rebase failed", mr_iid=mr_iid, error=str(e))
+            await sm.trigger_pipeline_failed(
+                failed_jobs=failed_jobs,
+                retry_count=retry_count + 1,
+                error_message=str(e),
+            )
+            return False, None
+
+        new_pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
+        if new_pipeline and new_pipeline.id != old_pipeline_id:
+            new_pipeline_url = self.notifier.build_pipeline_url(new_pipeline.id)
+            await sm.notify_pipeline_retry(
+                old_pipeline_id=old_pipeline_id,
+                old_pipeline_url=old_pipeline_url,
+                new_pipeline_id=new_pipeline.id,
+                new_pipeline_url=new_pipeline_url,
+                retry_count=retry_count + 1,
+                max_retries=max_retries,
+                failed_jobs=failed_jobs,
+            )
+            return True, datetime.now(UTC)
+
+        return False, None
+
+    async def _wait_for_pipeline(self, ctx: ProcessingContext) -> ProcessingResult:
+        """Poll pipeline status until success/failure or timeout."""
         mr_iid = ctx.mr_iid
         sm = ctx.state_machine
         timeout = timedelta(seconds=self.settings.pipeline_timeout_seconds)
@@ -395,35 +447,25 @@ class MergeProcessor:
         retry_count = 0
         max_retries = self.settings.pipeline_retry_count
 
-        log.info(
-            "Waiting for pipeline",
-            mr_iid=mr_iid,
-            timeout_seconds=timeout.total_seconds(),
-        )
+        log.info("Waiting for pipeline", mr_iid=mr_iid, timeout_seconds=timeout.total_seconds())
 
         while True:
-            # Check shutdown
             if self._shutdown_event.is_set():
                 log.info("Shutdown requested during pipeline wait", mr_iid=mr_iid)
                 return ProcessingResult.ERROR
 
-            # Check timeout
             elapsed = datetime.now(UTC) - start_time
             if elapsed > timeout:
                 log.warning(
-                    "Pipeline timeout",
-                    mr_iid=mr_iid,
-                    elapsed_seconds=elapsed.total_seconds(),
+                    "Pipeline timeout", mr_iid=mr_iid, elapsed_seconds=elapsed.total_seconds()
                 )
                 await sm.trigger_timeout(max_wait_hours=int(timeout.total_seconds() / 3600))
                 return ProcessingResult.TIMEOUT
 
-            # Check MR still in queue
             if not await self._verify_mr_in_queue(mr_iid):
                 await sm.trigger_mark_removed(reason="label_removed")
                 return ProcessingResult.REMOVED
 
-            # Get latest pipeline status
             pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
             if pipeline is None:
                 log.warning("No pipeline found", mr_iid=mr_iid)
@@ -431,10 +473,7 @@ class MergeProcessor:
                 continue
 
             log.debug(
-                "Pipeline status",
-                mr_iid=mr_iid,
-                pipeline_id=pipeline.id,
-                status=pipeline.status,
+                "Pipeline status", mr_iid=mr_iid, pipeline_id=pipeline.id, status=pipeline.status
             )
 
             if pipeline.status == "success":
@@ -443,9 +482,7 @@ class MergeProcessor:
                 return ProcessingResult.SUCCESS
 
             if pipeline.status in ("failed", "canceled"):
-                # Get failed jobs for notification and logging
                 failed_jobs = await self._get_failed_jobs(pipeline.id)
-
                 log.warning(
                     "Pipeline failed",
                     mr_iid=mr_iid,
@@ -454,57 +491,17 @@ class MergeProcessor:
                     failed_jobs=failed_jobs,
                     retry_count=retry_count,
                     max_retries=max_retries,
-                    will_retry=retry_count < max_retries,
                 )
 
-                if retry_count < max_retries:
-                    # Retry by triggering a new pipeline (re-rebase)
+                should_continue, new_start = await self._handle_pipeline_failure_retry(
+                    ctx, pipeline, failed_jobs, retry_count, max_retries
+                )
+                if should_continue and new_start:
                     retry_count += 1
-                    log.info("Retrying pipeline", mr_iid=mr_iid, retry_count=retry_count)
-
-                    old_pipeline_id = pipeline.id
-                    old_pipeline_url = self.notifier.build_pipeline_url(old_pipeline_id)
-
-                    # Trigger new rebase to create new pipeline
-                    try:
-                        await self.gitlab_client.rebase_mr(mr_iid)
-                        # Wait briefly for rebase
-                        await self._wait_for_rebase_quick(ctx)
-                    except (GitLabConflictError, GitLabAPIError) as e:
-                        log.exception("Retry rebase failed", mr_iid=mr_iid, error=str(e))
-                        await sm.trigger_pipeline_failed(
-                            failed_jobs=failed_jobs,
-                            retry_count=retry_count,
-                            error_message=str(e),
-                        )
-                        return ProcessingResult.PIPELINE_FAILED
-
-                    # Get new pipeline
-                    new_pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
-                    if new_pipeline and new_pipeline.id != old_pipeline_id:
-                        new_pipeline_url = self.notifier.build_pipeline_url(new_pipeline.id)
-                        await sm.notify_pipeline_retry(
-                            old_pipeline_id=old_pipeline_id,
-                            old_pipeline_url=old_pipeline_url,
-                            new_pipeline_id=new_pipeline.id,
-                            new_pipeline_url=new_pipeline_url,
-                            retry_count=retry_count,
-                            max_retries=max_retries,
-                            failed_jobs=failed_jobs,
-                        )
-                        # Reset start time for new pipeline
-                        start_time = datetime.now(UTC)
-                        continue
-
-                # No more retries
-                await sm.trigger_pipeline_failed(
-                    failed_jobs=failed_jobs,
-                    retry_count=retry_count,
-                    error_message=f"Pipeline {pipeline.status}",
-                )
+                    start_time = new_start
+                    continue
                 return ProcessingResult.PIPELINE_FAILED
 
-            # Pipeline still running (pending, running, etc.)
             await self._interruptible_sleep(self.settings.poll_interval_seconds)
 
     async def _wait_for_rebase_quick(self, ctx: ProcessingContext) -> None:

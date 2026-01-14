@@ -350,29 +350,46 @@ async def metrics(request: Request) -> Response:
 webhook_router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 
-@webhook_router.post("/gitlab", response_model=None)
-async def handle_gitlab_webhook(
-    request: Request,
-    x_gitlab_token: str = Header(alias="X-Gitlab-Token"),
-) -> dict[str, str] | JSONResponse:
-    """Handle incoming GitLab webhook events.
-
-    Validates the webhook token, parses the event payload, and routes
-    to the appropriate handler based on event type.
+async def _route_webhook_event(
+    state: WebhookAppState,
+    event: MergeRequestEvent | PipelineEvent,
+) -> None:
+    """Route webhook event to appropriate handler.
 
     Args:
-        request: FastAPI request object.
-        x_gitlab_token: GitLab webhook secret token from header.
+        state: Webhook application state.
+        event: Parsed webhook event.
+    """
+    if isinstance(event, MergeRequestEvent):
+        handler = MRWebhookHandler(
+            settings=state.settings,
+            gitlab_client=state.gitlab_client,
+            queue_manager=state.queue_manager,
+        )
+        await handler.handle(event)
+    elif isinstance(event, PipelineEvent):
+        pipeline_handler = PipelineWebhookHandler(
+            settings=state.settings,
+            gitlab_client=state.gitlab_client,
+            queue_manager=state.queue_manager,
+            notifier=state.notifier,
+        )
+        await pipeline_handler.handle(event)
 
-    Returns:
-        Status dict indicating event processing result.
+
+def _validate_webhook_request(
+    state: WebhookAppState,
+    x_gitlab_token: str,
+) -> None:
+    """Validate webhook token.
+
+    Args:
+        state: Webhook application state.
+        x_gitlab_token: Token from request header.
 
     Raises:
-        HTTPException: 401 if webhook token is invalid.
+        HTTPException: If validation fails.
     """
-    state: WebhookAppState = request.app.state.webhook_state
-
-    # Validate webhook token
     if state.settings.webhook_secret is None:
         log.error("Webhook secret not configured")
         raise HTTPException(status_code=500, detail="Webhook secret not configured")
@@ -384,7 +401,17 @@ async def handle_gitlab_webhook(
         log.warning("Invalid webhook token received")
         raise HTTPException(status_code=401, detail="Invalid webhook token")
 
-    # Parse event payload
+
+@webhook_router.post("/gitlab", response_model=None)
+async def handle_gitlab_webhook(
+    request: Request,
+    x_gitlab_token: str = Header(alias="X-Gitlab-Token"),
+) -> dict[str, str] | JSONResponse:
+    """Handle incoming GitLab webhook events."""
+    state: WebhookAppState = request.app.state.webhook_state
+
+    _validate_webhook_request(state, x_gitlab_token)
+
     payload = await request.json()
     event = parse_webhook_event(payload)
 
@@ -392,7 +419,6 @@ async def handle_gitlab_webhook(
         log.debug("Unknown event type ignored", object_kind=payload.get("object_kind"))
         return {"status": "ignored"}
 
-    # Validate project ID
     if event.project_id != state.settings.gitlab_project_id:
         log.debug(
             "Event for different project ignored",
@@ -401,25 +427,14 @@ async def handle_gitlab_webhook(
         )
         return {"status": "ignored"}
 
-    # Route to appropriate handler
+    # Only route MR and Pipeline events
+    if not isinstance(event, MergeRequestEvent | PipelineEvent):
+        log.debug("Unsupported event type ignored", event_type=type(event).__name__)
+        return {"status": "ignored"}
+
     try:
-        if isinstance(event, MergeRequestEvent):
-            handler = MRWebhookHandler(
-                settings=state.settings,
-                gitlab_client=state.gitlab_client,
-                queue_manager=state.queue_manager,
-            )
-            await handler.handle(event)
-        elif isinstance(event, PipelineEvent):
-            pipeline_handler = PipelineWebhookHandler(
-                settings=state.settings,
-                gitlab_client=state.gitlab_client,
-                queue_manager=state.queue_manager,
-                notifier=state.notifier,
-            )
-            await pipeline_handler.handle(event)
+        await _route_webhook_event(state, event)
     except GitLabCircuitOpenError as e:
-        # Circuit breaker is open - return 503 with Retry-After header
         log.warning(
             "Webhook handling failed: GitLab circuit open",
             event_type=type(event).__name__,
@@ -435,14 +450,12 @@ async def handle_gitlab_webhook(
             headers={"Retry-After": str(int(e.retry_after or 30))},
         )
     except Exception as e:
-        # Log error and add to retry queue
         log.exception(
             "Error handling webhook event",
             event_type=type(event).__name__,
             project_id=event.project_id,
         )
 
-        # Add to retry queue for later processing
         try:
             retry_id = await state.retry_manager.add_to_retry_queue(
                 event_type=event.object_kind,

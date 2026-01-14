@@ -122,99 +122,79 @@ class Database:
     _initialized: bool = field(default=False, init=False, repr=False)
     _init_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
 
+    def _build_engine_kwargs(self, is_memory_db: bool) -> dict[str, Any]:
+        """Build engine keyword arguments based on database type."""
+        kwargs: dict[str, Any] = {
+            "connect_args": {
+                "check_same_thread": False,
+                "timeout": 30.0,
+            },
+            "echo": self.echo,
+        }
+
+        if not is_memory_db:
+            kwargs.update(
+                {
+                    "pool_size": 1,
+                    "max_overflow": 20,
+                    "pool_timeout": 30,
+                    "pool_recycle": 3600,
+                    "pool_pre_ping": True,
+                }
+            )
+
+        return kwargs
+
+    async def _configure_sqlite_pragmas(self, conn: Any, is_memory_db: bool) -> str:
+        """Configure SQLite pragmas and return journal mode."""
+        if not is_memory_db:
+            result = await conn.execute(text("PRAGMA journal_mode=WAL"))
+            actual_mode = result.scalar()
+            if actual_mode != "wal":
+                raise DatabaseConnectionError(
+                    f"Failed to enable WAL mode. Got '{actual_mode}' instead. "
+                    "Check filesystem compatibility (network drives don't support WAL)."
+                )
+        else:
+            actual_mode = "memory"
+
+        await conn.execute(text("PRAGMA synchronous=FULL"))
+        await conn.execute(text("PRAGMA busy_timeout=30000"))
+        await conn.execute(text("PRAGMA foreign_keys=ON"))
+
+        result = await conn.execute(text("PRAGMA foreign_keys"))
+        if not result.scalar():
+            raise DatabaseConnectionError("Failed to enable foreign key constraints")
+
+        return str(actual_mode)
+
     async def initialize(self) -> None:
-        """Initialize the database engine and enable WAL mode.
-
-        Creates the async engine, enables WAL mode for concurrent reads,
-        enables foreign key constraints, and sets up the session factory.
-        Also ensures the database directory exists.
-
-        This method is thread-safe and protected by an async lock.
-
-        Raises:
-            DatabaseAlreadyInitializedError: If already initialized.
-            DatabaseConfigurationError: If database path is outside allowed directory.
-            DatabaseConnectionError: If WAL mode cannot be enabled.
-        """
+        """Initialize the database engine and enable WAL mode."""
         async with self._init_lock:
             if self._initialized:
                 raise DatabaseAlreadyInitializedError("Database is already initialized")
 
             log.info("Initializing database", database_url=self._masked_url)
-
-            # Ensure data directory exists for SQLite (with path validation)
             self._ensure_data_directory()
 
-            # Create async engine with proper pool configuration for SQLite
-            # SQLite can only have one writer at a time in WAL mode
-            # Note: In-memory databases use StaticPool which doesn't accept pool config
             is_memory_db = ":memory:" in self.database_url
-
-            engine_kwargs: dict[str, Any] = {
-                "connect_args": {
-                    "check_same_thread": False,
-                    "timeout": 30.0,  # SQLite connection timeout
-                },
-                "echo": self.echo,
-            }
-
-            # Only add pool configuration for file-based databases
-            # StaticPool (used for :memory:) doesn't accept these parameters
-            if not is_memory_db:
-                engine_kwargs.update(
-                    {
-                        "pool_size": 1,  # SQLite: single writer
-                        "max_overflow": 20,  # Allow queue of waiting connections
-                        "pool_timeout": 30,  # Wait up to 30s for connection
-                        "pool_recycle": 3600,  # Recycle connections every hour
-                        "pool_pre_ping": True,  # Validate connections before use
-                    }
-                )
-
+            engine_kwargs = self._build_engine_kwargs(is_memory_db)
             self._engine = create_async_engine(self.database_url, **engine_kwargs)
 
-            # Enable WAL mode, foreign keys, and configure durability
             async with self._engine.begin() as conn:
-                # Set journal mode and verify (skip for in-memory databases)
-                if not is_memory_db:
-                    result = await conn.execute(text("PRAGMA journal_mode=WAL"))
-                    actual_mode = result.scalar()
-                    if actual_mode != "wal":
-                        raise DatabaseConnectionError(
-                            f"Failed to enable WAL mode. Got '{actual_mode}' instead. "
-                            "Check filesystem compatibility (network drives don't support WAL)."
-                        )
-                else:
-                    actual_mode = "memory"  # In-memory databases don't support WAL
-
-                # FULL synchronous mode for durability (prevents data loss on crash)
-                await conn.execute(text("PRAGMA synchronous=FULL"))
-
-                # Longer timeout to handle contention
-                await conn.execute(text("PRAGMA busy_timeout=30000"))
-
-                # Enable foreign key constraints for referential integrity
-                await conn.execute(text("PRAGMA foreign_keys=ON"))
-
-                # Verify foreign keys are enabled
-                result = await conn.execute(text("PRAGMA foreign_keys"))
-                fk_enabled = result.scalar()
-                if not fk_enabled:
-                    raise DatabaseConnectionError("Failed to enable foreign key constraints")
-
+                actual_mode = await self._configure_sqlite_pragmas(conn, is_memory_db)
                 log.debug(
                     "Database configuration verified",
                     journal_mode=actual_mode,
                     synchronous="FULL",
-                    foreign_keys=bool(fk_enabled),
+                    foreign_keys=True,
                 )
 
-            # Create session factory with explicit control
             self._session_factory = async_sessionmaker(
                 self._engine,
                 class_=AsyncSession,
                 expire_on_commit=False,
-                autoflush=False,  # Explicit flush control
+                autoflush=False,
             )
 
             self._initialized = True

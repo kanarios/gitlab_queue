@@ -14,3 +14,10 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
+
+      - id: pyscn
+        name: pyscn
+        entry: bash -c 'cd backend && pyscn check --select complexity,deadcode --skip-clones src/'
+        language: system
+        types: [python]
+        pass_filenames: false
