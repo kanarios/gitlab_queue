@@ -7,9 +7,10 @@ operations based on label changes and MR state transitions.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from gitlab_queue.core.state_machine import create_state_machine_for_mr
+from gitlab_queue.models.events import MergeRequestEvent, PipelineEvent
 from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -17,7 +18,6 @@ if TYPE_CHECKING:
     from gitlab_queue.config import Settings
     from gitlab_queue.core.notifier import MRNotifier
     from gitlab_queue.core.queue import QueueManager
-    from gitlab_queue.models.events import MergeRequestEvent, PipelineEvent
 
 log = get_logger(__name__)
 
@@ -444,7 +444,99 @@ class PipelineWebhookHandler:
         )
 
 
+@dataclass
+class WebhookHandler:
+    """Unified webhook handler for integration tests.
+
+    Combines MRWebhookHandler and PipelineWebhookHandler functionality
+    for backward compatibility with integration tests.
+
+    Attributes:
+        queue_manager: Queue manager for MR operations.
+        gitlab_client: GitLab API client.
+        settings: Application configuration.
+        notifier: Optional MR notifier for state machine notifications.
+    """
+
+    queue_manager: QueueManager
+    gitlab_client: GitLabClient
+    settings: Settings
+    notifier: MRNotifier | None = None
+
+    async def handle_merge_request_event(self, webhook_payload: dict[str, Any]) -> None:
+        """Handle merge request webhook event.
+
+        Args:
+            webhook_payload: Raw webhook payload dict.
+        """
+        from gitlab_queue.models.retorts import parse_webhook_event
+
+        event = parse_webhook_event(webhook_payload)
+        if isinstance(event, MergeRequestEvent):
+            handler = MRWebhookHandler(
+                settings=self.settings,
+                gitlab_client=self.gitlab_client,
+                queue_manager=self.queue_manager,
+            )
+            await handler.handle(event)
+
+    async def handle_pipeline_event(self, webhook_payload: dict[str, Any]) -> None:
+        """Handle pipeline webhook event.
+
+        Args:
+            webhook_payload: Raw webhook payload dict.
+        """
+        from gitlab_queue.models.retorts import parse_webhook_event
+
+        if self.notifier is None:
+            from gitlab_queue.core.notifier import MRNotifier
+
+            self.notifier = MRNotifier(
+                gitlab_client=self.gitlab_client,
+                project_id=self.settings.gitlab_project_id,
+            )
+
+        event = parse_webhook_event(webhook_payload)
+        if isinstance(event, PipelineEvent):
+            handler = PipelineWebhookHandler(
+                settings=self.settings,
+                gitlab_client=self.gitlab_client,
+                queue_manager=self.queue_manager,
+                notifier=self.notifier,
+            )
+            await handler.handle(event)
+
+    async def validate_webhook(
+        self, payload: dict[str, Any], secret_token: str | None = None
+    ) -> bool:
+        """Validate webhook authenticity and project ID.
+
+        Args:
+            payload: Webhook payload.
+            secret_token: Secret token from webhook headers.
+
+        Returns:
+            True if webhook is valid, False otherwise.
+        """
+        from gitlab_queue.models.events import validate_webhook_token
+
+        # Validate secret if configured
+        if self.settings.webhook_secret:
+            if not secret_token:
+                return False
+            if not validate_webhook_token(
+                secret_token,
+                self.settings.webhook_secret.get_secret_value(),
+            ):
+                return False
+
+        # Validate project ID
+        project_id = payload.get("project", {}).get("id")
+        return project_id == self.settings.gitlab_project_id
+
+
 __all__: list[str] = [
     "MRWebhookHandler",
     "PipelineWebhookHandler",
+    "WebhookHandler",
 ]

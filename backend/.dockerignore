@@ -1,0 +1,61 @@
+# Git
+.git/
+.gitignore
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Testing
+scenarios/
+tests/
+.coverage
+htmlcov/
+.pytest_cache/
+.vedro/
+
+# Type checking and linting
+.mypy_cache/
+.ruff_cache/
+
+# Documentation (keep README.md for pyproject.toml)
+*.md
+!README.md
+docs/
+
+# Environment files (use env_file in docker-compose)
+.env
+.env.*
+!.env.example
+
+# SQLite database files (mounted as volume)
+data/*.db
+data/*.db-shm
+data/*.db-wal
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db

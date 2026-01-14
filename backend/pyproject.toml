@@ -30,6 +30,7 @@ dependencies = [
     "adaptix>=3.0.0b10",
     "structlog>=24.0",
     "apscheduler>=3.10",
+    "prometheus-client>=0.21.0",
 ]
 
 [project.optional-dependencies]
@@ -40,6 +41,9 @@ dev = [
     "jj>=2.13",
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
+    "watchfiles>=1.0",
+    "pre-commit>=4.0",
+    "coverage[toml]>=7.0",
 ]
 
 [build-system]

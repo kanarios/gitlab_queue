@@ -1210,7 +1210,7 @@ webhook_retort = Retort(
 
 ### Phase 3: Error Handling & Recovery (Tasks 23-30)
 
-#### Task 23: Retry Logic with Tenacity
+#### [DONE] Task 23: Retry Logic with Tenacity
 
 **Файлы:** `src/gitlab_queue/utils/retry.py`
 
@@ -1230,7 +1230,7 @@ webhook_retort = Retort(
 
 ---
 
-#### Task 24: Circuit Breaker
+#### [DONE] Task 24: Circuit Breaker
 
 **Файлы:** `src/gitlab_queue/clients/gitlab.py`
 
@@ -1248,7 +1248,7 @@ webhook_retort = Retort(
 
 ---
 
-#### Task 25: Conflict Detection & Reporting
+#### [DONE] Task 25: Conflict Detection & Reporting
 
 **Файлы:** `src/gitlab_queue/core/processor.py`
 
@@ -1266,7 +1266,7 @@ webhook_retort = Retort(
 
 ---
 
-#### Task 26: Pipeline Failure Handling
+#### [DONE] Task 26: Pipeline Failure Handling
 
 **Файлы:** `src/gitlab_queue/core/processor.py`
 
@@ -1284,7 +1284,7 @@ webhook_retort = Retort(
 
 ---
 
-#### Task 27: State Recovery After Restart
+#### [DONE] Task 27: State Recovery After Restart
 
 **Файлы:** `src/gitlab_queue/core/processor.py`
 
@@ -1304,7 +1304,7 @@ webhook_retort = Retort(
 
 ---
 
-#### Task 28: Timeout Handling
+#### [DONE] Task 28: Timeout Handling
 
 **Файлы:** `src/gitlab_queue/core/processor.py`
 
@@ -1321,7 +1321,7 @@ webhook_retort = Retort(
 
 ---
 
-#### Task 29: Rate Limit Handling
+#### [DONE] Task 29: Rate Limit Handling
 
 **Файлы:** `src/gitlab_queue/clients/gitlab.py`
 
@@ -1339,7 +1339,7 @@ webhook_retort = Retort(
 
 ---
 
-#### Task 30: Graceful Degradation
+#### [DONE] Task 30: Graceful Degradation
 
 **Файлы:** `src/gitlab_queue/main.py`
 
@@ -1358,7 +1358,7 @@ webhook_retort = Retort(
 
 ### Phase 4: Monitoring & Operations (Tasks 31-38)
 
-#### Task 31: Structured Logging Enhancement
+#### [DONE] Task 31: Structured Logging Enhancement
 
 **Файлы:** `src/gitlab_queue/utils/logging.py`
 
@@ -1376,7 +1376,7 @@ webhook_retort = Retort(
 
 ---
 
-#### Task 32: MR Comments Template System (обязательная обратная связь)
+#### [DONE] Task 32: MR Comments Template System (обязательная обратная связь)
 
 **Файлы:** `src/gitlab_queue/utils/comments.py`, `src/gitlab_queue/core/notifier.py`
 
@@ -1633,7 +1633,7 @@ class MRStateMachine:
 
 ---
 
-#### Task 33: Health Check Endpoint
+#### [DONE] Task 33: Health Check Endpoint
 
 **Файлы:** `src/gitlab_queue/webhooks/router.py`
 
@@ -1649,7 +1649,7 @@ class MRStateMachine:
 
 ---
 
-#### Task 34: Prometheus Metrics (Optional)
+#### [DONE] Task 34: Prometheus Metrics (Optional)
 
 **Файлы:** `src/gitlab_queue/utils/metrics.py`
 
@@ -1668,7 +1668,7 @@ class MRStateMachine:
 
 ---
 
-#### Task 35: Queue Status Dashboard Data
+#### [DONE] Task 35: Queue Status Dashboard Data
 
 **Файлы:** `src/gitlab_queue/core/queue.py`
 
@@ -1686,7 +1686,7 @@ class MRStateMachine:
 
 ---
 
-#### Task 36: Docker Setup
+#### [DONE] Task 36: Docker Setup
 
 **Файлы:** `docker/Dockerfile`, `docker/docker-compose.yml`
 
@@ -1706,7 +1706,7 @@ class MRStateMachine:
 
 ---
 
-#### Task 37: README Documentation
+#### [DONE] Task 37: README Documentation
 
 **Файлы:** `README.md`
 
@@ -1729,7 +1729,7 @@ class MRStateMachine:
 
 ---
 
-#### Task 38: Development Tooling
+#### [DONE] Task 38: Development Tooling
 
 **Файлы:** `scripts/dev.sh`, `Makefile`
 
@@ -1773,7 +1773,7 @@ test-changed:
 > **Vedro** — BDD-style тестовый фреймворк с нативной поддержкой async.
 > Документация: https://vedro.io/docs/quick-start
 
-#### Task 39: Vedro Test Infrastructure
+#### [DONE] Task 39: Vedro Test Infrastructure
 
 **Файлы:** `vedro.cfg.py`, `scenarios/contexts/`, `pyproject.toml`
 
@@ -1885,7 +1885,7 @@ docker run -p 8080:80 ghcr.io/jj-mock/jj
 
 ---
 
-#### Task 40: Queue Manager Scenarios
+#### [DONE] Task 40: Queue Manager Scenarios
 
 **Файлы:** `scenarios/unit/queue_*.py`
 
@@ -1923,7 +1923,7 @@ async def add_mr_to_empty_queue():
 
 ---
 
-#### Task 41: State Machine Scenarios
+#### [DONE] Task 41: State Machine Scenarios
 
 **Файлы:** `scenarios/unit/state_machine_*.py`
 
@@ -1967,7 +1967,7 @@ async def invalid_transition_raises_error():
 
 ---
 
-#### Task 42: GitLab Client Scenarios (с JJ Remote Mock)
+#### [DONE] Task 42: GitLab Client Scenarios (с JJ Remote Mock)
 
 **Файлы:** `scenarios/unit/gitlab_client_*.py`, `scenarios/contexts/jj_gitlab_mock.py`
 
@@ -2067,7 +2067,7 @@ async def rebase_sends_correct_request():
 
 ---
 
-#### Task 43: Processor Scenarios (с JJ Remote Mock)
+#### [DONE] Task 43: Processor Scenarios (с JJ Remote Mock)
 
 **Файлы:** `scenarios/unit/processor_*.py`
 
@@ -2176,14 +2176,14 @@ async def process_mr_with_conflict():
 - `processor_shutdown.py` — Graceful shutdown
 
 **Acceptance Criteria:**
-- [ ] Full flow tested с real HTTP через JJ mock
-- [ ] All error paths tested через JJ response status codes
-- [ ] Request history verification через `mock.fetch_history()`
-- [ ] Graceful shutdown tested
+- [x] Full flow tested с real HTTP через JJ mock
+- [x] All error paths tested через JJ response status codes
+- [x] Request history verification через `mock.fetch_history()`
+- [x] Graceful shutdown tested
 
 ---
 
-#### Task 44: Integration Scenarios - Webhook Flow (с JJ Remote Mock)
+#### [DONE] Task 44: Integration Scenarios - Webhook Flow (с JJ Remote Mock)
 
 **Файлы:** `scenarios/integration/webhook_*.py`
 
@@ -2311,7 +2311,7 @@ async def pipeline_success_triggers_merge():
 
 ---
 
-#### Task 45: Integration Scenarios - Full Flow (с JJ Remote Mock)
+#### [DONE] Task 45: Integration Scenarios - Full Flow (с JJ Remote Mock)
 
 **Файлы:** `scenarios/integration/full_flow_*.py`
 
@@ -2550,7 +2550,7 @@ test-jj-down:
 
 ### Phase 6: Database Layer (Tasks 46-50)
 
-#### Task 46: SQLite + SQLAlchemy Setup
+#### [DONE] Task 46: SQLite + SQLAlchemy Setup
 
 **Файлы:** `backend/src/gitlab_queue/db/database.py`, `backend/pyproject.toml`
 
@@ -2561,14 +2561,14 @@ test-jj-down:
 - Создать `db/database.py` с async session factory
 
 **Acceptance Criteria:**
-- [ ] `aiosqlite` и `sqlalchemy` установлены
-- [ ] Async engine с WAL mode работает
-- [ ] Alembic настроен для миграций
-- [ ] Session factory создает async sessions
+- [x] `aiosqlite` и `sqlalchemy` установлены
+- [x] Async engine с WAL mode работает
+- [x] Alembic настроен для миграций
+- [x] Session factory создает async sessions
 
 ---
 
-#### Task 47: Database Models
+#### [DONE] Task 47: Database Models
 
 **Файлы:** `backend/src/gitlab_queue/db/models.py`
 
@@ -2588,7 +2588,7 @@ test-jj-down:
 
 ---
 
-#### Task 48: Repository Pattern
+#### [DONE] Task 48: Repository Pattern
 
 **Файлы:** `backend/src/gitlab_queue/db/repositories.py`
 
@@ -2636,7 +2636,7 @@ test-jj-down:
 
 ---
 
-#### Task 49: Migrate Queue Logic to SQLite
+#### [DONE] Task 49: Migrate Queue Logic to SQLite
 
 **Файлы:** `backend/src/gitlab_queue/core/queue.py`
 
@@ -2652,7 +2652,7 @@ test-jj-down:
 
 ---
 
-#### Task 50: Data Retention & Analytics Jobs
+#### [DONE] Task 50: Data Retention & Analytics Jobs
 
 **Файлы:** `backend/src/gitlab_queue/jobs/analytics.py`, `backend/src/gitlab_queue/jobs/cleanup.py`
 
@@ -2723,7 +2723,7 @@ test-jj-down:
 
 ### Phase 7: GitLab OAuth (Tasks 51-53)
 
-#### Task 51: OAuth Configuration
+#### [DONE] Task 51: OAuth Configuration
 
 **Файлы:** `backend/src/gitlab_queue/auth/oauth.py`, `README.md`
 
@@ -2739,7 +2739,7 @@ test-jj-down:
 
 ---
 
-#### Task 52: Auth Endpoints
+#### [DONE] Task 52: Auth Endpoints
 
 **Файлы:** `backend/src/gitlab_queue/auth/oauth.py`, `backend/src/gitlab_queue/api/routes.py`
 
@@ -2764,7 +2764,7 @@ POST /auth/logout                  → Invalidate session
 
 ---
 
-#### Task 53: JWT & Middleware
+#### [DONE] Task 53: JWT & Middleware
 
 **Файлы:** `backend/src/gitlab_queue/auth/jwt.py`, `backend/src/gitlab_queue/auth/middleware.py`
 
@@ -2782,7 +2782,7 @@ POST /auth/logout                  → Invalidate session
 
 ### Phase 8: Dashboard API (Tasks 54-58)
 
-#### Task 54: REST API Routes
+#### [DONE] Task 54: REST API Routes
 
 **Файлы:** `backend/src/gitlab_queue/api/routes.py`
 
@@ -2816,7 +2816,7 @@ GET  /api/analytics/failure-reasons → { reason, count, percentage }[]
 
 ---
 
-#### Task 55: WebSocket Manager
+#### [DONE] Task 55: WebSocket Manager
 
 **Файлы:** `backend/src/gitlab_queue/api/websocket.py`
 
@@ -2853,7 +2853,7 @@ WS /ws/queue
 
 ---
 
-#### Task 56: API Schemas
+#### [DONE] Task 56: API Schemas
 
 **Файлы:** `backend/src/gitlab_queue/api/schemas.py`
 
@@ -2869,21 +2869,21 @@ WS /ws/queue
 
 ---
 
-#### Task 57: CORS Configuration
+#### [DONE] Task 57: CORS Configuration
 
-**Файлы:** `backend/src/gitlab_queue/main.py`
+**Файлы:** `backend/src/gitlab_queue/webhooks/router.py`
 
 **Действия:**
 - CORS для frontend origin
 - Credentials support для cookies/JWT
 
 **Acceptance Criteria:**
-- [ ] CORS позволяет frontend origin
-- [ ] Credentials передаются
+- [x] CORS позволяет frontend origin
+- [x] Credentials передаются
 
 ---
 
-#### Task 58: API Testing
+#### [DONE] Task 58: API Testing
 
 **Файлы:** `backend/scenarios/integration/api_*.py`
 
@@ -2899,108 +2899,370 @@ WS /ws/queue
 
 ---
 
-### Phase 9: Frontend Integration (Tasks 59-64)
+### Phase 9: Frontend Integration (Tasks 59-70)
 
-#### Task 59: Frontend Project Setup
+> **Обновлено:** 2025-12-07 — расширено с 6 до 12 задач для production-ready качества.
+> **Решения:** snake_case напрямую (как в backend), Vitest + RTL (без E2E Playwright).
+
+#### Выявленные несоответствия типов
+
+| Frontend (types.ts) | Backend (schemas.py) | Действие |
+|---------------------|---------------------|----------|
+| `author.avatar` | `author.avatar_url` | Переименовать |
+| `iid` | `mr_iid` | Переименовать |
+| `targetBranch` | `target_branch` | Переименовать |
+| `isHotfix` | `is_hotfix` | Переименовать |
+| `queuedAt` | `queued_at` | Переименовать |
+| `startedAt` | `started_at` | Переименовать |
+| `finishedAt` | `finished_at` | Переименовать |
+| `failureReason` | `failure_reason` | Переименовать |
+| `pipeline.jobs_failed` | ❌ не существует | **УДАЛИТЬ** |
+| `pipeline.duration_seconds` | ❌ не существует | **УДАЛИТЬ** |
+
+---
+
+#### [DONE] Task 59: Project Foundation & Cleanup
 
 **Файлы:** `frontend/`
 
 **Действия:**
-- Переместить `design/dashboard/` → `frontend/`
-- Настроить Vite proxy для API
-- Environment variables (API_URL)
+1. Переместить `design/gitlab-queue-commander/` → `frontend/`
+2. Удалить `mockData.ts` полностью
+3. Удалить simulation logic из `App.tsx` (строки 27-96)
+4. Удалить simulation buttons из `Dashboard.tsx`
+5. Настроить strict TypeScript (`tsconfig.json`: strict, noImplicitAny, strictNullChecks)
+6. Добавить ESLint + Prettier
+7. Создать `.env.example` с `VITE_API_URL`, `VITE_WS_URL`, `VITE_GITLAB_URL`
 
 **Acceptance Criteria:**
-- [ ] Frontend проект работает
-- [ ] Vite proxy настроен
-- [ ] Env variables загружаются
+- [ ] Нет файлов с mock данными
+- [ ] `npm run build` проходит без ошибок
+- [ ] TypeScript strict mode включен
+- [ ] ESLint проходит без warnings
 
 ---
 
-#### Task 60: Auth Integration
+#### [DONE] Task 60: Type Synchronization with Backend
 
-**Файлы:** `frontend/src/auth/`
+**Файлы:** `frontend/src/types.ts`
+
+**Решение:** Использовать snake_case напрямую во frontend (как в backend) — без трансформации.
 
 **Действия:**
-- Login page с GitLab OAuth button
-- JWT storage (localStorage или httpOnly cookie)
-- Auth context/hook
-- Protected routes
+1. Переименовать все поля в snake_case (соответствие backend schemas.py)
+2. Удалить несуществующие поля (`jobs_failed`, `duration_seconds`)
+3. Добавить WebSocket event types с discriminated unions
+4. Добавить nullable типы (`| null`) где backend возвращает null
+
+**Новые типы:**
+```typescript
+export type MRStatus =
+  | 'queued' | 'rebasing' | 'testing' | 'merging'
+  | 'merged' | 'failed' | 'conflict' | 'timeout' | 'removed';
+
+export interface Author {
+  name: string;
+  username: string;
+  avatar_url: string | null;
+}
+
+export interface PipelineInfo {
+  id: number;
+  status: string | null;
+}
+
+export interface MergeRequest {
+  mr_iid: number;
+  title: string;
+  author: Author;
+  status: MRStatus;
+  labels: string[];
+  is_hotfix: boolean;
+  queued_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  target_branch: string;
+  pipeline: PipelineInfo | null;
+  failure_reason: string | null;
+}
+
+export type WSEvent =
+  | { type: 'queue:updated'; data: { queue: MergeRequest[] } }
+  | { type: 'mr:status_changed'; data: { iid: number; old_status: string; new_status: string } }
+  | { type: 'mr:completed'; data: { iid: number; status: string; finished_at: string } };
+```
 
 **Acceptance Criteria:**
-- [ ] Login page работает
-- [ ] JWT хранится безопасно
-- [ ] Protected routes redirect на login
+- [ ] Все поля переименованы в snake_case
+- [ ] `jobs_failed` и `duration_seconds` удалены
+- [ ] Nullable поля типизированы как `| null`
+- [ ] WebSocket events имеют type guards
+- [ ] `npm run build` проходит без type errors
 
 ---
 
-#### Task 61: API Client Layer
+#### [DONE] Task 61: Authentication Flow
 
-**Файлы:** `frontend/src/api/client.ts`, `frontend/src/api/websocket.ts`
+**Файлы:** `frontend/src/auth/`, `frontend/src/pages/Login.tsx`, `frontend/src/pages/AuthCallback.tsx`
+
+**Решение по Token Storage:** `localStorage` (backend возвращает token в response body)
 
 **Действия:**
-- Fetch wrapper с JWT header
-- WebSocket client с reconnect и auth
-- TypeScript types matching backend schemas
+1. Создать `auth/storage.ts` — getToken, setToken, clearToken
+2. Создать `auth/api.ts` — login redirect, callback handler, getCurrentUser, logout
+3. Создать `pages/Login.tsx` — страница с кнопкой "Login with GitLab"
+4. Создать `pages/AuthCallback.tsx` — обработка `/auth/callback`
+5. Добавить auth check в `App.tsx` при mount
+6. Обработать OAuth ошибки (user denied, invalid state, network error)
 
 **Acceptance Criteria:**
-- [ ] API client с JWT
-- [ ] WebSocket с reconnect
-- [ ] Types синхронизированы с backend
+- [ ] Login redirect работает
+- [ ] Callback обрабатывает success и error cases
+- [ ] Token сохраняется в localStorage
+- [ ] `/auth/me` вызывается при mount для валидации
+- [ ] Expired token → redirect to login
+- [ ] Loading state во время auth check
 
 ---
 
-#### Task 62: Connect Dashboard Page
+#### [DONE] Task 62: API Client Layer
+
+**Файлы:** `frontend/src/api/`
+
+**Действия:**
+1. Создать `api/client.ts` — базовый fetch wrapper с JWT header
+2. Создать `api/history.ts` — getHistory, getHistoryItem
+3. Создать `api/analytics.ts` — getSummary, getHourly, getOutcomes, getFailureReasons
+4. Создать `api/queue.ts` — getQueue, getQueueStats
+5. Добавить 401 interceptor → logout + redirect
+6. Добавить request cancellation через AbortController
+
+**Acceptance Criteria:**
+- [ ] Все API endpoints типизированы
+- [ ] 401 → automatic logout и redirect
+- [ ] Errors трансформируются в типизированные ApiError
+- [ ] Request cancellation работает
+
+---
+
+#### [DONE] Task 63: WebSocket Integration
+
+**Файлы:** `frontend/src/api/websocket.ts`, `frontend/src/hooks/useWebSocket.ts`
+
+**Действия:**
+1. Создать WebSocket manager class с state machine
+2. Реализовать exponential backoff reconnect (1s, 2s, 4s, 8s, max 30s)
+3. Типизировать все events через discriminated unions
+4. Добавить connection state: connecting | connected | disconnected | error
+5. Создать React hook `useWebSocket()`
+
+**Acceptance Criteria:**
+- [ ] Reconnect с exponential backoff
+- [ ] Auth errors (code 1008) не reconnect
+- [ ] Connection state доступен в UI
+- [ ] Type guards для всех event types
+- [ ] Disconnect при logout
+
+---
+
+#### [DONE] Task 64: Dashboard Page Integration
 
 **Файлы:** `frontend/src/pages/Dashboard.tsx`
 
 **Действия:**
-- Заменить mock данные на API calls
-- WebSocket подписка
-- Loading/error states
+1. Удалить simulation props и buttons
+2. Подключить WebSocket для real-time updates
+3. Заменить hardcoded URL на configurable `${VITE_GITLAB_URL}/project/-/merge_requests/${iid}`
+4. Вычислять duration из `started_at` timestamp
+5. Добавить loading skeleton при initial load
+6. Добавить connection status indicator
 
 **Acceptance Criteria:**
-- [ ] Dashboard показывает реальные данные
-- [ ] WebSocket обновляет UI
-- [ ] Loading/error states работают
+- [ ] Нет simulation buttons
+- [ ] WebSocket updates отображаются в реальном времени
+- [ ] Duration обновляется каждую секунду
+- [ ] GitLab URL configurable через env
+- [ ] Loading skeleton при первой загрузке
 
 ---
 
-#### Task 63: Connect History & Analytics Pages
+#### [DONE] Task 65: History Page Integration
 
-**Файлы:** `frontend/src/pages/History.tsx`, `frontend/src/pages/Analytics.tsx`
+**Файлы:** `frontend/src/pages/History.tsx`
 
 **Действия:**
-- History: pagination, search
-- Analytics: API calls для метрик
-- Error boundaries
+1. Удалить client-side filtering
+2. Добавить server-side pagination через `?page=&per_page=`
+3. Добавить server-side search через `?search=`
+4. Добавить status filter через `?status=`
+5. Debounce search input (300ms)
+6. Sync filters с URL query params
 
 **Acceptance Criteria:**
-- [ ] History с пагинацией
-- [ ] Analytics с реальными метриками
-- [ ] Error handling
+- [ ] Нет client-side filtering
+- [ ] Pagination работает (next/prev pages)
+- [ ] Search debounced и cancellable
+- [ ] Filters сохраняются в URL
 
 ---
 
-#### Task 64: Logout & Session Expiry
+#### [DONE] Task 66: Analytics Page Integration
 
-**Файлы:** `frontend/src/auth/`
+**Файлы:** `frontend/src/pages/Analytics.tsx`
 
 **Действия:**
-- Logout button
-- JWT expiry handling
-- Redirect to login on 401
+1. Удалить `generateAnalyticsData()` и hardcoded pieData
+2. Удалить hardcoded failure reasons array
+3. Fetch данные параллельно: summary, hourly, outcomes, failure-reasons
+4. Transform data для Recharts format
+5. Конвертировать `avg_wait_time_seconds` → minutes для display
+6. Добавить time range selector (7d, 30d, 90d)
+7. Loading skeleton для каждого chart отдельно
 
 **Acceptance Criteria:**
-- [ ] Logout работает
-- [ ] JWT expiry обрабатывается
-- [ ] 401 redirect на login
+- [ ] Все данные из реальных API endpoints
+- [ ] Parallel fetching для performance
+- [ ] Time range selector работает
+- [ ] Partial failure handling
+- [ ] Правильная конвертация units (seconds → minutes)
 
 ---
 
-### Phase 10: Docker & Deployment (Tasks 65-67)
+#### [DONE] Task 67: Error Handling & Loading States
 
-#### Task 65: Multi-stage Frontend Build
+**Файлы:** `frontend/src/components/`
+
+**Действия:**
+1. Создать `ErrorBoundary.tsx` — global error boundary
+2. Создать `ErrorDisplay.tsx` — компонент отображения ошибок
+3. Создать `LoadingSkeleton.tsx` — скелетоны для queue, history, charts
+4. Создать `ConnectionIndicator.tsx` — WebSocket status badge
+5. Добавить toast notifications для transient errors
+6. Добавить retry button для failed requests
+
+**Acceptance Criteria:**
+- [ ] Unhandled errors не crash'ат приложение
+- [ ] User видит понятное сообщение об ошибке
+- [ ] Retry button позволяет повторить
+- [ ] Loading skeletons для всех async data
+- [ ] Connection status виден пользователю
+
+---
+
+#### [DONE] Task 68: Layout & Configuration
+
+**Файлы:** `frontend/src/components/Layout.tsx`, `frontend/src/config.ts`
+
+**Действия:**
+1. Создать `config.ts` — centralized configuration
+2. Удалить hardcoded "MergeBot", version, status из Layout
+3. Добавить user info в header (из `/auth/me`)
+4. Добавить logout button
+5. Health status — fetch из `/health` или `/ready`
+
+**Acceptance Criteria:**
+- [ ] Нет hardcoded strings в Layout
+- [ ] User info отображается в header
+- [ ] Logout button работает
+- [ ] Config values из environment variables
+
+---
+
+#### [DONE] Task 69: Accessibility & Dark Mode
+
+**Файлы:** All components
+
+**Действия:**
+1. Добавить ARIA labels ко всем interactive elements
+2. Добавить keyboard navigation (Tab, Enter, Escape)
+3. Добавить focus indicators
+4. Fix dark mode — detect system preference
+5. Persist dark mode preference в localStorage
+6. Добавить `prefers-reduced-motion` support для Framer Motion
+
+**Acceptance Criteria:**
+- [ ] Keyboard navigation работает везде
+- [ ] Screen reader читает контент корректно
+- [ ] Dark mode respects system preference
+- [ ] Dark mode preference persisted
+- [ ] Animations отключаются при `prefers-reduced-motion`
+
+---
+
+#### [DONE] Task 70: Testing Setup
+
+**Файлы:** `frontend/src/__tests__/`, `frontend/vitest.config.ts`
+
+**Действия:**
+1. Настроить Vitest + React Testing Library
+2. Написать тесты для auth flow
+3. Написать тесты для API client (с mock fetch)
+4. Написать тесты для WebSocket reconnect logic
+5. Написать тесты для data transformers
+6. Настроить coverage reports (target: 80% на business logic)
+
+**Acceptance Criteria:**
+- [ ] Vitest настроен и работает
+- [ ] Auth flow покрыт тестами
+- [ ] WebSocket logic покрыта тестами
+- [ ] Coverage ≥80% на utils и business logic
+
+---
+
+#### Структура файлов Phase 9
+
+```
+frontend/
+├── src/
+│   ├── api/
+│   │   ├── client.ts          # Base fetch wrapper с JWT
+│   │   ├── history.ts         # History API calls
+│   │   ├── analytics.ts       # Analytics API calls
+│   │   ├── queue.ts           # Queue API calls
+│   │   └── websocket.ts       # WebSocket manager
+│   ├── auth/
+│   │   ├── storage.ts         # Token storage (localStorage)
+│   │   └── api.ts             # Auth API calls
+│   ├── utils/
+│   │   ├── duration.ts        # Duration formatting
+│   │   └── date.ts            # Date formatting
+│   ├── hooks/
+│   │   ├── useWebSocket.ts    # WebSocket React hook
+│   │   ├── useDarkMode.ts     # Dark mode hook
+│   │   └── useAuth.ts         # Auth state hook
+│   ├── components/
+│   │   ├── Layout.tsx
+│   │   ├── StatusBadge.tsx
+│   │   ├── ErrorBoundary.tsx
+│   │   ├── ErrorDisplay.tsx
+│   │   ├── LoadingSkeleton.tsx
+│   │   └── ConnectionIndicator.tsx
+│   ├── pages/
+│   │   ├── Login.tsx
+│   │   ├── AuthCallback.tsx
+│   │   ├── Dashboard.tsx
+│   │   ├── History.tsx
+│   │   └── Analytics.tsx
+│   ├── types.ts               # Все типы (snake_case как в backend)
+│   ├── config.ts
+│   ├── App.tsx
+│   └── main.tsx
+├── __tests__/
+│   ├── auth.test.ts
+│   ├── api-client.test.ts
+│   └── websocket.test.ts
+├── .env.example
+├── tsconfig.json              # Strict mode
+├── eslint.config.js
+├── vitest.config.ts
+└── package.json
+```
+
+---
+
+### Phase 10: Docker & Deployment (Tasks 71-73)
+
+#### [DONE] Task 71: Multi-stage Frontend Build
 
 **Файлы:** `docker/Dockerfile.frontend`, `docker/nginx.conf`
 
@@ -3015,7 +3277,7 @@ WS /ws/queue
 
 ---
 
-#### Task 66: Updated Docker Compose
+#### [DONE] Task 72: Updated Docker Compose
 
 **Файлы:** `docker/docker-compose.yml`
 
@@ -3032,7 +3294,7 @@ WS /ws/queue
 
 ---
 
-#### Task 67: Development Environment
+#### [DONE] Task 73: Development Environment
 
 **Файлы:** `docker/docker-compose.dev.yml`
 
@@ -3311,3 +3573,4 @@ stateDiagram-v2
 | 2025-12-02 | 1.3.1 | Switched to UV only (removed Poetry) |
 | 2025-12-02 | 1.4.0 | Added ADR-006: Mandatory MR Feedback, MRNotifier, 14 comment templates |
 | 2025-12-02 | 2.0.0 | **Web Dashboard**: Replaced Redis with SQLite (ADR-004), added frontend stack (TypeScript/Vite/React), new ADRs 007-010 (WebSocket, OAuth, Read-only, Monorepo), 22 new tasks (46-67), 5 new phases (6-10), monorepo structure |
+| 2025-12-07 | 2.1.0 | **Phase 9 expanded**: 6 tasks → 12 tasks (59-70). Added: type sync with backend, OAuth callback handling, WebSocket reconnect logic, accessibility, Vitest testing. Removed: Vite proxy, auth context abstraction. Using snake_case directly in frontend. Phase 10 renumbered (71-73). |

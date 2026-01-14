@@ -14,6 +14,7 @@ from statemachine import State, StateMachine
 from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
+    from gitlab_queue.api.websocket import WebSocketManager
     from gitlab_queue.core.notifier import MRNotifier
     from gitlab_queue.core.queue import QueueManager
     from gitlab_queue.models.queue_item import QueueItem
@@ -84,10 +85,7 @@ class MRStateMachine(StateMachine):
 
     # Any non-final state can transition to removed
     mark_removed = (
-        queued.to(removed)
-        | rebasing.to(removed)
-        | testing.to(removed)
-        | merging.to(removed)
+        queued.to(removed) | rebasing.to(removed) | testing.to(removed) | merging.to(removed)
     )
 
     # =========================================================================
@@ -102,6 +100,7 @@ class MRStateMachine(StateMachine):
         *,
         target_branch: str = "master",
         start_value: str | None = None,
+        websocket_manager: WebSocketManager | None = None,
     ) -> None:
         """Initialize state machine for a specific MR.
 
@@ -111,11 +110,13 @@ class MRStateMachine(StateMachine):
             mr_iid: Merge request IID to manage.
             target_branch: Target branch for rebasing/merging.
             start_value: Initial state (for resuming from DB). If None, starts at queued.
+            websocket_manager: Optional WebSocketManager for real-time updates.
         """
         self.notifier = notifier
         self.queue_manager = queue_manager
         self.mr_iid = mr_iid
         self.target_branch = target_branch
+        self.websocket_manager: WebSocketManager | None = websocket_manager
         self._context: dict[str, Any] = {}
 
         # Initialize with correct starting state
@@ -126,7 +127,7 @@ class MRStateMachine(StateMachine):
         log.debug(
             "State machine initialized",
             mr_iid=mr_iid,
-            initial_state=self.current_state.id,
+            initial_state=start_value or "queued",
         )
 
     # =========================================================================
@@ -149,6 +150,10 @@ class MRStateMachine(StateMachine):
             queued_at=datetime.now(UTC),
         )
 
+        # Broadcast WebSocket update
+        if self.websocket_manager:
+            await self.websocket_manager.broadcast_mr_status_changed(self.mr_iid, "new", "queued")
+
     async def on_enter_rebasing(self) -> None:
         """Called when MR starts rebasing."""
         log.debug("Entering rebasing state", mr_iid=self.mr_iid)
@@ -160,6 +165,12 @@ class MRStateMachine(StateMachine):
             started_at=datetime.now(UTC),
             target_branch=self.target_branch,
         )
+
+        # Broadcast WebSocket update
+        if self.websocket_manager:
+            await self.websocket_manager.broadcast_mr_status_changed(
+                self.mr_iid, "queued", "rebasing"
+            )
 
     async def on_enter_testing(self) -> None:
         """Called when pipeline starts after rebase."""
@@ -182,6 +193,12 @@ class MRStateMachine(StateMachine):
             started_at=datetime.now(UTC),
         )
 
+        # Broadcast WebSocket update
+        if self.websocket_manager:
+            await self.websocket_manager.broadcast_mr_status_changed(
+                self.mr_iid, "rebasing", "testing"
+            )
+
     async def on_enter_merging(self) -> None:
         """Called when pipeline passes and merge starts."""
         log.debug("Entering merging state", mr_iid=self.mr_iid)
@@ -194,6 +211,12 @@ class MRStateMachine(StateMachine):
             pipeline_url=self._context.get("pipeline_url"),
             target_branch=self.target_branch,
         )
+
+        # Broadcast WebSocket update
+        if self.websocket_manager:
+            await self.websocket_manager.broadcast_mr_status_changed(
+                self.mr_iid, "testing", "merging"
+            )
 
     async def on_enter_merged(self) -> None:
         """Called when MR is successfully merged."""
@@ -210,6 +233,14 @@ class MRStateMachine(StateMachine):
             duration=duration,
             target_branch=self.target_branch,
         )
+
+        # Broadcast WebSocket completion
+        if self.websocket_manager:
+            await self.websocket_manager.broadcast_mr_completed(
+                self.mr_iid,
+                "merged",
+                finished_at=datetime.now(UTC),
+            )
 
     async def on_enter_failed(self) -> None:
         """Called when MR fails (conflict, pipeline, timeout)."""
@@ -264,6 +295,15 @@ class MRStateMachine(StateMachine):
                 failed_jobs=[error_message] if error_message else [],
             )
 
+        # Broadcast WebSocket completion
+        if self.websocket_manager:
+            await self.websocket_manager.broadcast_mr_completed(
+                self.mr_iid,
+                "failed",
+                finished_at=datetime.now(UTC),
+                failure_reason=error_message,
+            )
+
     async def on_enter_removed(self) -> None:
         """Called when MR is removed from queue."""
         log.debug("Entering removed state", mr_iid=self.mr_iid)
@@ -285,6 +325,14 @@ class MRStateMachine(StateMachine):
                 "removed_label",
                 removed_at=datetime.now(UTC),
                 position=position or 0,
+            )
+
+        # Broadcast WebSocket completion
+        if self.websocket_manager:
+            await self.websocket_manager.broadcast_mr_completed(
+                self.mr_iid,
+                "removed",
+                finished_at=datetime.now(UTC),
             )
 
     # =========================================================================
@@ -505,6 +553,33 @@ class MRStateMachine(StateMachine):
             rebased_at=datetime.now(UTC),
         )
 
+    async def notify_stale_warning(self, *, warning_hours: int) -> None:
+        """Notify about MR being in queue for extended time (stays in current state).
+
+        This is a warning notification - the MR remains in queue.
+        Only sent once per MR (tracked via stale_warning_sent field).
+
+        Args:
+            warning_hours: Number of hours threshold that was exceeded.
+        """
+        log.info(
+            "Notifying stale MR warning",
+            mr_iid=self.mr_iid,
+            warning_hours=warning_hours,
+        )
+
+        queue_item = await self.queue_manager.get_queue_item(self.mr_iid)
+        position = await self.queue_manager.get_queue_position(self.mr_iid)
+
+        await self.notifier.notify(
+            self.mr_iid,
+            "stale_warning",
+            queued_at=queue_item.queued_at if queue_item else datetime.now(UTC),
+            duration=self._calculate_duration(queue_item),
+            warning_hours=warning_hours,
+            position=position or 1,
+        )
+
     # =========================================================================
     # Helper Methods
     # =========================================================================
@@ -554,6 +629,7 @@ async def create_state_machine_for_mr(
     queue_manager: QueueManager,
     *,
     target_branch: str = "master",
+    websocket_manager: WebSocketManager | None = None,
 ) -> MRStateMachine:
     """Create state machine for an MR, resuming from DB state if exists.
 
@@ -562,6 +638,7 @@ async def create_state_machine_for_mr(
         notifier: MRNotifier for sending notifications.
         queue_manager: QueueManager for state persistence.
         target_branch: Target branch for rebasing/merging.
+        websocket_manager: Optional WebSocketManager for real-time updates.
 
     Returns:
         MRStateMachine initialized with the correct state.
@@ -574,21 +651,26 @@ async def create_state_machine_for_mr(
             mr_iid=mr_iid,
             existing_state=queue_item.state,
         )
-        return MRStateMachine(
+        sm = MRStateMachine(
             notifier=notifier,
             queue_manager=queue_manager,
             mr_iid=mr_iid,
             target_branch=target_branch,
             start_value=queue_item.state,
+            websocket_manager=websocket_manager,
         )
     else:
         log.debug("Creating new state machine", mr_iid=mr_iid)
-        return MRStateMachine(
+        sm = MRStateMachine(
             notifier=notifier,
             queue_manager=queue_manager,
             mr_iid=mr_iid,
             target_branch=target_branch,
+            websocket_manager=websocket_manager,
         )
+
+    await sm.activate_initial_state()  # type: ignore[no-untyped-call]
+    return sm
 
 
 __all__: list[str] = [

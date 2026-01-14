@@ -7,13 +7,14 @@ FIFO ordering with hotfix priority support.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
 
-from gitlab_queue.models.queue_item import QueueItem
+from gitlab_queue.metrics import OPERATIONS_TOTAL
+from gitlab_queue.models.queue_item import DashboardStats, QueueItem
 from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -48,6 +49,7 @@ CREATE TABLE IF NOT EXISTS merge_requests (
     pipeline_status TEXT,
     retry_count INTEGER DEFAULT 0,
     last_error TEXT,
+    stale_warning_sent INTEGER DEFAULT 0,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 )
 """
@@ -121,6 +123,46 @@ DELETE FROM merge_requests
 WHERE finished_at IS NOT NULL AND finished_at < datetime('now', :days_param)
 """
 
+_SELECT_STALE_MRS_SQL = """
+SELECT * FROM merge_requests
+WHERE status IN ('queued', 'rebasing', 'testing', 'merging')
+AND stale_warning_sent = 0
+AND queued_at < datetime('now', :hours_param)
+ORDER BY queued_at ASC
+"""
+
+_MARK_STALE_WARNING_SENT_SQL = """
+UPDATE merge_requests
+SET stale_warning_sent = 1
+WHERE iid = :iid
+"""
+
+_ALTER_TABLE_STALE_WARNING_SQL = """
+ALTER TABLE merge_requests ADD COLUMN stale_warning_sent INTEGER DEFAULT 0
+"""
+
+_SELECT_RECENT_HISTORY_SQL = """
+SELECT * FROM merge_requests
+WHERE status IN ('merged', 'failed', 'removed')
+AND finished_at IS NOT NULL
+ORDER BY finished_at DESC
+LIMIT :limit
+"""
+
+_SELECT_STATS_WINDOW_SQL = """
+SELECT
+    SUM(CASE WHEN status = 'merged' THEN 1 ELSE 0 END) as merged_count,
+    SUM(CASE WHEN status IN ('merged', 'failed') THEN 1 ELSE 0 END) as total_completed,
+    AVG(CASE WHEN started_at IS NOT NULL AND queued_at IS NOT NULL THEN
+        (julianday(started_at) - julianday(queued_at)) * 86400 ELSE NULL END
+    ) as avg_wait_seconds,
+    AVG(CASE WHEN finished_at IS NOT NULL AND started_at IS NOT NULL AND status = 'merged' THEN
+        (julianday(finished_at) - julianday(started_at)) * 86400 ELSE NULL END
+    ) as avg_processing_seconds
+FROM merge_requests
+WHERE finished_at >= datetime('now', :days_param)
+"""
+
 
 # =============================================================================
 # Custom Exceptions
@@ -140,6 +182,46 @@ class QueueItemNotFoundError(QueueError):
 
 
 # =============================================================================
+# Queue Cache
+# =============================================================================
+
+
+@dataclass
+class QueueCache:
+    """In-memory cache for active queue state.
+
+    Caches the active queue to avoid repeated database queries.
+    Cache is invalidated on any write operation.
+
+    Attributes:
+        _active_queue: Cached list of active queue items, or None if invalid.
+        _last_refresh: Timestamp of last cache refresh.
+    """
+
+    _active_queue: list[QueueItem] | None = field(default=None)
+    _last_refresh: datetime | None = field(default=None)
+
+    def invalidate(self) -> None:
+        """Clear all cached data."""
+        self._active_queue = None
+        self._last_refresh = None
+
+    @property
+    def is_valid(self) -> bool:
+        """Check if cache contains valid data."""
+        return self._active_queue is not None
+
+    def get_active_queue(self) -> list[QueueItem] | None:
+        """Get cached active queue or None if cache is invalid."""
+        return self._active_queue
+
+    def set_active_queue(self, items: list[QueueItem]) -> None:
+        """Update cached active queue."""
+        self._active_queue = items
+        self._last_refresh = datetime.now(UTC)
+
+
+# =============================================================================
 # Queue Manager
 # =============================================================================
 
@@ -149,10 +231,12 @@ class QueueManager:
     """Manages the merge request queue in SQLite.
 
     Provides FIFO ordering with hotfix priority support. All operations
-    are idempotent and transaction-safe.
+    are idempotent and transaction-safe. Uses an in-memory cache for
+    active queue to reduce database queries.
 
     Attributes:
         db: Database instance for SQLite operations.
+        _cache: In-memory cache for active queue state.
 
     Example:
         >>> from gitlab_queue.db.database import Database
@@ -163,11 +247,13 @@ class QueueManager:
     """
 
     db: Database
+    _cache: QueueCache = field(default_factory=QueueCache, init=False)
 
     async def ensure_schema(self) -> None:
         """Create the merge_requests table and indexes if they don't exist.
 
         Safe to call multiple times - uses CREATE IF NOT EXISTS.
+        Also handles schema migrations for new columns.
         """
         log.debug("Ensuring database schema exists")
 
@@ -175,6 +261,14 @@ class QueueManager:
             await session.execute(text(_CREATE_TABLE_SQL))
             for index_sql in _CREATE_INDEXES_SQL:
                 await session.execute(text(index_sql))
+
+            # Migrate: add stale_warning_sent column if not exists
+            try:
+                await session.execute(text(_ALTER_TABLE_STALE_WARNING_SQL))
+                log.info("Added stale_warning_sent column to merge_requests table")
+            except Exception:
+                # Column already exists - ignore
+                pass
 
         log.info("Database schema ensured")
 
@@ -230,6 +324,8 @@ class QueueManager:
             row = result.mappings().one()
 
         item = self._row_to_queue_item(row)
+        self._cache.invalidate()  # Invalidate cache after queue modification
+        OPERATIONS_TOTAL.labels(type="add", status="success").inc()
         log.info(
             "MR added to queue",
             mr_iid=mr.iid,
@@ -261,6 +357,8 @@ class QueueManager:
             changed: bool = cursor_result.rowcount > 0  # type: ignore[attr-defined]
 
         if changed:
+            self._cache.invalidate()  # Invalidate cache after queue modification
+            OPERATIONS_TOTAL.labels(type="remove", status="success").inc()
             log.info("MR removed from queue", mr_iid=mr_iid)
         else:
             log.debug("MR not removed (already removed or not found)", mr_iid=mr_iid)
@@ -271,7 +369,8 @@ class QueueManager:
         """Get the position of an MR in the active queue.
 
         Position is 1-indexed (first MR in queue = position 1).
-        Considers hotfix priority in ordering.
+        Considers hotfix priority in ordering. Uses in-memory cache
+        via get_active_queue().
 
         Args:
             mr_iid: The MR's internal ID.
@@ -279,31 +378,11 @@ class QueueManager:
         Returns:
             Position (1-indexed) if in active queue, None if not found or removed.
         """
-        async with self.db.session() as session:
-            # First check if MR exists and is in active state
-            result = await session.execute(
-                text(_SELECT_MR_BY_IID_SQL),
-                {"iid": mr_iid},
-            )
-            row = result.mappings().one_or_none()
-
-            if row is None:
-                return None
-
-            # Check if in active state
-            status = row["status"]
-            if status not in ("queued", "rebasing", "testing", "merging"):
-                return None
-
-            # Count items ahead of this one
-            result = await session.execute(
-                text(_COUNT_POSITION_SQL),
-                {"iid": mr_iid},
-            )
-            count = result.scalar() or 0
-            await session.commit()
-
-        return count + 1  # 1-indexed
+        queue = await self.get_active_queue()
+        for i, item in enumerate(queue):
+            if item.mr_iid == mr_iid:
+                return i + 1  # 1-indexed
+        return None
 
     async def get_next_mr(self) -> QueueItem | None:
         """Get the next MR to process from the queue.
@@ -312,18 +391,16 @@ class QueueManager:
         1. is_hotfix DESC (hotfixes first)
         2. queued_at ASC (FIFO within priority)
 
+        Uses in-memory cache via get_active_queue().
+
         Returns:
             Next QueueItem to process, or None if queue is empty.
         """
-        async with self.db.session() as session:
-            result = await session.execute(text(_SELECT_NEXT_MR_SQL))
-            row = result.mappings().one_or_none()
-            await session.commit()
-
-        if row is None:
-            return None
-
-        return self._row_to_queue_item(row)
+        queue = await self.get_active_queue()
+        for item in queue:
+            if item.state == "queued":
+                return item
+        return None
 
     async def get_queue_item(self, mr_iid: int) -> QueueItem | None:
         """Get a queue item by MR IID.
@@ -351,17 +428,25 @@ class QueueManager:
         """Get all MRs in the active queue.
 
         Returns MRs with status in ('queued', 'rebasing', 'testing', 'merging'),
-        ordered by hotfix priority and queue time.
+        ordered by hotfix priority and queue time. Uses in-memory cache when available.
 
         Returns:
             List of QueueItems in queue order.
         """
+        # Return cached data if available
+        cached = self._cache.get_active_queue()
+        if cached is not None:
+            return cached
+
+        # Fetch from database and cache
         async with self.db.session() as session:
             result = await session.execute(text(_SELECT_ACTIVE_QUEUE_SQL))
             rows = result.mappings().all()
             await session.commit()
 
-        return [self._row_to_queue_item(row) for row in rows]
+        items = [self._row_to_queue_item(row) for row in rows]
+        self._cache.set_active_queue(items)
+        return items
 
     async def get_queue_length(self) -> int:
         """Get the number of MRs in the active queue.
@@ -399,9 +484,7 @@ class QueueManager:
             ),
             "last_error": row["last_error"],
             "finished_at": (
-                datetime.fromisoformat(row["finished_at"])
-                if row["finished_at"]
-                else None
+                datetime.fromisoformat(row["finished_at"]) if row["finished_at"] else None
             ),
         }
 
@@ -448,10 +531,10 @@ class QueueManager:
 
         # Handle extra fields
         allowed_fields = ("pipeline_id", "pipeline_status", "last_error", "retry_count")
-        for field, value in extra.items():
-            if field in allowed_fields:
-                set_clauses.append(f"{field} = :{field}")
-                params[field] = value
+        for field_name, value in extra.items():
+            if field_name in allowed_fields:
+                set_clauses.append(f"{field_name} = :{field_name}")
+                params[field_name] = value
 
         sql = f"UPDATE merge_requests SET {', '.join(set_clauses)} WHERE iid = :iid"
 
@@ -460,6 +543,8 @@ class QueueManager:
             changed: bool = cursor_result.rowcount > 0  # type: ignore[attr-defined]
 
         if changed:
+            self._cache.invalidate()  # Invalidate cache after state change
+            OPERATIONS_TOTAL.labels(type="update", status="success").inc()
             log.info("MR state updated", mr_iid=mr_iid, new_state=state)
         else:
             log.warning("MR not found for state update", mr_iid=mr_iid)
@@ -494,6 +579,72 @@ class QueueManager:
         log.debug("Queue stats retrieved", stats=stats)
         return stats
 
+    async def get_recent_history(self, limit: int = 10) -> list[QueueItem]:
+        """Get recently completed MRs for dashboard history.
+
+        Returns MRs with status in ('merged', 'failed', 'removed') that have
+        a finished_at timestamp, ordered by most recent first.
+
+        Args:
+            limit: Maximum number of items to return (default: 10).
+
+        Returns:
+            List of QueueItems ordered by finished_at descending.
+        """
+        log.debug("Getting recent history", limit=limit)
+
+        async with self.db.session() as session:
+            result = await session.execute(
+                text(_SELECT_RECENT_HISTORY_SQL),
+                {"limit": limit},
+            )
+            rows = result.mappings().all()
+            await session.commit()
+
+        history = [self._row_to_queue_item(row) for row in rows]
+        log.debug("Recent history retrieved", count=len(history))
+        return history
+
+    async def get_dashboard_stats(self, days: int = 7) -> DashboardStats:
+        """Get aggregate statistics for dashboard display.
+
+        Computes statistics over a rolling window of completed MRs.
+
+        Args:
+            days: Number of days to include in statistics (default: 7).
+
+        Returns:
+            DashboardStats with success rate and timing metrics.
+        """
+        log.debug("Getting dashboard stats", days=days)
+
+        async with self.db.session() as session:
+            result = await session.execute(
+                text(_SELECT_STATS_WINDOW_SQL),
+                {"days_param": f"-{days} days"},
+            )
+            row = result.mappings().one()
+            await session.commit()
+
+        merged_count = int(row["merged_count"] or 0)
+        total_completed = int(row["total_completed"] or 0)
+        success_rate = (merged_count / total_completed * 100) if total_completed > 0 else 0.0
+
+        total_in_queue = await self.get_queue_length()
+
+        stats = DashboardStats(
+            total_in_queue=total_in_queue,
+            merged_count=merged_count,
+            failed_count=total_completed - merged_count,
+            success_rate=round(success_rate, 1),
+            avg_wait_seconds=round(float(row["avg_wait_seconds"] or 0), 1),
+            avg_processing_seconds=round(float(row["avg_processing_seconds"] or 0), 1),
+            stats_window_days=days,
+        )
+
+        log.debug("Dashboard stats retrieved", stats=stats)
+        return stats
+
     async def cleanup_old_entries(self, days: int = 90) -> int:
         """Delete queue entries older than specified days.
 
@@ -516,13 +667,69 @@ class QueueManager:
             deleted_count: int = cursor_result.rowcount  # type: ignore[attr-defined]
 
         if deleted_count > 0:
-            log.info(
-                "Old queue entries cleaned up", deleted_count=deleted_count, days=days
-            )
+            log.info("Old queue entries cleaned up", deleted_count=deleted_count, days=days)
         else:
             log.debug("No old entries to clean up")
 
         return deleted_count
+
+    async def get_stale_mrs(self, hours: int) -> list[QueueItem]:
+        """Get MRs that have been in queue longer than specified hours.
+
+        Only returns MRs that haven't received a stale warning yet.
+
+        Args:
+            hours: Threshold in hours.
+
+        Returns:
+            List of QueueItem objects that exceed the threshold and haven't been warned.
+        """
+        log.debug("Checking for stale MRs", hours=hours)
+
+        async with self.db.session() as session:
+            result = await session.execute(
+                text(_SELECT_STALE_MRS_SQL),
+                {"hours_param": f"-{hours} hours"},
+            )
+            rows = result.mappings().all()
+            await session.commit()
+
+        stale_items = [self._row_to_queue_item(row) for row in rows]
+
+        if stale_items:
+            log.info(
+                "Found stale MRs",
+                count=len(stale_items),
+                mr_iids=[item.mr_iid for item in stale_items],
+            )
+
+        return stale_items
+
+    async def mark_stale_warning_sent(self, mr_iid: int) -> bool:
+        """Mark that stale warning has been sent for an MR.
+
+        Args:
+            mr_iid: The MR's internal ID.
+
+        Returns:
+            True if updated, False if MR not found.
+        """
+        log.debug("Marking stale warning sent", mr_iid=mr_iid)
+
+        async with self.db.transaction() as session:
+            cursor_result = await session.execute(
+                text(_MARK_STALE_WARNING_SENT_SQL),
+                {"iid": mr_iid},
+            )
+            changed: bool = cursor_result.rowcount > 0  # type: ignore[attr-defined]
+
+        if changed:
+            self._cache.invalidate()  # Invalidate cache after stale warning update
+            log.info("Stale warning marked as sent", mr_iid=mr_iid)
+        else:
+            log.warning("MR not found for stale warning update", mr_iid=mr_iid)
+
+        return changed
 
     def _row_to_queue_item(self, row: RowMapping | dict[str, Any]) -> QueueItem:
         """Convert a database row to a QueueItem.
@@ -566,6 +773,7 @@ class QueueManager:
             pipeline_status=row.get("pipeline_status"),
             retry_count=row.get("retry_count", 0),
             last_error=row.get("last_error"),
+            stale_warning_sent=bool(row.get("stale_warning_sent", 0)),
         )
 
 

@@ -1,0 +1,34 @@
+:80 {
+    log {
+        output stdout
+    }
+
+    # API and auth routes go to backend (except /auth/callback which is handled by SPA)
+    @api {
+        path /api/* /auth/login /auth/token /auth/me /auth/logout /health /ready
+    }
+
+    handle @api {
+        reverse_proxy backend:8080 {
+            header_up X-Forwarded-Proto {header.X-Forwarded-Proto}
+        }
+    }
+
+    @ws {
+        path /ws/*
+    }
+    handle @ws {
+        reverse_proxy backend:8080
+    }
+
+    @webhook {
+        path /webhooks/*
+    }
+    handle @webhook {
+        reverse_proxy backend:8080
+    }
+
+    handle {
+        reverse_proxy frontend:80
+    }
+}

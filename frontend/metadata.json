@@ -1,0 +1,5 @@
+{
+  "name": "GitLab Queue Commander",
+  "description": "A real-time visualization dashboard for the GitLab Merge Queue Bot, featuring interactive queue management, live status tracking, and deep analytics.",
+  "requestFramePermissions": []
+}

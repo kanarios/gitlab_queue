@@ -73,7 +73,8 @@ class QueueScheduler:
         """Main polling loop - runs until shutdown signal.
 
         Polls GitLab at regular intervals (poll_interval_seconds)
-        to synchronize the queue state.
+        to synchronize the queue state. Respects rate limit state and
+        pauses polling when at critical limit.
         """
         log.info(
             "Queue scheduler starting",
@@ -82,8 +83,25 @@ class QueueScheduler:
 
         try:
             while not self._shutdown_event.is_set():
+                # Check rate limit before sync
+                should_pause, pause_seconds = self._should_pause_for_rate_limit()
+                if should_pause:
+                    if not await self._interruptible_sleep(pause_seconds):
+                        break
+                    continue
+
                 try:
                     stats = await self.sync_queue()
+
+                    # Log queue stats at INFO level for visibility
+                    log.info(
+                        "Queue stats",
+                        queue_depth=stats.mrs_in_queue,
+                        mrs_with_label=stats.mrs_in_gitlab,
+                        added=stats.added,
+                        removed=stats.removed,
+                    )
+
                     log.debug(
                         "Queue sync completed",
                         mrs_in_gitlab=stats.mrs_in_gitlab,
@@ -105,6 +123,33 @@ class QueueScheduler:
                     break
         finally:
             log.info("Queue scheduler stopped")
+
+    def _should_pause_for_rate_limit(self) -> tuple[bool, float]:
+        """Check if polling should pause due to rate limit pressure.
+
+        Pauses polling when GitLab API rate limit is at critical level
+        to prevent further API calls and allow the limit to reset.
+
+        Returns:
+            Tuple of (should_pause, pause_seconds).
+            If should_pause is True, caller should wait pause_seconds
+            before making any API calls.
+        """
+        state = self.gitlab_client.rate_limit_state
+        critical_threshold = self.settings.rate_limit_critical_threshold
+
+        if state.is_critical(critical_threshold):
+            # At critical limit, wait until reset
+            pause = state.seconds_until_reset or 60.0
+            log.warning(
+                "Pausing scheduler due to critical rate limit",
+                pause_seconds=round(pause, 1),
+                usage_ratio=state.usage_ratio,
+                reset_seconds=state.seconds_until_reset,
+            )
+            return True, pause
+
+        return False, 0.0
 
     async def sync_queue(self) -> SyncStats:
         """Synchronize queue state with GitLab.

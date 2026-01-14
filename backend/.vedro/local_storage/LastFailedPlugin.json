@@ -1,8 +1,3 @@
 {
-    "last_failed": [
-        "scenarios/integration/scheduler_integration.py::scheduler_integrates_with_real_queue_manager",
-        "scenarios/integration/scheduler_integration.py::scheduler_recovers_from_gitlab_outage",
-        "scenarios/integration/scheduler_integration.py::scheduler_removes_orphaned_entries_after_mr_closed",
-        "scenarios/integration/scheduler_integration.py::scheduler_handles_concurrent_webhook_and_polling"
-    ]
+    "last_failed": []
 }

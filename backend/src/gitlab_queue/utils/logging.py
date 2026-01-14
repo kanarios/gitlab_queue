@@ -4,6 +4,8 @@ Provides JSON and console logging formats using structlog with:
 - Context variables for request/operation tracking
 - Automatic filtering of sensitive data (tokens, secrets)
 - Configurable log levels
+- Timing utilities for operation duration logging
+- Correlation ID generation
 
 Example:
     >>> from gitlab_queue.utils.logging import configure_logging, get_logger
@@ -11,6 +13,10 @@ Example:
     >>> configure_logging(LogLevel.INFO, LogFormat.JSON)
     >>> log = get_logger()
     >>> log.info("Processing MR", mr_iid=42)
+
+    # With timing
+    >>> async with timed_operation("rebase", mr_iid=42):
+    ...     await do_rebase()
 """
 
 from __future__ import annotations
@@ -19,12 +25,17 @@ import logging
 import re
 import sys
 import threading
+import time
+import uuid
+from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
 import structlog
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Iterator
+
     from structlog.types import EventDict, Processor
 
     from gitlab_queue.config import LogFormat, LogLevel
@@ -77,6 +88,7 @@ def _mask_sensitive_data(
     Recursively processes strings in the event dictionary to mask
     tokens, secrets, and other sensitive patterns.
     """
+
     def mask_value(value: Any) -> Any:
         if isinstance(value, str):
             return _mask_sensitive_value(value)
@@ -167,7 +179,6 @@ def configure_logging(
     from gitlab_queue.config import LogFormat as LF
 
     with _logging_lock:
-
         # Choose renderer based on format
         renderer = _get_json_renderer() if log_format == LF.JSON else _get_console_renderer()
 
@@ -300,12 +311,136 @@ class LogContext:
             token.var.reset(token)
 
 
+def generate_request_id() -> str:
+    """Generate a unique request/correlation ID.
+
+    Format: {timestamp_ms}-{random_hex}
+    Example: "1733500000000-a1b2c3d4"
+
+    Use this to create correlation IDs for tracking requests across
+    the system. Set it via LogContext for automatic inclusion in logs.
+
+    Returns:
+        Unique request ID string.
+
+    Example:
+        >>> request_id = generate_request_id()
+        >>> with LogContext(request_id=request_id):
+        ...     log.info("Processing webhook")
+    """
+    timestamp_ms = int(time.time() * 1000)
+    random_suffix = uuid.uuid4().hex[:8]
+    return f"{timestamp_ms}-{random_suffix}"
+
+
+@contextmanager
+def timed_operation(
+    operation: str,
+    *,
+    log_start: bool = True,
+    **context: Any,
+) -> Iterator[None]:
+    """Context manager that logs operation start and duration.
+
+    Logs an info message when the operation starts (optional) and
+    another when it completes with the duration in seconds.
+
+    Args:
+        operation: Name of the operation being timed (e.g., 'rebase', 'merge').
+        log_start: Whether to log when operation starts. Defaults to True.
+        **context: Additional context to include in log messages.
+
+    Example:
+        >>> with timed_operation("database_query", table="users"):
+        ...     result = db.query("SELECT * FROM users")
+        # Logs: "database_query started" with table=users
+        # Logs: "database_query completed" with duration_seconds=0.123, table=users
+    """
+    log = get_logger()
+    start_time = time.perf_counter()
+
+    if log_start:
+        log.info(f"{operation} started", operation=operation, **context)
+
+    try:
+        yield
+    except Exception:
+        duration = time.perf_counter() - start_time
+        log.warning(
+            f"{operation} failed",
+            operation=operation,
+            duration_seconds=round(duration, 3),
+            **context,
+        )
+        raise
+    else:
+        duration = time.perf_counter() - start_time
+        log.info(
+            f"{operation} completed",
+            operation=operation,
+            duration_seconds=round(duration, 3),
+            **context,
+        )
+
+
+@asynccontextmanager
+async def timed_operation_async(
+    operation: str,
+    *,
+    log_start: bool = True,
+    **context: Any,
+) -> AsyncIterator[None]:
+    """Async context manager that logs operation start and duration.
+
+    Async version of timed_operation for use with async code.
+
+    Args:
+        operation: Name of the operation being timed (e.g., 'rebase', 'merge').
+        log_start: Whether to log when operation starts. Defaults to True.
+        **context: Additional context to include in log messages.
+
+    Example:
+        >>> async with timed_operation_async("api_call", endpoint="/users"):
+        ...     response = await http_client.get("/users")
+        # Logs: "api_call started" with endpoint=/users
+        # Logs: "api_call completed" with duration_seconds=0.456, endpoint=/users
+    """
+    log = get_logger()
+    start_time = time.perf_counter()
+
+    if log_start:
+        log.info(f"{operation} started", operation=operation, **context)
+
+    try:
+        yield
+    except Exception:
+        duration = time.perf_counter() - start_time
+        log.warning(
+            f"{operation} failed",
+            operation=operation,
+            duration_seconds=round(duration, 3),
+            **context,
+        )
+        raise
+    else:
+        duration = time.perf_counter() - start_time
+        log.info(
+            f"{operation} completed",
+            operation=operation,
+            duration_seconds=round(duration, 3),
+            **context,
+        )
+
+
 __all__: list[str] = [
     "LogContext",
     "configure_logging",
+    "generate_request_id",
     "get_logger",
     "mr_iid_ctx",
     "operation_ctx",
     "request_id_ctx",
     "reset_logging",
+    "timed_operation",
+    "timed_operation_async",
 ]
