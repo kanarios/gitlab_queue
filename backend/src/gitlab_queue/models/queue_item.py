@@ -36,6 +36,7 @@ class QueueItem:
         pipeline_status: Current pipeline status
         retry_count: Number of retry attempts for pipeline failures
         last_error: Most recent error message if any
+        stale_warning_sent: Whether stale warning has been sent for this MR
     """
 
     # Required fields (no defaults)
@@ -57,6 +58,33 @@ class QueueItem:
     pipeline_status: str | None = None
     retry_count: int = 0
     last_error: str | None = None
+    stale_warning_sent: bool = False
 
 
-__all__: list[str] = ["QueueItem"]
+@dataclass(frozen=True, slots=True)
+class DashboardStats:
+    """Aggregate statistics for queue dashboard.
+
+    Provides computed metrics over a rolling time window for
+    display on the status dashboard.
+
+    Attributes:
+        total_in_queue: Current number of MRs in active queue.
+        merged_count: Number of successfully merged MRs in window.
+        failed_count: Number of failed MRs in window.
+        success_rate: Percentage of successful merges (0-100).
+        avg_wait_seconds: Average time from queued to processing start.
+        avg_processing_seconds: Average time from start to merge.
+        stats_window_days: Number of days included in statistics.
+    """
+
+    total_in_queue: int
+    merged_count: int
+    failed_count: int
+    success_rate: float
+    avg_wait_seconds: float
+    avg_processing_seconds: float
+    stats_window_days: int
+
+
+__all__: list[str] = ["DashboardStats", "QueueItem"]

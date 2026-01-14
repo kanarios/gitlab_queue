@@ -14,7 +14,7 @@ import vedro
 from vedro import scenario
 
 if TYPE_CHECKING:
-    from gitlab_queue.core.scheduler import QueueScheduler, SyncStats
+    from gitlab_queue.core.scheduler import SyncStats
 
 
 @scenario()
@@ -25,7 +25,7 @@ async def sync_adds_missing_mrs_to_queue():
         gitlab_client = AsyncMock()
 
         # Create real MergeRequest objects (not mocks)
-        from gitlab_queue.models.mr import MergeRequest, Author
+        from gitlab_queue.models.mr import Author, MergeRequest
 
         mr1 = MergeRequest(
             iid=1,
@@ -109,7 +109,7 @@ async def sync_removes_orphaned_mrs_from_queue():
         gitlab_client = AsyncMock()
 
         # GitLab returns only MR 1 (MR 2 has been closed/unlabeled)
-        from gitlab_queue.models.mr import MergeRequest, Author
+        from gitlab_queue.models.mr import Author, MergeRequest
 
         mr1 = MergeRequest(
             iid=1,
@@ -238,7 +238,7 @@ async def sync_does_not_duplicate_existing_mrs():
         gitlab_client = AsyncMock()
 
         # GitLab returns 2 MRs
-        from gitlab_queue.models.mr import MergeRequest, Author
+        from gitlab_queue.models.mr import Author, MergeRequest
 
         mr1 = MergeRequest(
             iid=1,

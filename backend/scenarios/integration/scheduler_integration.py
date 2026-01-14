@@ -7,19 +7,10 @@ and the overall system behavior.
 from __future__ import annotations
 
 import asyncio
-import json
-from datetime import UTC, datetime
-from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
 import vedro
 from vedro import scenario
-
-if TYPE_CHECKING:
-    from gitlab_queue.core.queue import QueueManager
-    from gitlab_queue.core.scheduler import QueueScheduler
-    from gitlab_queue.db.database import Database
-    from gitlab_queue.models.mr import MergeRequest
 
 
 @scenario()

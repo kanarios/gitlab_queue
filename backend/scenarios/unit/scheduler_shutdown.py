@@ -6,14 +6,10 @@ Tests the scheduler's graceful shutdown functionality and cancellation handling.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock
 
 import vedro
 from vedro import scenario
-
-if TYPE_CHECKING:
-    from gitlab_queue.core.scheduler import QueueScheduler
 
 
 @scenario()
@@ -58,7 +54,7 @@ async def scheduler_shutdown_stops_polling_loop():
         try:
             await asyncio.wait_for(scheduler_task, timeout=1.0)
             shutdown_successful = True
-        except asyncio.TimeoutError:
+        except TimeoutError:
             shutdown_successful = False
             scheduler_task.cancel()
             try:
@@ -123,7 +119,7 @@ async def scheduler_completes_current_sync_before_shutdown():
         try:
             await asyncio.wait_for(scheduler_task, timeout=1.0)
             shutdown_successful = True
-        except asyncio.TimeoutError:
+        except TimeoutError:
             shutdown_successful = False
             scheduler_task.cancel()
             try:
@@ -241,7 +237,7 @@ async def scheduler_continues_after_sync_error():
         # Wait for task to complete
         try:
             await asyncio.wait_for(scheduler_task, timeout=1.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             scheduler_task.cancel()
             try:
                 await scheduler_task

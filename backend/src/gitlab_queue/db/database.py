@@ -147,30 +147,45 @@ class Database:
 
             # Create async engine with proper pool configuration for SQLite
             # SQLite can only have one writer at a time in WAL mode
-            self._engine = create_async_engine(
-                self.database_url,
-                connect_args={
+            # Note: In-memory databases use StaticPool which doesn't accept pool config
+            is_memory_db = ":memory:" in self.database_url
+
+            engine_kwargs: dict = {
+                "connect_args": {
                     "check_same_thread": False,
                     "timeout": 30.0,  # SQLite connection timeout
                 },
-                echo=self.echo,
-                pool_size=1,  # SQLite: single writer
-                max_overflow=20,  # Allow queue of waiting connections
-                pool_timeout=30,  # Wait up to 30s for connection
-                pool_recycle=3600,  # Recycle connections every hour
-                pool_pre_ping=True,  # Validate connections before use
-            )
+                "echo": self.echo,
+            }
+
+            # Only add pool configuration for file-based databases
+            # StaticPool (used for :memory:) doesn't accept these parameters
+            if not is_memory_db:
+                engine_kwargs.update(
+                    {
+                        "pool_size": 1,  # SQLite: single writer
+                        "max_overflow": 20,  # Allow queue of waiting connections
+                        "pool_timeout": 30,  # Wait up to 30s for connection
+                        "pool_recycle": 3600,  # Recycle connections every hour
+                        "pool_pre_ping": True,  # Validate connections before use
+                    }
+                )
+
+            self._engine = create_async_engine(self.database_url, **engine_kwargs)
 
             # Enable WAL mode, foreign keys, and configure durability
             async with self._engine.begin() as conn:
-                # Set journal mode and verify
-                result = await conn.execute(text("PRAGMA journal_mode=WAL"))
-                actual_mode = result.scalar()
-                if actual_mode != "wal":
-                    raise DatabaseConnectionError(
-                        f"Failed to enable WAL mode. Got '{actual_mode}' instead. "
-                        "Check filesystem compatibility (network drives don't support WAL)."
-                    )
+                # Set journal mode and verify (skip for in-memory databases)
+                if not is_memory_db:
+                    result = await conn.execute(text("PRAGMA journal_mode=WAL"))
+                    actual_mode = result.scalar()
+                    if actual_mode != "wal":
+                        raise DatabaseConnectionError(
+                            f"Failed to enable WAL mode. Got '{actual_mode}' instead. "
+                            "Check filesystem compatibility (network drives don't support WAL)."
+                        )
+                else:
+                    actual_mode = "memory"  # In-memory databases don't support WAL
 
                 # FULL synchronous mode for durability (prevents data loss on crash)
                 await conn.execute(text("PRAGMA synchronous=FULL"))
@@ -259,9 +274,7 @@ class Database:
             DatabaseNotInitializedError: If database is not initialized.
         """
         if self._engine is None:
-            raise DatabaseNotInitializedError(
-                "Database not initialized. Call initialize() first."
-            )
+            raise DatabaseNotInitializedError("Database not initialized. Call initialize() first.")
         return self._engine
 
     @asynccontextmanager
@@ -286,9 +299,7 @@ class Database:
             ...     await session.commit()  # Required to persist changes
         """
         if self._session_factory is None:
-            raise DatabaseNotInitializedError(
-                "Database not initialized. Call initialize() first."
-            )
+            raise DatabaseNotInitializedError("Database not initialized. Call initialize() first.")
 
         async with self._session_factory() as session:
             try:
@@ -328,9 +339,7 @@ class Database:
             ...     # Automatic commit on success, rollback on exception
         """
         if self._session_factory is None:
-            raise DatabaseNotInitializedError(
-                "Database not initialized. Call initialize() first."
-            )
+            raise DatabaseNotInitializedError("Database not initialized. Call initialize() first.")
 
         async with self._session_factory() as session:
             try:

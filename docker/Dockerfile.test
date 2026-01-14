@@ -1,0 +1,37 @@
+# =============================================================================
+# Dockerfile for running tests with Vedro
+# =============================================================================
+FROM python:3.12-slim
+
+# Install curl for healthcheck and uv for dependency management
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv for fast dependency management
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+WORKDIR /app
+
+# Copy dependency files and README (needed by hatchling for project metadata)
+COPY pyproject.toml uv.lock README.md ./
+
+# Install ALL dependencies including dev (for testing)
+RUN uv sync --frozen
+
+# Copy source code
+COPY src/ ./src/
+
+# Copy test scenarios
+COPY scenarios/ ./scenarios/
+
+# Copy vedro config
+COPY vedro.cfg.py ./
+
+# Set environment variables
+ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Default command: run all tests
+CMD ["uv", "run", "vedro", "run", "scenarios/"]

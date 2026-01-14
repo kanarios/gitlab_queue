@@ -17,6 +17,8 @@ Example:
 from __future__ import annotations
 
 import asyncio
+import time
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -28,8 +30,15 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
+from gitlab_queue.metrics import API_LATENCY, normalize_endpoint
 from gitlab_queue.models.retorts import parse_job, parse_merge_request, parse_note, parse_pipeline
+from gitlab_queue.utils.circuit_breaker import (
+    CircuitBreaker,
+    CircuitOpenError,
+    create_circuit_breaker,
+)
 from gitlab_queue.utils.logging import get_logger
+from gitlab_queue.utils.retry import log_after_retry, log_before_retry
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -42,11 +51,26 @@ log = get_logger(__name__)
 
 
 # Keys that may contain sensitive data and should be redacted from response bodies
-_SENSITIVE_KEYS = frozenset({
-    "token", "tokens", "access_token", "refresh_token", "private_token",
-    "password", "secret", "api_key", "apikey", "auth", "authorization",
-    "credential", "credentials", "key", "private_key", "secret_key",
-})
+_SENSITIVE_KEYS = frozenset(
+    {
+        "token",
+        "tokens",
+        "access_token",
+        "refresh_token",
+        "private_token",
+        "password",
+        "secret",
+        "api_key",
+        "apikey",
+        "auth",
+        "authorization",
+        "credential",
+        "credentials",
+        "key",
+        "private_key",
+        "secret_key",
+    }
+)
 
 
 def _sanitize_response_body(body: dict[str, Any] | str | None) -> dict[str, Any] | str | None:
@@ -68,14 +92,81 @@ def _sanitize_response_body(body: dict[str, Any] | str | None) -> dict[str, Any]
                 result[key] = redact_dict(value)
             elif isinstance(value, list):
                 result[key] = [
-                    redact_dict(item) if isinstance(item, dict) else item
-                    for item in value
+                    redact_dict(item) if isinstance(item, dict) else item for item in value
                 ]
             else:
                 result[key] = value
         return result
 
     return redact_dict(body)
+
+
+@dataclass
+class RateLimitState:
+    """Tracks GitLab API rate limit state.
+
+    This dataclass stores the current rate limit information from GitLab API
+    response headers and provides utility properties for adaptive throttling.
+
+    Attributes:
+        limit: Maximum requests allowed per window (RateLimit-Limit header).
+        remaining: Requests remaining in current window (RateLimit-Remaining header).
+        reset_at: Unix timestamp when limit resets (RateLimit-Reset header).
+        last_updated: Monotonic time when state was last updated.
+    """
+
+    limit: int | None = None
+    remaining: int | None = None
+    reset_at: int | None = None
+    last_updated: float = field(default_factory=time.monotonic)
+
+    @property
+    def usage_ratio(self) -> float | None:
+        """Return ratio of used quota (0.0 to 1.0), or None if unknown.
+
+        Returns:
+            Float between 0.0 and 1.0 indicating usage (0.0 = none used, 1.0 = all used),
+            or None if limit/remaining are not available.
+        """
+        if self.limit is None or self.remaining is None or self.limit == 0:
+            return None
+        return 1.0 - (self.remaining / self.limit)
+
+    def is_approaching_limit(self, threshold: float) -> bool:
+        """Check if usage exceeds the warning threshold.
+
+        Args:
+            threshold: Usage ratio threshold (e.g., 0.8 for 80%).
+
+        Returns:
+            True if usage ratio is known and exceeds threshold.
+        """
+        ratio = self.usage_ratio
+        return ratio is not None and ratio > threshold
+
+    def is_critical(self, threshold: float) -> bool:
+        """Check if usage exceeds the critical threshold.
+
+        Args:
+            threshold: Critical usage ratio threshold (e.g., 0.95 for 95%).
+
+        Returns:
+            True if usage ratio is known and exceeds threshold.
+        """
+        ratio = self.usage_ratio
+        return ratio is not None and ratio > threshold
+
+    @property
+    def seconds_until_reset(self) -> float | None:
+        """Seconds until rate limit resets, or None if unknown.
+
+        Returns:
+            Float seconds remaining, clamped to minimum 0.0,
+            or None if reset_at is not available.
+        """
+        if self.reset_at is None:
+            return None
+        return max(0.0, self.reset_at - time.time())
 
 
 class GitLabAPIError(Exception):
@@ -138,6 +229,25 @@ class GitLabServerError(GitLabAPIError):
     """Raised for server errors (5xx)."""
 
 
+class GitLabCircuitOpenError(GitLabAPIError):
+    """Raised when circuit breaker is open and GitLab API requests are blocked.
+
+    This indicates that GitLab has been experiencing repeated failures and
+    the circuit breaker is protecting the system from cascading failures.
+
+    Attributes:
+        retry_after: Time in seconds until circuit may attempt recovery.
+    """
+
+    def __init__(
+        self,
+        message: str = "GitLab API circuit breaker is open",
+        retry_after: float | None = None,
+    ) -> None:
+        super().__init__(message, status_code=None)
+        self.retry_after = retry_after
+
+
 class GitLabClient:
     """Async HTTP client for GitLab API.
 
@@ -173,6 +283,26 @@ class GitLabClient:
             },
             timeout=httpx.Timeout(30.0, connect=10.0),
         )
+
+        # Initialize circuit breaker for API protection
+        self._circuit_breaker = create_circuit_breaker(settings, name="gitlab_api")
+
+        # Initialize rate limit tracking
+        self._rate_limit_state = RateLimitState()
+        self._rate_limit_lock = asyncio.Lock()
+
+    @property
+    def rate_limit_state(self) -> RateLimitState:
+        """Return current rate limit state for inspection.
+
+        The returned state is a snapshot and may be updated by concurrent requests.
+        """
+        return self._rate_limit_state
+
+    @property
+    def circuit_breaker(self) -> CircuitBreaker:
+        """Return the circuit breaker for inspection/testing."""
+        return self._circuit_breaker
 
     @property
     def base_url(self) -> str:
@@ -247,9 +377,7 @@ class GitLabClient:
                 return None
         return None
 
-    def _parse_response_body(
-        self, response: httpx.Response
-    ) -> dict[str, Any] | str | None:
+    def _parse_response_body(self, response: httpx.Response) -> dict[str, Any] | str | None:
         """Try to parse response body as JSON, fallback to text."""
         try:
             body: dict[str, Any] = response.json()
@@ -352,6 +480,85 @@ class GitLabClient:
         log.info("Waiting for rate limit reset", wait_seconds=wait_seconds)
         await asyncio.sleep(wait_seconds)
 
+    async def _update_rate_limit_state(self, response: httpx.Response) -> None:
+        """Update rate limit state from response headers.
+
+        Called after every successful response to track current rate limit status.
+        Logs proactively when approaching or at critical limit.
+
+        Args:
+            response: HTTP response containing rate limit headers.
+        """
+        limit, remaining, reset = self._parse_rate_limit_headers(response)
+
+        # Skip if no rate limit headers present
+        if limit is None and remaining is None:
+            return
+
+        async with self._rate_limit_lock:
+            self._rate_limit_state = RateLimitState(
+                limit=limit,
+                remaining=remaining,
+                reset_at=reset,
+                last_updated=time.monotonic(),
+            )
+
+        # Log proactively based on thresholds
+        state = self._rate_limit_state
+        warning_threshold = self._settings.rate_limit_warning_threshold
+        critical_threshold = self._settings.rate_limit_critical_threshold
+
+        if state.is_critical(critical_threshold):
+            log.warning(
+                "Rate limit critical",
+                limit=limit,
+                remaining=remaining,
+                reset_seconds=state.seconds_until_reset,
+                usage_ratio=state.usage_ratio,
+            )
+        elif state.is_approaching_limit(warning_threshold):
+            log.info(
+                "Rate limit approaching",
+                limit=limit,
+                remaining=remaining,
+                reset_seconds=state.seconds_until_reset,
+                usage_ratio=state.usage_ratio,
+            )
+
+    async def _apply_rate_limit_throttle(self) -> None:
+        """Apply adaptive throttling based on rate limit state.
+
+        Implements linear scaling delay when approaching rate limit:
+        - At warning threshold (80%): base delay
+        - At 100%: 5x base delay
+
+        Does NOT block event loop - uses asyncio.sleep.
+        """
+        state = self._rate_limit_state
+        ratio = state.usage_ratio
+        warning_threshold = self._settings.rate_limit_warning_threshold
+
+        if ratio is None or ratio <= warning_threshold:
+            return  # No throttling needed
+
+        # Linear scaling: at threshold = base delay, at 100% = 5x base delay
+        # scale goes from 0.0 (at threshold) to 1.0 (at 100%)
+        scale = (ratio - warning_threshold) / (1.0 - warning_threshold)
+        delay = self._settings.rate_limit_throttle_delay_seconds * (1 + 4 * scale)
+
+        # Cap delay at time until reset if available and shorter
+        reset_seconds = state.seconds_until_reset
+        if reset_seconds is not None and reset_seconds < delay:
+            delay = reset_seconds
+
+        log.debug(
+            "Rate limit throttling",
+            delay_seconds=round(delay, 2),
+            usage_ratio=round(ratio, 3),
+        )
+
+        await asyncio.sleep(delay)
+
     async def _request(
         self,
         method: str,
@@ -360,7 +567,14 @@ class GitLabClient:
         project_scoped: bool = True,
         **kwargs: Any,
     ) -> httpx.Response:
-        """Make HTTP request with retry logic for transient failures.
+        """Make HTTP request with circuit breaker, rate limiting, and retry logic.
+
+        Request flow:
+        1. Circuit breaker check (fail fast if open)
+        2. Adaptive rate limit throttling (slow down when approaching limit)
+        3. Tenacity retry loop (handles transient errors)
+        4. HTTP request execution
+        5. Update rate limit state from response headers
 
         Args:
             method: HTTP method (GET, POST, PUT, DELETE).
@@ -372,6 +586,7 @@ class GitLabClient:
             HTTP response.
 
         Raises:
+            GitLabCircuitOpenError: If circuit breaker is open.
             GitLabAPIError: On API errors after retries exhausted.
         """
         full_path = self._project_path(path) if project_scoped else path.lstrip("/")
@@ -382,25 +597,63 @@ class GitLabClient:
             path=full_path,
         )
 
+        # Check circuit breaker BEFORE attempting request
+        try:
+            await self._circuit_breaker.before_call()
+        except CircuitOpenError as e:
+            log.warning(
+                "Request blocked by circuit breaker",
+                method=method,
+                path=full_path,
+                retry_after=e.retry_after,
+            )
+            raise GitLabCircuitOpenError(
+                f"GitLab API unavailable: {e}",
+                retry_after=e.retry_after,
+            ) from e
+
+        # Apply adaptive throttling before making request
+        await self._apply_rate_limit_throttle()
+
+        # Normalize endpoint for metrics (replace IDs with placeholders)
+        normalized_path = normalize_endpoint(full_path)
+
         try:
             async for attempt in AsyncRetrying(
                 retry=retry_if_exception_type((GitLabServerError, GitLabRateLimitError)),
                 stop=stop_after_attempt(self._max_retries),
                 wait=wait_exponential_jitter(initial=1, max=30, jitter=5),
+                before_sleep=log_before_retry,
+                after=log_after_retry,
                 reraise=True,
             ):
                 with attempt:
                     try:
-                        response = await self._client.request(method, full_path, **kwargs)
+                        # Track API latency
+                        start_time = time.monotonic()
+                        try:
+                            response = await self._client.request(method, full_path, **kwargs)
+                        finally:
+                            duration = time.monotonic() - start_time
+                            API_LATENCY.labels(method=method, endpoint=normalized_path).observe(
+                                duration
+                            )
+
+                        # Update rate limit state from ALL responses
+                        await self._update_rate_limit_state(response)
+
                         self._handle_error_response(response)
+                        # Record success with circuit breaker
+                        await self._circuit_breaker.record_success()
                         return response
                     except GitLabRateLimitError as e:
                         await self._handle_rate_limit(e)
                         raise
         except RetryError as e:
-            # Re-raise the last exception from retries
+            # All retries exhausted - record failure with circuit breaker
             last_exc = e.last_attempt.exception()
             if last_exc is not None:
+                await self._circuit_breaker.record_failure(last_exc)
                 raise last_exc from e
             raise GitLabAPIError("Request failed after retries") from e
 
@@ -425,9 +678,7 @@ class GitLabClient:
         Returns:
             Parsed JSON response.
         """
-        response = await self._request(
-            "GET", path, project_scoped=project_scoped, params=params
-        )
+        response = await self._request("GET", path, project_scoped=project_scoped, params=params)
         result: dict[str, Any] = response.json()
         return result
 
@@ -448,9 +699,7 @@ class GitLabClient:
         Returns:
             Parsed JSON list response.
         """
-        response = await self._request(
-            "GET", path, project_scoped=project_scoped, params=params
-        )
+        response = await self._request("GET", path, project_scoped=project_scoped, params=params)
         result: list[dict[str, Any]] = response.json()
         return result
 
@@ -518,9 +767,7 @@ class GitLabClient:
             project_scoped: Whether to prefix with /projects/{id}/.
             params: Query parameters.
         """
-        await self._request(
-            "DELETE", path, project_scoped=project_scoped, params=params
-        )
+        await self._request("DELETE", path, project_scoped=project_scoped, params=params)
 
     # =========================================================================
     # Merge Request Operations (Task 6)
@@ -637,6 +884,37 @@ class GitLabClient:
         )
         return mr.rebase_in_progress, mr.has_conflicts
 
+    async def get_mr_conflicts(self, iid: int) -> list[str]:
+        """Get list of conflicted files for a merge request.
+
+        Uses GitLab's internal /conflicts endpoint to fetch the list of files
+        with merge conflicts. This endpoint is used by the GitLab web UI.
+
+        Returns empty list if endpoint fails or MR has no conflicts
+        (non-breaking fallback).
+
+        Args:
+            iid: Internal ID of the merge request.
+
+        Returns:
+            List of file paths with conflicts, or empty list on failure.
+        """
+        log.debug("Fetching conflict files", mr_iid=iid)
+        try:
+            data = await self.get_list(f"/merge_requests/{iid}/conflicts")
+            # Each conflict entry has 'old_path' and 'new_path' fields
+            files: list[str] = []
+            for conflict in data:
+                # Prefer new_path, fall back to old_path
+                path = conflict.get("new_path") or conflict.get("old_path")
+                if path:
+                    files.append(path)
+            log.debug("Found conflicted files", mr_iid=iid, count=len(files), files=files)
+            return files
+        except GitLabAPIError as e:
+            log.debug("Could not fetch conflict files", mr_iid=iid, error=str(e))
+            return []
+
     # =========================================================================
     # Pipeline Operations (Task 7)
     # =========================================================================
@@ -739,6 +1017,29 @@ class GitLabClient:
             status=job.status,
         )
         return job
+
+    async def get_pipeline_jobs(self, pipeline_id: int) -> list[Job]:
+        """Get all jobs for a pipeline.
+
+        Args:
+            pipeline_id: Pipeline ID to fetch jobs for.
+
+        Returns:
+            List of Job objects for the pipeline.
+
+        Raises:
+            GitLabNotFoundError: If pipeline does not exist.
+            GitLabAPIError: On other API errors.
+        """
+        log.debug("Fetching jobs for pipeline", pipeline_id=pipeline_id)
+        data = await self.get_list(f"/pipelines/{pipeline_id}/jobs")
+        jobs = [parse_job(job) for job in data]
+        log.debug(
+            "Fetched pipeline jobs",
+            pipeline_id=pipeline_id,
+            job_count=len(jobs),
+        )
+        return jobs
 
     # =========================================================================
     # Merge & Comment Operations (Task 8)
@@ -899,9 +1200,11 @@ class GitLabClient:
 
 __all__: list[str] = [
     "GitLabAPIError",
+    "GitLabCircuitOpenError",
     "GitLabClient",
     "GitLabConflictError",
     "GitLabNotFoundError",
     "GitLabRateLimitError",
     "GitLabServerError",
+    "RateLimitState",
 ]

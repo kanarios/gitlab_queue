@@ -182,10 +182,21 @@ class Settings:
     poll_interval_seconds: int = var(default=30, converter=int)
     pipeline_timeout_seconds: int = var(default=7200, converter=int)  # 2 hours
     rebase_timeout_seconds: int = var(default=300, converter=int)  # 5 minutes
+    stale_mr_warning_hours: int = var(default=24, converter=int)  # 24 hours
 
     # Retry Logic
     pipeline_retry_count: int = var(default=1, converter=int)
     api_max_retries: int = var(default=5, converter=int)
+
+    # Rate Limit Handling
+    rate_limit_warning_threshold: float = var(default=0.8, converter=float)  # 80%
+    rate_limit_throttle_delay_seconds: float = var(default=1.0, converter=float)
+    rate_limit_critical_threshold: float = var(default=0.95, converter=float)  # 95%
+
+    # Circuit Breaker
+    circuit_breaker_failure_threshold: int = var(default=5, converter=int)
+    circuit_breaker_half_open_timeout_seconds: int = var(default=30, converter=int)
+    circuit_breaker_success_threshold: int = var(default=1, converter=int)
 
     # Webhook Retry Queue
     webhook_retry_max_attempts: int = var(default=3, converter=int)
@@ -196,6 +207,13 @@ class Settings:
 
     # Database
     database_url: str = var(default="sqlite+aiosqlite:///data/queue.db")
+
+    # Graceful Degradation
+    database_retry_base_delay_seconds: int = var(default=5, converter=int)
+    database_retry_max_delay_seconds: int = var(default=60, converter=int)
+    startup_gitlab_required: bool = bool_var(
+        default=False
+    )  # If True, fail startup if GitLab unavailable
 
     # GitLab OAuth
     oauth_client_id: str | None = var(default=None)
@@ -212,13 +230,12 @@ class Settings:
 
     # Dashboard
     dashboard_enabled: bool = bool_var(default=True)
-    cors_origins: list[str] = var(
-        default="http://localhost:5173", converter=_to_cors_origins_list
-    )
+    cors_origins: list[str] = var(default="http://localhost:5173", converter=_to_cors_origins_list)
 
     # Monitoring
     log_level: LogLevel = var(default="INFO", converter=_to_log_level)
     log_format: LogFormat = var(default="json", converter=_to_log_format)
+
 
 def _mask_database_url(self: Settings) -> str:
     """Mask credentials in database URL for safe logging."""
@@ -251,14 +268,24 @@ def _settings_repr(self: Settings) -> str:
         "poll_interval_seconds",
         "pipeline_timeout_seconds",
         "rebase_timeout_seconds",
+        "stale_mr_warning_hours",
         "pipeline_retry_count",
         "api_max_retries",
+        "rate_limit_warning_threshold",
+        "rate_limit_throttle_delay_seconds",
+        "rate_limit_critical_threshold",
+        "circuit_breaker_failure_threshold",
+        "circuit_breaker_half_open_timeout_seconds",
+        "circuit_breaker_success_threshold",
         "webhook_retry_max_attempts",
         "webhook_retry_base_delay_seconds",
         "webhook_retry_max_delay_seconds",
         "webhook_retry_poll_interval_seconds",
         "webhook_dlq_retention_days",
         "database_url",
+        "database_retry_base_delay_seconds",
+        "database_retry_max_delay_seconds",
+        "startup_gitlab_required",
         "oauth_client_id",
         "oauth_client_secret",
         "oauth_redirect_uri",
@@ -294,6 +321,182 @@ class ConfigurationError(Exception):
     """Raised when configuration validation fails."""
 
 
+def _validate_gitlab_settings(settings: Settings, errors: list[str]) -> None:
+    """Validate GitLab connection settings."""
+    if not settings.gitlab_url.startswith(("http://", "https://")):
+        errors.append(f"gitlab_url must start with http:// or https://, got: {settings.gitlab_url}")
+    if settings.gitlab_project_id <= 0:
+        errors.append(
+            f"gitlab_project_id must be a positive integer, got: {settings.gitlab_project_id}"
+        )
+
+
+def _validate_timing_settings(settings: Settings, errors: list[str]) -> None:
+    """Validate timing and interval settings."""
+    if settings.poll_interval_seconds <= 0:
+        errors.append(
+            f"poll_interval_seconds must be positive, got: {settings.poll_interval_seconds}"
+        )
+    if settings.pipeline_timeout_seconds <= 0:
+        errors.append(
+            f"pipeline_timeout_seconds must be positive, got: {settings.pipeline_timeout_seconds}"
+        )
+    if settings.rebase_timeout_seconds <= 0:
+        errors.append(
+            f"rebase_timeout_seconds must be positive, got: {settings.rebase_timeout_seconds}"
+        )
+    if settings.stale_mr_warning_hours < 1:
+        errors.append(
+            f"stale_mr_warning_hours must be at least 1, got: {settings.stale_mr_warning_hours}"
+        )
+
+
+def _validate_retry_settings(settings: Settings, errors: list[str]) -> None:
+    """Validate retry count settings."""
+    if settings.pipeline_retry_count < 0:
+        errors.append(
+            f"pipeline_retry_count cannot be negative, got: {settings.pipeline_retry_count}"
+        )
+    if settings.api_max_retries < 0:
+        errors.append(f"api_max_retries cannot be negative, got: {settings.api_max_retries}")
+
+
+def _validate_rate_limit_settings(settings: Settings, errors: list[str]) -> None:
+    """Validate rate limiting thresholds and delays."""
+    if not (0.5 <= settings.rate_limit_warning_threshold <= 0.99):
+        errors.append(
+            f"rate_limit_warning_threshold must be between 0.5 and 0.99, "
+            f"got: {settings.rate_limit_warning_threshold}"
+        )
+    if not (0.5 <= settings.rate_limit_critical_threshold <= 0.99):
+        errors.append(
+            f"rate_limit_critical_threshold must be between 0.5 and 0.99, "
+            f"got: {settings.rate_limit_critical_threshold}"
+        )
+    if settings.rate_limit_critical_threshold <= settings.rate_limit_warning_threshold:
+        errors.append(
+            f"rate_limit_critical_threshold ({settings.rate_limit_critical_threshold}) "
+            f"must be greater than rate_limit_warning_threshold "
+            f"({settings.rate_limit_warning_threshold})"
+        )
+    if settings.rate_limit_throttle_delay_seconds <= 0:
+        errors.append(
+            f"rate_limit_throttle_delay_seconds must be positive, "
+            f"got: {settings.rate_limit_throttle_delay_seconds}"
+        )
+
+
+def _validate_circuit_breaker_settings(settings: Settings, errors: list[str]) -> None:
+    """Validate circuit breaker configuration."""
+    if settings.circuit_breaker_failure_threshold < 1:
+        errors.append(
+            f"circuit_breaker_failure_threshold must be at least 1, "
+            f"got: {settings.circuit_breaker_failure_threshold}"
+        )
+    if settings.circuit_breaker_half_open_timeout_seconds < 1:
+        errors.append(
+            f"circuit_breaker_half_open_timeout_seconds must be at least 1, "
+            f"got: {settings.circuit_breaker_half_open_timeout_seconds}"
+        )
+    if settings.circuit_breaker_success_threshold < 1:
+        errors.append(
+            f"circuit_breaker_success_threshold must be at least 1, "
+            f"got: {settings.circuit_breaker_success_threshold}"
+        )
+
+
+def _validate_webhook_retry_settings(settings: Settings, errors: list[str]) -> None:
+    """Validate webhook retry queue configuration."""
+    if settings.webhook_retry_max_attempts < 1:
+        errors.append(
+            f"webhook_retry_max_attempts must be at least 1, "
+            f"got: {settings.webhook_retry_max_attempts}"
+        )
+    if settings.webhook_retry_base_delay_seconds <= 0:
+        errors.append(
+            f"webhook_retry_base_delay_seconds must be positive, "
+            f"got: {settings.webhook_retry_base_delay_seconds}"
+        )
+    if settings.webhook_retry_max_delay_seconds <= 0:
+        errors.append(
+            f"webhook_retry_max_delay_seconds must be positive, "
+            f"got: {settings.webhook_retry_max_delay_seconds}"
+        )
+    if settings.webhook_retry_max_delay_seconds < settings.webhook_retry_base_delay_seconds:
+        errors.append(
+            f"webhook_retry_max_delay_seconds ({settings.webhook_retry_max_delay_seconds}) "
+            f"must be >= webhook_retry_base_delay_seconds "
+            f"({settings.webhook_retry_base_delay_seconds})"
+        )
+    if settings.webhook_retry_poll_interval_seconds <= 0:
+        errors.append(
+            f"webhook_retry_poll_interval_seconds must be positive, "
+            f"got: {settings.webhook_retry_poll_interval_seconds}"
+        )
+    if settings.webhook_dlq_retention_days < 1:
+        errors.append(
+            f"webhook_dlq_retention_days must be at least 1, "
+            f"got: {settings.webhook_dlq_retention_days}"
+        )
+
+
+def _validate_database_settings(settings: Settings, errors: list[str]) -> None:
+    """Validate database retry configuration."""
+    if settings.database_retry_base_delay_seconds <= 0:
+        errors.append(
+            f"database_retry_base_delay_seconds must be positive, "
+            f"got: {settings.database_retry_base_delay_seconds}"
+        )
+    if settings.database_retry_max_delay_seconds <= 0:
+        errors.append(
+            f"database_retry_max_delay_seconds must be positive, "
+            f"got: {settings.database_retry_max_delay_seconds}"
+        )
+    if settings.database_retry_max_delay_seconds < settings.database_retry_base_delay_seconds:
+        errors.append(
+            f"database_retry_max_delay_seconds ({settings.database_retry_max_delay_seconds}) "
+            f"must be >= database_retry_base_delay_seconds "
+            f"({settings.database_retry_base_delay_seconds})"
+        )
+
+
+def _validate_security_settings(settings: Settings, errors: list[str]) -> None:
+    """Validate security-related settings (JWT, webhook secrets)."""
+    if settings.jwt_expiration_hours <= 0:
+        errors.append(
+            f"jwt_expiration_hours must be positive, got: {settings.jwt_expiration_hours}"
+        )
+    jwt_secret_len = len(settings.jwt_secret)
+    if jwt_secret_len < JWT_SECRET_MIN_LENGTH:
+        errors.append(
+            f"jwt_secret must be at least 64 characters (256 bits) for security, "
+            f"got {jwt_secret_len} characters. Generate with: openssl rand -hex 64"
+        )
+
+
+def _validate_webhook_server_settings(settings: Settings, errors: list[str]) -> None:
+    """Validate webhook server configuration."""
+    if not (1 <= settings.webhook_port <= 65535):
+        errors.append(f"webhook_port must be between 1 and 65535, got: {settings.webhook_port}")
+    if settings.webhook_enabled and settings.webhook_secret is None:
+        errors.append(
+            "webhook_secret is required when webhook_enabled is true. "
+            "Set GITLAB_QUEUE_WEBHOOK_SECRET or disable webhooks with "
+            "GITLAB_QUEUE_WEBHOOK_ENABLED=false"
+        )
+
+
+def _validate_cors_settings(settings: Settings, errors: list[str]) -> None:
+    """Validate CORS origin configuration."""
+    for origin in settings.cors_origins:
+        if origin == "*":
+            errors.append(
+                "Wildcard CORS origin (*) is not allowed for security. Specify explicit origins."
+            )
+        elif not origin.startswith(("http://", "https://")):
+            errors.append(f"Invalid CORS origin '{origin}': must start with http:// or https://")
+
+
 def _validate_settings(settings: Settings) -> None:
     """Validate settings for logical consistency and valid ranges.
 
@@ -305,120 +508,19 @@ def _validate_settings(settings: Settings) -> None:
     """
     errors: list[str] = []
 
-    # Validate GitLab URL
-    if not settings.gitlab_url.startswith(("http://", "https://")):
-        errors.append(
-            f"gitlab_url must start with http:// or https://, got: {settings.gitlab_url}"
-        )
-
-    # Validate GitLab project ID
-    if settings.gitlab_project_id <= 0:
-        errors.append(
-            f"gitlab_project_id must be a positive integer, got: {settings.gitlab_project_id}"
-        )
-
-    # Validate timing values
-    if settings.poll_interval_seconds <= 0:
-        errors.append(
-            f"poll_interval_seconds must be positive, got: {settings.poll_interval_seconds}"
-        )
-
-    if settings.pipeline_timeout_seconds <= 0:
-        errors.append(
-            f"pipeline_timeout_seconds must be positive, got: {settings.pipeline_timeout_seconds}"
-        )
-
-    if settings.rebase_timeout_seconds <= 0:
-        errors.append(
-            f"rebase_timeout_seconds must be positive, got: {settings.rebase_timeout_seconds}"
-        )
-
-    # Validate retry counts
-    if settings.pipeline_retry_count < 0:
-        errors.append(
-            f"pipeline_retry_count cannot be negative, got: {settings.pipeline_retry_count}"
-        )
-
-    if settings.api_max_retries < 0:
-        errors.append(
-            f"api_max_retries cannot be negative, got: {settings.api_max_retries}"
-        )
-
-    # Validate webhook retry queue settings
-    if settings.webhook_retry_max_attempts < 1:
-        errors.append(
-            f"webhook_retry_max_attempts must be at least 1, got: {settings.webhook_retry_max_attempts}"
-        )
-
-    if settings.webhook_retry_base_delay_seconds <= 0:
-        errors.append(
-            f"webhook_retry_base_delay_seconds must be positive, got: {settings.webhook_retry_base_delay_seconds}"
-        )
-
-    if settings.webhook_retry_max_delay_seconds <= 0:
-        errors.append(
-            f"webhook_retry_max_delay_seconds must be positive, got: {settings.webhook_retry_max_delay_seconds}"
-        )
-
-    if settings.webhook_retry_max_delay_seconds < settings.webhook_retry_base_delay_seconds:
-        errors.append(
-            f"webhook_retry_max_delay_seconds ({settings.webhook_retry_max_delay_seconds}) "
-            f"must be >= webhook_retry_base_delay_seconds ({settings.webhook_retry_base_delay_seconds})"
-        )
-
-    if settings.webhook_retry_poll_interval_seconds <= 0:
-        errors.append(
-            f"webhook_retry_poll_interval_seconds must be positive, got: {settings.webhook_retry_poll_interval_seconds}"
-        )
-
-    if settings.webhook_dlq_retention_days < 1:
-        errors.append(
-            f"webhook_dlq_retention_days must be at least 1, got: {settings.webhook_dlq_retention_days}"
-        )
-
-    # Validate JWT expiration
-    if settings.jwt_expiration_hours <= 0:
-        errors.append(
-            f"jwt_expiration_hours must be positive, got: {settings.jwt_expiration_hours}"
-        )
-
-    # Validate webhook port
-    if not (1 <= settings.webhook_port <= 65535):
-        errors.append(
-            f"webhook_port must be between 1 and 65535, got: {settings.webhook_port}"
-        )
-
-    # Validate webhook secret is set when webhooks are enabled
-    if settings.webhook_enabled and settings.webhook_secret is None:
-        errors.append(
-            "webhook_secret is required when webhook_enabled is true. "
-            "Set GITLAB_QUEUE_WEBHOOK_SECRET or disable webhooks with GITLAB_QUEUE_WEBHOOK_ENABLED=false"
-        )
-
-    # Validate JWT secret length
-    jwt_secret_len = len(settings.jwt_secret)
-    if jwt_secret_len < JWT_SECRET_MIN_LENGTH:
-        errors.append(
-            f"jwt_secret must be at least 64 characters (256 bits) for security, "
-            f"got {jwt_secret_len} characters. Generate with: openssl rand -hex 64"
-        )
-
-    # Validate CORS origins format
-    for origin in settings.cors_origins:
-        if origin == "*":
-            errors.append(
-                "Wildcard CORS origin (*) is not allowed for security. "
-                "Specify explicit origins."
-            )
-        elif not origin.startswith(("http://", "https://")):
-            errors.append(
-                f"Invalid CORS origin '{origin}': must start with http:// or https://"
-            )
+    _validate_gitlab_settings(settings, errors)
+    _validate_timing_settings(settings, errors)
+    _validate_retry_settings(settings, errors)
+    _validate_rate_limit_settings(settings, errors)
+    _validate_circuit_breaker_settings(settings, errors)
+    _validate_webhook_retry_settings(settings, errors)
+    _validate_database_settings(settings, errors)
+    _validate_security_settings(settings, errors)
+    _validate_webhook_server_settings(settings, errors)
+    _validate_cors_settings(settings, errors)
 
     if errors:
-        raise ConfigurationError(
-            "Configuration validation failed:\n  - " + "\n  - ".join(errors)
-        )
+        raise ConfigurationError("Configuration validation failed:\n  - " + "\n  - ".join(errors))
 
 
 def load_settings() -> Settings:
