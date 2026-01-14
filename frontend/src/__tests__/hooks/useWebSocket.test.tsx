@@ -3,10 +3,10 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { renderHook, act, waitFor } from '@testing-library/react';
+import { renderHook, act } from '@testing-library/react';
 import { useWebSocket } from '../../hooks/useWebSocket';
-import { wsManager, WebSocketManager } from '../../api/websocket';
-import { setToken, clearToken } from '../../auth/storage';
+import { wsManager } from '../../api/websocket';
+import { setToken } from '../../auth/storage';
 import type { MergeRequest, QueueStatsFromWS } from '../../types';
 
 // Mock the wsManager module

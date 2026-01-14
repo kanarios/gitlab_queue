@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 import { apiFetch, buildUrl } from '../../api/client';
-import { setToken, clearToken } from '../../auth/storage';
+import { setToken } from '../../auth/storage';
 
 describe('api/client', () => {
   beforeEach(() => {
@@ -35,47 +35,47 @@ describe('api/client', () => {
     it('adds Authorization header when token exists', async () => {
       setToken('test-jwt-token');
 
-      let capturedHeaders: Headers | null = null;
+      const capturedHeaders: { value: Headers | null } = { value: null };
       server.use(
         http.get('/api/test', ({ request }) => {
-          capturedHeaders = request.headers;
+          capturedHeaders.value = request.headers;
           return HttpResponse.json({});
         })
       );
 
       await apiFetch('/api/test');
 
-      expect(capturedHeaders?.get('Authorization')).toBe(
+      expect(capturedHeaders.value?.get('Authorization')).toBe(
         'Bearer test-jwt-token'
       );
     });
 
     it('does not add Authorization header when no token', async () => {
-      let capturedHeaders: Headers | null = null;
+      const capturedHeaders: { value: Headers | null } = { value: null };
       server.use(
         http.get('/api/test', ({ request }) => {
-          capturedHeaders = request.headers;
+          capturedHeaders.value = request.headers;
           return HttpResponse.json({});
         })
       );
 
       await apiFetch('/api/test');
 
-      expect(capturedHeaders?.get('Authorization')).toBeNull();
+      expect(capturedHeaders.value?.get('Authorization')).toBeNull();
     });
 
     it('sets Content-Type to application/json', async () => {
-      let capturedHeaders: Headers | null = null;
+      const capturedHeaders: { value: Headers | null } = { value: null };
       server.use(
         http.get('/api/test', ({ request }) => {
-          capturedHeaders = request.headers;
+          capturedHeaders.value = request.headers;
           return HttpResponse.json({});
         })
       );
 
       await apiFetch('/api/test');
 
-      expect(capturedHeaders?.get('Content-Type')).toBe('application/json');
+      expect(capturedHeaders.value?.get('Content-Type')).toBe('application/json');
     });
 
     it('returns unauthorized error on 401 and clears token', async () => {
@@ -202,10 +202,10 @@ describe('api/client', () => {
     });
 
     it('passes custom headers', async () => {
-      let capturedHeaders: Headers | null = null;
+      const capturedHeaders: { value: Headers | null } = { value: null };
       server.use(
         http.get('/api/test', ({ request }) => {
-          capturedHeaders = request.headers;
+          capturedHeaders.value = request.headers;
           return HttpResponse.json({});
         })
       );
@@ -216,7 +216,7 @@ describe('api/client', () => {
         },
       });
 
-      expect(capturedHeaders?.get('X-Custom-Header')).toBe('custom-value');
+      expect(capturedHeaders.value?.get('X-Custom-Header')).toBe('custom-value');
     });
 
     it('supports POST requests with body', async () => {
