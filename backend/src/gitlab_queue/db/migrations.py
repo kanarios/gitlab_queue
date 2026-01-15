@@ -70,10 +70,7 @@ async def get_current_revision(database_url: str) -> str | None:
         async with engine.connect() as conn:
             # Check if alembic_version table exists
             result = await conn.execute(
-                text(
-                    "SELECT name FROM sqlite_master "
-                    "WHERE type='table' AND name='alembic_version'"
-                )
+                text("SELECT name FROM sqlite_master WHERE type='table' AND name='alembic_version'")
             )
             if result.fetchone() is None:
                 return None
