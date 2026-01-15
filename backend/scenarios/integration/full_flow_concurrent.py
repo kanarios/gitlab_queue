@@ -78,11 +78,15 @@ async def concurrent_webhook_and_polling_no_duplicates():
             get_mr_response = jj.Response(status=200, json=mr_data)
 
             # GET notes (for finding existing bot comments)
-            get_notes_matcher = jj.match("GET", r"/api/v4/projects/123/merge_requests/\d+/notes")
+            get_notes_matcher = jj.match(
+                "GET", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes")
+            )
             get_notes_response = jj.Response(status=200, json=[])
 
             # Comment matcher (optional notifications)
-            comment_matcher = jj.match("POST", r"/api/v4/projects/123/merge_requests/\d+/notes")
+            comment_matcher = jj.match(
+                "POST", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes")
+            )
             comment_response = jj.Response(status=201, json={"id": 1})
 
         async with (
@@ -107,7 +111,7 @@ async def concurrent_webhook_and_polling_no_duplicates():
                 # Run both operations concurrently using asyncio.gather
                 results = await asyncio.gather(
                     webhook_handler.handle_merge_request_event(webhook_payload),
-                    scheduler.sync_queue_with_gitlab(),
+                    scheduler.sync_queue(),
                     return_exceptions=True,
                 )
 
@@ -189,10 +193,14 @@ async def concurrent_multiple_webhooks_same_mr():
             get_mr_response = jj.Response(status=200, json=mr_data)
 
             # GET notes (for finding existing bot comments)
-            get_notes_matcher = jj.match("GET", r"/api/v4/projects/123/merge_requests/\d+/notes")
+            get_notes_matcher = jj.match(
+                "GET", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes")
+            )
             get_notes_response = jj.Response(status=200, json=[])
 
-            comment_matcher = jj.match("POST", r"/api/v4/projects/123/merge_requests/\d+/notes")
+            comment_matcher = jj.match(
+                "POST", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes")
+            )
             comment_response = jj.Response(status=201, json={"id": 1})
 
         async with (
@@ -302,10 +310,14 @@ async def concurrent_add_and_remove():
             get_mr_response = jj.Response(status=200, json=mr_data)
 
             # GET notes (for finding existing bot comments)
-            get_notes_matcher = jj.match("GET", r"/api/v4/projects/123/merge_requests/\d+/notes")
+            get_notes_matcher = jj.match(
+                "GET", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes")
+            )
             get_notes_response = jj.Response(status=200, json=[])
 
-            comment_matcher = jj.match("POST", r"/api/v4/projects/123/merge_requests/\d+/notes")
+            comment_matcher = jj.match(
+                "POST", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes")
+            )
             comment_response = jj.Response(status=201, json={"id": 1})
 
         async with (

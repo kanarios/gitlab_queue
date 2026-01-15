@@ -29,6 +29,7 @@ from gitlab_queue.metrics import MR_DURATION
 from gitlab_queue.utils.logging import LogContext, get_logger
 
 if TYPE_CHECKING:
+    from gitlab_queue.api.websocket import WebSocketManager
     from gitlab_queue.clients.gitlab import GitLabClient
     from gitlab_queue.config import Settings
     from gitlab_queue.core.notifier import MRNotifier
@@ -99,6 +100,16 @@ class MergeProcessor:
     _shutdown_event: asyncio.Event = field(default_factory=asyncio.Event, init=False)
     _current_mr_iid: int | None = field(default=None, init=False)
     _processing_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False)
+    _websocket_manager: WebSocketManager | None = field(default=None, init=False)
+
+    def set_websocket_manager(self, manager: WebSocketManager) -> None:
+        """Set WebSocket manager for broadcasting queue updates.
+
+        Args:
+            manager: WebSocketManager instance.
+        """
+        self._websocket_manager = manager
+        log.debug("WebSocket manager set for processor")
 
     # =========================================================================
     # Main Loop
@@ -200,6 +211,7 @@ class MergeProcessor:
                     notifier=self.notifier,
                     queue_manager=self.queue_manager,
                     target_branch=self.settings.target_branch,
+                    websocket_manager=self._websocket_manager,
                 )
 
                 ctx = ProcessingContext(
@@ -422,7 +434,26 @@ class MergeProcessor:
             )
             return False, None
 
-        new_pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
+        # Wait for new pipeline to be created (GitLab creates it asynchronously)
+        max_wait_seconds = 30
+        poll_interval = 3
+        waited = 0
+        new_pipeline = None
+
+        while waited < max_wait_seconds:
+            new_pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
+            if new_pipeline and new_pipeline.id != old_pipeline_id:
+                log.info(
+                    "New pipeline detected after retry rebase",
+                    mr_iid=mr_iid,
+                    old_pipeline_id=old_pipeline_id,
+                    new_pipeline_id=new_pipeline.id,
+                    waited_seconds=waited,
+                )
+                break
+            await asyncio.sleep(poll_interval)
+            waited += poll_interval
+
         if new_pipeline and new_pipeline.id != old_pipeline_id:
             new_pipeline_url = self.notifier.build_pipeline_url(new_pipeline.id)
             await sm.notify_pipeline_retry(
@@ -436,6 +467,18 @@ class MergeProcessor:
             )
             return True, datetime.now(UTC)
 
+        # Rebase succeeded but no new pipeline was created after waiting - mark as failed
+        log.warning(
+            "No new pipeline after retry rebase",
+            mr_iid=mr_iid,
+            old_pipeline_id=old_pipeline_id,
+            waited_seconds=waited,
+        )
+        await sm.trigger_pipeline_failed(
+            failed_jobs=failed_jobs,
+            retry_count=retry_count + 1,
+            error_message="No new pipeline created after retry rebase",
+        )
         return False, None
 
     async def _wait_for_pipeline(self, ctx: ProcessingContext) -> ProcessingResult:
@@ -500,6 +543,23 @@ class MergeProcessor:
                     retry_count += 1
                     start_time = new_start
                     continue
+                return ProcessingResult.PIPELINE_FAILED
+
+            # Handle non-actionable terminal statuses that require manual intervention
+            # These statuses will never automatically transition to success/failed
+            non_actionable_statuses = ("skipped", "manual", "waiting_for_resource", "blocked")
+            if pipeline.status in non_actionable_statuses:
+                log.warning(
+                    "Pipeline in non-actionable state requiring manual intervention",
+                    mr_iid=mr_iid,
+                    pipeline_id=pipeline.id,
+                    status=pipeline.status,
+                )
+                await sm.trigger_pipeline_failed(
+                    failed_jobs=[],
+                    retry_count=retry_count,
+                    error_message=f"Pipeline status is '{pipeline.status}' - requires manual intervention",
+                )
                 return ProcessingResult.PIPELINE_FAILED
 
             await self._interruptible_sleep(self.settings.poll_interval_seconds)
@@ -628,6 +688,7 @@ class MergeProcessor:
                         notifier=self.notifier,
                         queue_manager=self.queue_manager,
                         target_branch=self.settings.target_branch,
+                        websocket_manager=self._websocket_manager,
                     )
                     await sm.notify_stale_warning(warning_hours=warning_hours)
                     await self.queue_manager.mark_stale_warning_sent(item.mr_iid)
@@ -812,6 +873,49 @@ class MergeProcessor:
             gitlab_mrs_count=len(gitlab_mrs),
             added_count=added_count,
         )
+
+        # Broadcast queue update if MRs were added
+        if added_count > 0 and self._websocket_manager:
+            await self._broadcast_queue_update()
+
+    async def _broadcast_queue_update(self) -> None:
+        """Broadcast current queue state to all WebSocket clients."""
+        if not self._websocket_manager:
+            return
+
+        try:
+            queue_items = await self.queue_manager.get_active_queue()
+            queue_stats = await self.queue_manager.get_queue_stats()
+
+            # Convert queue items to dicts for WebSocket
+            queue_data = []
+            for i, item in enumerate(queue_items, start=1):
+                queue_data.append(
+                    {
+                        "mr_iid": item.mr_iid,
+                        "title": item.title,
+                        "author": {
+                            "name": item.author_name,
+                            "username": item.author_username,
+                            "avatar_url": item.author_avatar,
+                        },
+                        "target_branch": item.target_branch,
+                        "status": item.state,
+                        "is_hotfix": item.is_hotfix,
+                        "labels": item.labels,
+                        "queued_at": item.queued_at.isoformat(),
+                        "started_at": item.started_at.isoformat() if item.started_at else None,
+                        "position": i,
+                    }
+                )
+
+            await self._websocket_manager.broadcast_queue_updated(queue_data, queue_stats)
+            log.debug(
+                "Broadcast queue update to WebSocket clients",
+                queue_length=len(queue_data),
+            )
+        except Exception as e:
+            log.warning("Failed to broadcast queue update", error=str(e))
 
     # =========================================================================
     # Shutdown Control

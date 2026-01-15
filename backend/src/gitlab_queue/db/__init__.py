@@ -39,6 +39,12 @@ from gitlab_queue.db.database import (
     DatabaseStatus,
     create_database,
 )
+from gitlab_queue.db.migrations import (
+    ensure_migrations,
+    get_current_revision,
+    get_pending_migrations,
+    run_migrations,
+)
 from gitlab_queue.db.models import (
     AnalyticsDailyModel,
     AnalyticsHourlyModel,
@@ -103,4 +109,9 @@ __all__: list[str] = [
     "WebhookDLQModel",
     "WebhookRetryModel",
     "create_database",
+    # Migrations
+    "ensure_migrations",
+    "get_current_revision",
+    "get_pending_migrations",
+    "run_migrations",
 ]

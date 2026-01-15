@@ -54,11 +54,42 @@ CREATE TABLE IF NOT EXISTS merge_requests (
 )
 """
 
+_CREATE_HISTORY_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS merge_requests_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    iid INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    author_name TEXT NOT NULL,
+    author_username TEXT NOT NULL,
+    author_avatar TEXT,
+    status TEXT NOT NULL,
+    is_hotfix INTEGER DEFAULT 0 NOT NULL,
+    labels TEXT,
+    target_branch TEXT NOT NULL,
+    queued_at TEXT NOT NULL,
+    started_at TEXT,
+    finished_at TEXT NOT NULL,
+    wait_time_seconds INTEGER,
+    processing_time_seconds INTEGER,
+    failure_reason TEXT,
+    pipeline_id INTEGER,
+    pipeline_status TEXT,
+    pipeline_duration_seconds INTEGER,
+    pipeline_failed_jobs TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+)
+"""
+
 _CREATE_INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_mr_status ON merge_requests(status)",
     "CREATE INDEX IF NOT EXISTS idx_mr_queued_at ON merge_requests(queued_at)",
     "CREATE INDEX IF NOT EXISTS idx_mr_iid ON merge_requests(iid)",
     "CREATE INDEX IF NOT EXISTS idx_mr_finished_at ON merge_requests(finished_at)",
+]
+
+_CREATE_HISTORY_INDEXES_SQL = [
+    "CREATE INDEX IF NOT EXISTS idx_history_finished_at ON merge_requests_history(finished_at)",
+    "CREATE INDEX IF NOT EXISTS idx_history_status ON merge_requests_history(status)",
 ]
 
 _INSERT_MR_SQL = """
@@ -80,13 +111,13 @@ SELECT * FROM merge_requests WHERE iid = :iid
 _SELECT_ACTIVE_QUEUE_SQL = """
 SELECT * FROM merge_requests
 WHERE status IN ('queued', 'rebasing', 'testing', 'merging')
-ORDER BY is_hotfix DESC, queued_at ASC
+ORDER BY is_hotfix DESC, id ASC
 """
 
 _SELECT_NEXT_MR_SQL = """
 SELECT * FROM merge_requests
 WHERE status = 'queued'
-ORDER BY is_hotfix DESC, queued_at ASC
+ORDER BY is_hotfix DESC, id ASC
 LIMIT 1
 """
 
@@ -103,7 +134,7 @@ AND (
     is_hotfix > (SELECT COALESCE(is_hotfix, 0) FROM merge_requests WHERE iid = :iid)
     OR (
         is_hotfix = (SELECT COALESCE(is_hotfix, 0) FROM merge_requests WHERE iid = :iid)
-        AND queued_at < (SELECT queued_at FROM merge_requests WHERE iid = :iid)
+        AND id < (SELECT id FROM merge_requests WHERE iid = :iid)
     )
 )
 """
@@ -161,6 +192,27 @@ SELECT
     ) as avg_processing_seconds
 FROM merge_requests
 WHERE finished_at >= datetime('now', :days_param)
+"""
+
+_INSERT_HISTORY_SQL = """
+INSERT INTO merge_requests_history (
+    iid, title, author_name, author_username, author_avatar,
+    status, is_hotfix, labels, target_branch,
+    queued_at, started_at, finished_at,
+    wait_time_seconds, processing_time_seconds, failure_reason,
+    pipeline_id, pipeline_status, pipeline_duration_seconds, pipeline_failed_jobs
+)
+VALUES (
+    :iid, :title, :author_name, :author_username, :author_avatar,
+    :status, :is_hotfix, :labels, :target_branch,
+    :queued_at, :started_at, :finished_at,
+    :wait_time_seconds, :processing_time_seconds, :failure_reason,
+    :pipeline_id, :pipeline_status, :pipeline_duration_seconds, :pipeline_failed_jobs
+)
+"""
+
+_DELETE_MR_SQL = """
+DELETE FROM merge_requests WHERE iid = :iid
 """
 
 
@@ -250,7 +302,7 @@ class QueueManager:
     _cache: QueueCache = field(default_factory=QueueCache, init=False)
 
     async def ensure_schema(self) -> None:
-        """Create the merge_requests table and indexes if they don't exist.
+        """Create the merge_requests and history tables if they don't exist.
 
         Safe to call multiple times - uses CREATE IF NOT EXISTS.
         Also handles schema migrations for new columns.
@@ -258,8 +310,14 @@ class QueueManager:
         log.debug("Ensuring database schema exists")
 
         async with self.db.transaction() as session:
+            # Create active queue table
             await session.execute(text(_CREATE_TABLE_SQL))
             for index_sql in _CREATE_INDEXES_SQL:
+                await session.execute(text(index_sql))
+
+            # Create history table
+            await session.execute(text(_CREATE_HISTORY_TABLE_SQL))
+            for index_sql in _CREATE_HISTORY_INDEXES_SQL:
                 await session.execute(text(index_sql))
 
             # Migrate: add stale_warning_sent column if not exists
@@ -279,8 +337,9 @@ class QueueManager:
     ) -> QueueItem:
         """Add a merge request to the queue.
 
-        Idempotent - if the MR is already in the queue, returns the existing item.
-        New items are added with 'queued' status.
+        Idempotent - if the MR is already in active queue, returns the existing item.
+        If MR exists in terminal state (failed/merged/removed), it will be deleted
+        and re-added as 'queued'.
 
         Args:
             mr: The MergeRequest to add.
@@ -299,22 +358,45 @@ class QueueManager:
             title=mr.title,
         )
 
+        terminal_states = ("merged", "failed", "removed")
+
         async with self.db.transaction() as session:
-            # Try to insert (will be ignored if already exists)
-            await session.execute(
-                text(_INSERT_MR_SQL),
-                {
-                    "iid": mr.iid,
-                    "title": mr.title,
-                    "author_name": mr.author.name,
-                    "author_username": mr.author.username,
-                    "author_avatar": mr.author.avatar_url,
-                    "is_hotfix": 1 if is_hotfix else 0,
-                    "labels": labels_json,
-                    "target_branch": mr.target_branch,
-                    "queued_at": now.isoformat(),
-                },
+            # Check if MR already exists
+            result = await session.execute(
+                text(_SELECT_MR_BY_IID_SQL),
+                {"iid": mr.iid},
             )
+            existing = result.mappings().one_or_none()
+
+            # If exists in terminal state, delete it first (should have been in history)
+            if existing and existing["status"] in terminal_states:
+                log.info(
+                    "Removing stale terminal-state MR before re-adding",
+                    mr_iid=mr.iid,
+                    old_status=existing["status"],
+                )
+                await session.execute(
+                    text(_DELETE_MR_SQL),
+                    {"iid": mr.iid},
+                )
+                existing = None
+
+            # Insert new MR (or skip if already in active state)
+            if existing is None:
+                await session.execute(
+                    text(_INSERT_MR_SQL),
+                    {
+                        "iid": mr.iid,
+                        "title": mr.title,
+                        "author_name": mr.author.name,
+                        "author_username": mr.author.username,
+                        "author_avatar": mr.author.avatar_url,
+                        "is_hotfix": 1 if is_hotfix else 0,
+                        "labels": labels_json,
+                        "target_branch": mr.target_branch,
+                        "queued_at": now.isoformat(),
+                    },
+                )
 
             # Fetch the item (whether newly inserted or existing)
             result = await session.execute(
@@ -458,7 +540,9 @@ class QueueManager:
         return len(items)
 
     async def get_mr_state(self, mr_iid: int) -> dict[str, Any] | None:
-        """Get the current state of an MR in the queue.
+        """Get the current state of an MR in the queue or history.
+
+        First checks the active queue, then falls back to history if not found.
 
         Args:
             mr_iid: The MR's internal ID.
@@ -467,11 +551,25 @@ class QueueManager:
             Dict with status, started_at, last_error, finished_at or None if not found.
         """
         async with self.db.session() as session:
+            # First check active queue
             result = await session.execute(
                 text(_SELECT_MR_STATE_SQL),
                 {"iid": mr_iid},
             )
             row = result.mappings().one_or_none()
+
+            # If not found in active queue, check history
+            if row is None:
+                result = await session.execute(
+                    text(
+                        "SELECT status, started_at, failure_reason as last_error, "
+                        "finished_at FROM merge_requests_history WHERE iid = :iid "
+                        "ORDER BY id DESC LIMIT 1"
+                    ),
+                    {"iid": mr_iid},
+                )
+                row = result.mappings().one_or_none()
+
             await session.commit()
 
         if row is None:
@@ -551,6 +649,102 @@ class QueueManager:
             raise QueueItemNotFoundError(mr_iid)
 
         return changed
+
+    async def complete_mr(
+        self,
+        mr_iid: int,
+        status: str,
+        failure_reason: str | None = None,
+        pipeline_duration_seconds: int | None = None,
+        pipeline_failed_jobs: list[str] | None = None,
+    ) -> bool:
+        """Move MR from active queue to history table.
+
+        This is an atomic operation that:
+        1. Reads the MR from active queue
+        2. Creates history record with computed timing fields
+        3. Deletes from active queue
+
+        Should be called after MR reaches terminal state (merged, failed, removed).
+
+        Args:
+            mr_iid: MR internal ID.
+            status: Final status (merged, failed, conflict, timeout, removed).
+            failure_reason: Reason for failure if applicable.
+            pipeline_duration_seconds: Total pipeline duration.
+            pipeline_failed_jobs: List of failed job names.
+
+        Returns:
+            True if MR was moved to history, False if not found.
+        """
+        log.debug(
+            "Completing MR and moving to history",
+            mr_iid=mr_iid,
+            status=status,
+            failure_reason=failure_reason,
+        )
+
+        # First get the MR data
+        mr = await self.get_queue_item(mr_iid)
+        if not mr:
+            log.warning("MR not found for completion", mr_iid=mr_iid)
+            return False
+
+        now = datetime.now(UTC)
+        finished_at = now.isoformat()
+
+        # Calculate timing metrics
+        wait_time_seconds: int | None = None
+        processing_time_seconds: int | None = None
+
+        if mr.queued_at and mr.started_at:
+            wait_time_seconds = int((mr.started_at - mr.queued_at).total_seconds())
+            processing_time_seconds = int((now - mr.started_at).total_seconds())
+        elif mr.queued_at:
+            # MR never started processing (e.g., removed while queued)
+            wait_time_seconds = int((now - mr.queued_at).total_seconds())
+
+        # Prepare history record params
+        history_params = {
+            "iid": mr.mr_iid,
+            "title": mr.title,
+            "author_name": mr.author_name,
+            "author_username": mr.author_username,
+            "author_avatar": mr.author_avatar,
+            "status": status,
+            "is_hotfix": 1 if mr.is_hotfix else 0,
+            "labels": json.dumps(mr.labels) if mr.labels else None,
+            "target_branch": mr.target_branch,
+            "queued_at": mr.queued_at.isoformat() if mr.queued_at else finished_at,
+            "started_at": mr.started_at.isoformat() if mr.started_at else None,
+            "finished_at": finished_at,
+            "wait_time_seconds": wait_time_seconds,
+            "processing_time_seconds": processing_time_seconds,
+            "failure_reason": failure_reason,
+            "pipeline_id": mr.pipeline_id,
+            "pipeline_status": mr.pipeline_status,
+            "pipeline_duration_seconds": pipeline_duration_seconds,
+            "pipeline_failed_jobs": json.dumps(pipeline_failed_jobs)
+            if pipeline_failed_jobs
+            else None,
+        }
+
+        async with self.db.transaction() as session:
+            # Insert into history
+            await session.execute(text(_INSERT_HISTORY_SQL), history_params)
+            # Delete from active queue
+            await session.execute(text(_DELETE_MR_SQL), {"iid": mr_iid})
+
+        self._cache.invalidate()
+        OPERATIONS_TOTAL.labels(type="complete", status="success").inc()
+        log.info(
+            "MR completed and moved to history",
+            mr_iid=mr_iid,
+            status=status,
+            wait_time_seconds=wait_time_seconds,
+            processing_time_seconds=processing_time_seconds,
+        )
+        return True
 
     async def get_queue_stats(self) -> dict[str, int]:
         """Get statistics about the active queue.

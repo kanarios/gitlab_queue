@@ -1195,6 +1195,29 @@ class GitLabClient:
         log.info("Creating new bot comment", mr_iid=iid)
         return await self.add_comment(iid, body)
 
+    async def remove_mr_label(self, iid: int, label: str) -> MergeRequest:
+        """Remove a label from a merge request.
+
+        Args:
+            iid: Internal ID of the merge request.
+            label: Label name to remove.
+
+        Returns:
+            Updated MergeRequest model.
+
+        Raises:
+            GitLabNotFoundError: If MR does not exist.
+            GitLabAPIError: On other API errors.
+        """
+        log.info("Removing label from MR", mr_iid=iid, label=label)
+
+        data = await self.put(
+            f"merge_requests/{iid}",
+            json={"remove_labels": label},
+        )
+
+        return parse_merge_request(data)
+
 
 __all__: list[str] = [
     "GitLabAPIError",

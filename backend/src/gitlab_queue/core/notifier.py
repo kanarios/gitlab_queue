@@ -363,6 +363,27 @@ class MRNotifier:
         base = self.settings.gitlab_url.rstrip("/")
         return f"{base}/-/pipelines/{pipeline_id}"
 
+    async def remove_queue_label(self, mr_iid: int) -> None:
+        """Remove the queue label from an MR.
+
+        Called when MR processing completes (merged, failed, removed)
+        to prevent re-queueing by the scheduler.
+
+        Args:
+            mr_iid: Internal ID of the merge request.
+        """
+        try:
+            await self.gitlab_client.remove_mr_label(mr_iid, self.settings.queue_label)
+            log.info("Queue label removed from MR", mr_iid=mr_iid, label=self.settings.queue_label)
+        except Exception as e:
+            # Don't fail the whole operation if label removal fails
+            log.warning(
+                "Failed to remove queue label from MR",
+                mr_iid=mr_iid,
+                label=self.settings.queue_label,
+                error=str(e),
+            )
+
 
 __all__: list[str] = [
     "COMMENT_TEMPLATES",

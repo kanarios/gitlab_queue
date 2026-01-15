@@ -76,26 +76,39 @@ async def restart_recovery_continues_processing():
 
             # Individual MR matchers
             mr_matchers = []
-            for mr_iid, _ in mrs_states:
+            for mr_iid, state in mrs_states:
                 matcher = jj.match("GET", f"/api/v4/projects/123/merge_requests/{mr_iid}")
                 response = jj.Response(
                     status=200,
                     json={
                         "iid": mr_iid,
                         "project_id": 123,
+                        "title": f"MR {mr_iid} - {state}",
                         "state": "opened",
                         "sha": f"sha_{mr_iid}",
                         "labels": ["merge_queue"],
+                        "source_branch": f"feature/{mr_iid}",
+                        "target_branch": "main",
+                        "merge_status": "can_be_merged",
+                        "author": {
+                            "id": mr_iid,
+                            "name": f"User {mr_iid}",
+                            "username": f"user{mr_iid}",
+                        },
                     },
                 )
                 mr_matchers.append((matcher, response))
 
             # GET notes (for finding existing bot comments)
-            get_notes_matcher = jj.match("GET", r"/api/v4/projects/123/merge_requests/\d+/notes")
+            get_notes_matcher = jj.match(
+                "GET", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes")
+            )
             get_notes_response = jj.Response(status=200, json=[])
 
             # POST notes (for creating new comments)
-            comment_matcher = jj.match("POST", r"/api/v4/projects/123/merge_requests/\d+/notes")
+            comment_matcher = jj.match(
+                "POST", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes")
+            )
             comment_response = jj.Response(status=201, json={"id": 1})
 
         async with (
@@ -136,7 +149,8 @@ async def restart_recovery_continues_processing():
                 # Get recovered states
                 recovered_states = {}
                 for mr_iid, _ in mrs_states:
-                    recovered_states[mr_iid] = await queue.get_mr_state(mr_iid)
+                    state_data = await queue.get_mr_state(mr_iid)
+                    recovered_states[mr_iid] = state_data["status"] if state_data else None
 
             with then("all intermediate states reset to queued"):
                 # All intermediate states should be reset to queued
@@ -186,9 +200,14 @@ async def restart_detects_merged_mr_in_gitlab():
                 json={
                     "iid": 600,
                     "project_id": 123,
+                    "title": "Almost Merged",
                     "state": "merged",  # Already merged in GitLab
                     "sha": "sha_600",
                     "labels": [],  # Labels removed after merge
+                    "source_branch": "feature/600",
+                    "target_branch": "main",
+                    "merge_status": "can_be_merged",
+                    "author": {"id": 600, "name": "User 600", "username": "user600"},
                 },
             )
 
@@ -196,11 +215,15 @@ async def restart_detects_merged_mr_in_gitlab():
             list_mrs_response = jj.Response(status=200, json=[])
 
             # GET notes (for finding existing bot comments)
-            get_notes_matcher = jj.match("GET", r"/api/v4/projects/123/merge_requests/\d+/notes")
+            get_notes_matcher = jj.match(
+                "GET", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes")
+            )
             get_notes_response = jj.Response(status=200, json=[])
 
             # POST notes (for creating new comments)
-            comment_matcher = jj.match("POST", r"/api/v4/projects/123/merge_requests/\d+/notes")
+            comment_matcher = jj.match(
+                "POST", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes")
+            )
             comment_response = jj.Response(status=201, json={"id": 1})
 
         async with (
@@ -220,7 +243,8 @@ async def restart_detects_merged_mr_in_gitlab():
                 )
 
                 await processor._recover_interrupted_state()
-                final_state = await queue.get_mr_state(600)
+                state_data = await queue.get_mr_state(600)
+                final_state = state_data["status"] if state_data else None
 
             with then("MR is marked as merged"):
                 assert final_state == "merged", "MR should be marked as merged"
@@ -264,9 +288,14 @@ async def restart_detects_closed_mr_in_gitlab():
                 json={
                     "iid": 700,
                     "project_id": 123,
+                    "title": "Closed MR",
                     "state": "closed",  # Closed in GitLab
                     "sha": "sha_700",
                     "labels": ["merge_queue"],
+                    "source_branch": "feature/700",
+                    "target_branch": "main",
+                    "merge_status": "can_be_merged",
+                    "author": {"id": 700, "name": "User 700", "username": "user700"},
                 },
             )
 
@@ -274,11 +303,15 @@ async def restart_detects_closed_mr_in_gitlab():
             list_mrs_response = jj.Response(status=200, json=[])
 
             # GET notes (for finding existing bot comments)
-            get_notes_matcher = jj.match("GET", r"/api/v4/projects/123/merge_requests/\d+/notes")
+            get_notes_matcher = jj.match(
+                "GET", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes")
+            )
             get_notes_response = jj.Response(status=200, json=[])
 
             # POST notes (for creating new comments)
-            comment_matcher = jj.match("POST", r"/api/v4/projects/123/merge_requests/\d+/notes")
+            comment_matcher = jj.match(
+                "POST", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes")
+            )
             comment_response = jj.Response(status=201, json={"id": 1})
 
         async with (
@@ -298,7 +331,8 @@ async def restart_detects_closed_mr_in_gitlab():
                 )
 
                 await processor._recover_interrupted_state()
-                final_state = await queue.get_mr_state(700)
+                state_data = await queue.get_mr_state(700)
+                final_state = state_data["status"] if state_data else None
 
             with then("MR is marked as removed"):
                 assert final_state == "removed", "MR should be marked as removed"

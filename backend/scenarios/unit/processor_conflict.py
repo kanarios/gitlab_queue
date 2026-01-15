@@ -151,7 +151,7 @@ async def process_mr_with_immediate_conflict():
 
             # Verify queue state
             mr_state = await queue.get_mr_state(44)
-            assert mr_state["status"] == "failed", f"MR should be failed, got {mr_state}"
+            assert mr_state["status"] == "conflict", f"MR should be conflict, got {mr_state}"
 
 
 @scenario()
@@ -279,7 +279,7 @@ async def process_mr_with_conflict_during_rebase():
 
             # Verify state
             mr_state = await queue.get_mr_state(45)
-            assert mr_state["status"] == "failed"
+            assert mr_state["status"] == "conflict"
 
 
 @scenario()
@@ -395,9 +395,9 @@ async def process_mr_with_conflict_after_multiple_mrs():
         with then("conflicting MR is failed but queue continues"):
             assert result == ProcessingResult.CONFLICT
 
-            # Verify first MR is failed
+            # Verify first MR is conflict
             mr_46_state = await queue.get_mr_state(46)
-            assert mr_46_state["status"] == "failed"
+            assert mr_46_state["status"] == "conflict"
 
             # Verify second MR is still queued and ready
             next_item = await queue.get_next_mr()

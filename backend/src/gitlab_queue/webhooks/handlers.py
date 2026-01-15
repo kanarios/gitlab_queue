@@ -14,6 +14,7 @@ from gitlab_queue.models.events import MergeRequestEvent, PipelineEvent
 from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
+    from gitlab_queue.api.websocket import WebSocketManager
     from gitlab_queue.clients.gitlab import GitLabClient
     from gitlab_queue.config import Settings
     from gitlab_queue.core.notifier import MRNotifier
@@ -33,11 +34,13 @@ class MRWebhookHandler:
         settings: Application configuration.
         gitlab_client: GitLab API client.
         queue_manager: Queue manager for MR operations.
+        websocket_manager: WebSocket manager for real-time UI updates.
     """
 
     settings: Settings
     gitlab_client: GitLabClient
     queue_manager: QueueManager
+    websocket_manager: WebSocketManager | None = None
 
     async def handle(self, event: MergeRequestEvent) -> None:
         """Dispatch event to appropriate handler based on action.
@@ -166,35 +169,91 @@ class MRWebhookHandler:
     async def _handle_update(self, event: MergeRequestEvent) -> None:
         """Handle MR update event.
 
-        Resets MR to queued state if new commits are pushed while processing.
+        If MR has queue label but is not in active queue, adds it.
+        Does NOT reset state for MRs already being processed - this avoids race conditions
+        with bot-initiated rebases.
 
         Args:
             event: The merge request webhook event.
         """
         mr_iid = event.object_attributes.iid
 
+        # Check if MR has the queue label
+        has_queue_label = self.settings.queue_label in event.labels
+
         # Check if MR is in queue
         queue_item = await self.queue_manager.get_queue_item(mr_iid)
 
-        if queue_item is None:
-            log.debug("Updated MR not in queue", mr_iid=mr_iid)
+        # Terminal states - MR is not actively in queue
+        terminal_states = ("removed", "failed", "merged")
+        is_in_active_queue = queue_item is not None and queue_item.state not in terminal_states
+
+        if not is_in_active_queue:
+            if has_queue_label:
+                # MR has label but not in active queue - add it
+                mr = await self.gitlab_client.get_mr(mr_iid)
+                is_hotfix = self.settings.hotfix_label in event.labels
+                await self.queue_manager.add_to_queue(mr, is_hotfix=is_hotfix)
+                log.info(
+                    "MR added to queue via update webhook",
+                    mr_iid=mr_iid,
+                    is_hotfix=is_hotfix,
+                    title=mr.title,
+                )
+                # Broadcast queue update to UI
+                await self._broadcast_queue_update()
+            else:
+                log.debug("Updated MR not in queue and no queue label", mr_iid=mr_iid)
             return
 
-        # If MR is being processed (rebasing or testing), reset to queued
-        processing_states = ("rebasing", "testing")
-        if queue_item.state in processing_states:
-            log.info(
-                "Resetting MR to queued due to update",
-                mr_iid=mr_iid,
-                previous_state=queue_item.state,
-            )
-            await self.queue_manager.update_mr_state(mr_iid, "queued")
-        else:
+        # Log update but don't reset state - this avoids race conditions with bot rebases
+        # At this point queue_item is not None (checked by is_in_active_queue)
+        assert queue_item is not None
+        log.debug(
+            "MR update received",
+            mr_iid=mr_iid,
+            current_state=queue_item.state,
+            rebase_in_progress=event.object_attributes.rebase_in_progress,
+        )
+
+    async def _broadcast_queue_update(self) -> None:
+        """Broadcast current queue state to all WebSocket clients."""
+        if not self.websocket_manager:
+            return
+
+        try:
+            queue_items = await self.queue_manager.get_active_queue()
+            queue_stats = await self.queue_manager.get_queue_stats()
+
+            # Convert queue items to dicts for WebSocket
+            queue_data = []
+            for i, item in enumerate(queue_items, start=1):
+                queue_data.append(
+                    {
+                        "mr_iid": item.mr_iid,
+                        "title": item.title,
+                        "author": {
+                            "name": item.author_name,
+                            "username": item.author_username,
+                            "avatar_url": item.author_avatar,
+                        },
+                        "target_branch": item.target_branch,
+                        "status": item.state,
+                        "is_hotfix": item.is_hotfix,
+                        "labels": item.labels,
+                        "queued_at": item.queued_at.isoformat(),
+                        "started_at": item.started_at.isoformat() if item.started_at else None,
+                        "position": i,
+                    }
+                )
+
+            await self.websocket_manager.broadcast_queue_updated(queue_data, queue_stats)
             log.debug(
-                "MR update ignored, not in processing state",
-                mr_iid=mr_iid,
-                current_state=queue_item.state,
+                "Broadcast queue update to WebSocket clients",
+                queue_length=len(queue_data),
             )
+        except Exception as e:
+            log.warning("Failed to broadcast queue update", error=str(e))
 
     def _was_queue_label_added(self, event: MergeRequestEvent) -> bool:
         """Check if queue label was added in this event.
@@ -239,12 +298,14 @@ class PipelineWebhookHandler:
         gitlab_client: GitLab API client.
         queue_manager: Queue manager for MR operations.
         notifier: MR notifier for state machine notifications.
+        websocket_manager: WebSocket manager for real-time UI updates.
     """
 
     settings: Settings
     gitlab_client: GitLabClient
     queue_manager: QueueManager
     notifier: MRNotifier
+    websocket_manager: WebSocketManager | None = None
 
     async def handle(self, event: PipelineEvent) -> None:
         """Dispatch event to appropriate handler based on pipeline status.
@@ -326,6 +387,7 @@ class PipelineWebhookHandler:
             notifier=self.notifier,
             queue_manager=self.queue_manager,
             target_branch=self.settings.target_branch,
+            websocket_manager=self.websocket_manager,
         )
         await state_machine.trigger_pipeline_success()
 
@@ -388,6 +450,7 @@ class PipelineWebhookHandler:
                 notifier=self.notifier,
                 queue_manager=self.queue_manager,
                 target_branch=self.settings.target_branch,
+                websocket_manager=self.websocket_manager,
             )
             await state_machine.trigger_pipeline_failed(
                 failed_jobs=[],
@@ -436,6 +499,7 @@ class PipelineWebhookHandler:
             notifier=self.notifier,
             queue_manager=self.queue_manager,
             target_branch=self.settings.target_branch,
+            websocket_manager=self.websocket_manager,
         )
         await state_machine.trigger_pipeline_failed(
             failed_jobs=[],
@@ -456,12 +520,14 @@ class WebhookHandler:
         gitlab_client: GitLab API client.
         settings: Application configuration.
         notifier: Optional MR notifier for state machine notifications.
+        websocket_manager: WebSocket manager for real-time UI updates.
     """
 
     queue_manager: QueueManager
     gitlab_client: GitLabClient
     settings: Settings
     notifier: MRNotifier | None = None
+    websocket_manager: WebSocketManager | None = None
 
     async def handle_merge_request_event(self, webhook_payload: dict[str, Any]) -> None:
         """Handle merge request webhook event.
@@ -477,6 +543,7 @@ class WebhookHandler:
                 settings=self.settings,
                 gitlab_client=self.gitlab_client,
                 queue_manager=self.queue_manager,
+                websocket_manager=self.websocket_manager,
             )
             await handler.handle(event)
 
@@ -503,6 +570,7 @@ class WebhookHandler:
                 gitlab_client=self.gitlab_client,
                 queue_manager=self.queue_manager,
                 notifier=self.notifier,
+                websocket_manager=self.websocket_manager,
             )
             await handler.handle(event)
 

@@ -225,7 +225,6 @@ class MRStateMachine(StateMachine):
         queue_item = await self.queue_manager.get_queue_item(self.mr_iid)
         duration = self._calculate_duration(queue_item)
 
-        await self.queue_manager.update_mr_state(self.mr_iid, "merged")
         await self.notifier.notify(
             self.mr_iid,
             "merged",
@@ -242,18 +241,23 @@ class MRStateMachine(StateMachine):
                 finished_at=datetime.now(UTC),
             )
 
+        # Remove queue label (MR is merged, label no longer needed)
+        await self.notifier.remove_queue_label(self.mr_iid)
+
+        # Move MR to history table
+        pipeline_duration = self._context.get("pipeline_duration_seconds")
+        await self.queue_manager.complete_mr(
+            self.mr_iid,
+            status="merged",
+            pipeline_duration_seconds=pipeline_duration,
+        )
+
     async def on_enter_failed(self) -> None:
         """Called when MR fails (conflict, pipeline, timeout)."""
         log.debug("Entering failed state", mr_iid=self.mr_iid)
 
         failure_reason = self._context.get("failure_reason", "unknown")
         error_message = self._context.get("error_message")
-
-        await self.queue_manager.update_mr_state(
-            self.mr_iid,
-            "failed",
-            last_error=error_message,
-        )
 
         # Choose template based on failure reason
         if failure_reason == "conflict":
@@ -304,14 +308,31 @@ class MRStateMachine(StateMachine):
                 failure_reason=error_message,
             )
 
+        # Remove queue label to prevent re-queueing
+        await self.notifier.remove_queue_label(self.mr_iid)
+
+        # Move MR to history table
+        # Map internal failure_reason to history status
+        history_status = "failed"
+        if failure_reason == "conflict":
+            history_status = "conflict"
+        elif failure_reason == "timeout":
+            history_status = "timeout"
+
+        await self.queue_manager.complete_mr(
+            self.mr_iid,
+            status=history_status,
+            failure_reason=error_message,
+            pipeline_duration_seconds=self._context.get("pipeline_duration_seconds"),
+            pipeline_failed_jobs=self._context.get("failed_jobs"),
+        )
+
     async def on_enter_removed(self) -> None:
         """Called when MR is removed from queue."""
         log.debug("Entering removed state", mr_iid=self.mr_iid)
 
         removal_reason = self._context.get("removal_reason", "label_removed")
         position = await self.queue_manager.get_queue_position(self.mr_iid)
-
-        await self.queue_manager.update_mr_state(self.mr_iid, "removed")
 
         if removal_reason == "closed":
             await self.notifier.notify(
@@ -334,6 +355,17 @@ class MRStateMachine(StateMachine):
                 "removed",
                 finished_at=datetime.now(UTC),
             )
+
+        # Remove queue label if still present (e.g., MR was closed but label not removed)
+        if removal_reason == "closed":
+            await self.notifier.remove_queue_label(self.mr_iid)
+
+        # Move MR to history table
+        await self.queue_manager.complete_mr(
+            self.mr_iid,
+            status="removed",
+            failure_reason=f"Removed: {removal_reason}",
+        )
 
     # =========================================================================
     # Trigger Methods (context passing)

@@ -14,6 +14,7 @@ def create_mock_notifier():
     """Create a mock MRNotifier."""
     notifier = MagicMock()
     notifier.notify = AsyncMock()
+    notifier.remove_queue_label = AsyncMock()
     notifier.build_pipeline_url = MagicMock(return_value="https://gitlab.com/pipeline/123")
     return notifier
 
@@ -24,6 +25,7 @@ def create_mock_queue_manager():
     qm.get_queue_position = AsyncMock(return_value=1)
     qm.get_queue_length = AsyncMock(return_value=5)
     qm.update_mr_state = AsyncMock(return_value=True)
+    qm.complete_mr = AsyncMock()
     qm.get_queue_item = AsyncMock(
         return_value=QueueItem(
             mr_iid=123,

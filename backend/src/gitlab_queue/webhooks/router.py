@@ -365,6 +365,7 @@ async def _route_webhook_event(
             settings=state.settings,
             gitlab_client=state.gitlab_client,
             queue_manager=state.queue_manager,
+            websocket_manager=state.websocket_manager,
         )
         await handler.handle(event)
     elif isinstance(event, PipelineEvent):
@@ -373,6 +374,7 @@ async def _route_webhook_event(
             gitlab_client=state.gitlab_client,
             queue_manager=state.queue_manager,
             notifier=state.notifier,
+            websocket_manager=state.websocket_manager,
         )
         await pipeline_handler.handle(event)
 

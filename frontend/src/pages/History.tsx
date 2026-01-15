@@ -16,6 +16,7 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { SafeMotionTr } from '../components/SafeMotion';
+import { getMrUrl, getPipelineUrl } from '../config';
 
 const DEFAULT_AVATAR = 'https://www.gravatar.com/avatar/?d=mp';
 const PER_PAGE = 20;
@@ -38,8 +39,7 @@ const History: React.FC = () => {
   // Track if initial load is done to prevent double URL updates
   const initialLoadDone = useRef(false);
 
-  const gitlabUrl = import.meta.env.VITE_GITLAB_URL || 'https://gitlab.com';
-  const getMrUrl = (iid: number) => `${gitlabUrl}/project/-/merge_requests/${iid}`;
+
 
   // Debounce search input (300ms)
   useEffect(() => {
@@ -275,7 +275,7 @@ const History: React.FC = () => {
                       <td className="px-6 py-4 align-top">
                         {mr.pipeline ? (
                           <a
-                            href={`${gitlabUrl}/project/-/pipelines/${mr.pipeline.id}`}
+                            href={getPipelineUrl(mr.pipeline.id)}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="flex items-center text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors mt-1 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none rounded"

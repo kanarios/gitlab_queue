@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import and_, delete, func, select
+from sqlalchemy import and_, case, delete, func, select
 
 from gitlab_queue.db.models import (
     AnalyticsDailyModel,
@@ -604,21 +604,19 @@ class HistoryRepository:
         # Use CASE WHEN for SQLite compatibility (no IIF in older versions)
         stmt = select(
             func.count().label("total"),
-            func.sum(func.case((MergeRequestHistoryModel.status == "merged", 1), else_=0)).label(
+            func.sum(case((MergeRequestHistoryModel.status == "merged", 1), else_=0)).label(
                 "success"
             ),
-            func.sum(func.case((MergeRequestHistoryModel.status == "failed", 1), else_=0)).label(
+            func.sum(case((MergeRequestHistoryModel.status == "failed", 1), else_=0)).label(
                 "failed"
             ),
-            func.sum(func.case((MergeRequestHistoryModel.status == "conflict", 1), else_=0)).label(
+            func.sum(case((MergeRequestHistoryModel.status == "conflict", 1), else_=0)).label(
                 "conflict"
             ),
-            func.sum(func.case((MergeRequestHistoryModel.status == "timeout", 1), else_=0)).label(
+            func.sum(case((MergeRequestHistoryModel.status == "timeout", 1), else_=0)).label(
                 "timeout"
             ),
-            func.sum(func.case((MergeRequestHistoryModel.is_hotfix == 1, 1), else_=0)).label(
-                "hotfix"
-            ),
+            func.sum(case((MergeRequestHistoryModel.is_hotfix == 1, 1), else_=0)).label("hotfix"),
             func.avg(MergeRequestHistoryModel.wait_time_seconds).label("avg_wait"),
             func.avg(MergeRequestHistoryModel.processing_time_seconds).label("avg_processing"),
         ).where(
@@ -660,11 +658,11 @@ class HistoryRepository:
 
         stmt = select(
             func.count().label("total"),
-            func.sum(func.case((MergeRequestHistoryModel.status == "merged", 1), else_=0)).label(
+            func.sum(case((MergeRequestHistoryModel.status == "merged", 1), else_=0)).label(
                 "success"
             ),
             func.sum(
-                func.case(
+                case(
                     (
                         MergeRequestHistoryModel.status.in_(["failed", "conflict", "timeout"]),
                         1,
@@ -781,21 +779,19 @@ class AnalyticsRepository:
         # Query history for the day
         history_stmt = select(
             func.count().label("total"),
-            func.sum(func.case((MergeRequestHistoryModel.status == "merged", 1), else_=0)).label(
+            func.sum(case((MergeRequestHistoryModel.status == "merged", 1), else_=0)).label(
                 "success"
             ),
-            func.sum(func.case((MergeRequestHistoryModel.status == "failed", 1), else_=0)).label(
+            func.sum(case((MergeRequestHistoryModel.status == "failed", 1), else_=0)).label(
                 "failed"
             ),
-            func.sum(func.case((MergeRequestHistoryModel.status == "conflict", 1), else_=0)).label(
+            func.sum(case((MergeRequestHistoryModel.status == "conflict", 1), else_=0)).label(
                 "conflict"
             ),
-            func.sum(func.case((MergeRequestHistoryModel.status == "timeout", 1), else_=0)).label(
+            func.sum(case((MergeRequestHistoryModel.status == "timeout", 1), else_=0)).label(
                 "timeout"
             ),
-            func.sum(func.case((MergeRequestHistoryModel.is_hotfix == 1, 1), else_=0)).label(
-                "hotfix"
-            ),
+            func.sum(case((MergeRequestHistoryModel.is_hotfix == 1, 1), else_=0)).label("hotfix"),
             func.avg(MergeRequestHistoryModel.wait_time_seconds).label("avg_wait"),
             func.avg(MergeRequestHistoryModel.processing_time_seconds).label("avg_processing"),
         ).where(
@@ -868,11 +864,11 @@ class AnalyticsRepository:
 
         # Get period stats from history
         history_stmt = select(
-            func.sum(func.case((MergeRequestHistoryModel.status == "merged", 1), else_=0)).label(
+            func.sum(case((MergeRequestHistoryModel.status == "merged", 1), else_=0)).label(
                 "merged"
             ),
             func.sum(
-                func.case(
+                case(
                     (
                         MergeRequestHistoryModel.status.in_(("failed", "conflict", "timeout")),
                         1,

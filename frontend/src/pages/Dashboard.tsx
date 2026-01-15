@@ -5,6 +5,7 @@ import ConnectionIndicator from '../components/ConnectionIndicator';
 import { DashboardSkeleton } from '../components/LoadingSkeleton';
 import { SkipForward, GitPullRequest, Flame, Check, MoreVertical, ExternalLink } from 'lucide-react';
 import { SafeMotionDiv, AnimatePresence } from '../components/SafeMotion';
+import { getMrUrl } from '../config';
 
 interface DashboardProps {
   queue: MergeRequest[];
@@ -69,8 +70,7 @@ const Dashboard: React.FC<DashboardProps> = ({ queue, wsState, onReconnect }) =>
     }
   };
 
-  const gitlabUrl = import.meta.env.VITE_GITLAB_URL || 'https://gitlab.com';
-  const getMrUrl = (iid: number) => `${gitlabUrl}/project/-/merge_requests/${iid}`;
+
 
   // Show loading skeleton during initial connection
   if (wsState === 'connecting') {

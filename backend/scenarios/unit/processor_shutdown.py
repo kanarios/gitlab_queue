@@ -526,7 +526,7 @@ async def concurrent_processing_during_shutdown():
 
                 return is_processing, current_mr, result
 
-            was_processing, current_mr, result = await process_and_shutdown()
+            _was_processing, _current_mr, result = await process_and_shutdown()
 
         with then("processing state is tracked correctly"):
             # During shutdown, processor may have finished early

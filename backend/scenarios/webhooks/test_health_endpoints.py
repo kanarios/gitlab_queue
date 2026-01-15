@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import vedro
 from fastapi.testclient import TestClient
 
+from gitlab_queue.api.websocket import WebSocketManager
 from gitlab_queue.db.database import DatabaseStatus
 from gitlab_queue.health import ApplicationHealth, ComponentStatus, GitLabHealth
 from gitlab_queue.utils.circuit_breaker import CircuitBreaker, CircuitState
@@ -113,6 +114,7 @@ def create_webhook_state(
         notifier=create_mock_notifier(),
         retry_manager=create_mock_retry_manager(),
         health=health,
+        websocket_manager=WebSocketManager(),
     )
 
 

@@ -323,8 +323,8 @@ class Scenario__handle_close_action(vedro.Scenario):
         self.queue_manager.remove_from_queue.assert_called_once_with(123)
 
 
-class Scenario__handle_update_resets_processing_mr(vedro.Scenario):
-    subject = "handle update resets MR in processing state"
+class Scenario__handle_update_does_not_reset_processing_mr(vedro.Scenario):
+    subject = "handle update does not reset MR in processing state"
 
     def given_handler_with_processing_mr(self):
         self.settings = create_mock_settings()
@@ -351,8 +351,9 @@ class Scenario__handle_update_resets_processing_mr(vedro.Scenario):
     async def when_event_is_handled(self):
         await self.handler.handle(self.event)
 
-    def then_mr_should_be_reset_to_queued(self):
-        self.queue_manager.update_mr_state.assert_called_once_with(123, "queued")
+    def then_mr_state_should_not_be_changed(self):
+        # MR updates don't reset state to avoid race conditions with bot-initiated rebases
+        self.queue_manager.update_mr_state.assert_not_called()
 
 
 class Scenario__handle_update_ignores_queued_mr(vedro.Scenario):
