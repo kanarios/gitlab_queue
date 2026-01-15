@@ -29,7 +29,7 @@ dev:
 	./scripts/dev.sh
 
 test:
-	uv run vedro run scenarios/
+	uv run vedro run scenarios/ -f
 
 test-random:
 	uv run vedro run scenarios/ --order-random

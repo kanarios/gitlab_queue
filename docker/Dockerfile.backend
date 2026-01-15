@@ -65,6 +65,5 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')" || exit 1
 
-# Run migrations and start the application
-# Use || true to continue even if migrations fail (e.g., already applied)
-CMD ["sh", "-c", "alembic upgrade head || echo 'Migration warning (may be ok if already applied)'; python -m gitlab_queue"]
+# Start the application (migrations are applied automatically in main.py)
+CMD ["python", "-m", "gitlab_queue"]

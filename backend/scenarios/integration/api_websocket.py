@@ -200,7 +200,7 @@ class Scenario__websocket_broadcasts_queue_updated(vedro.Scenario):
         self.mock_ws.client_state = MagicMock()
         # Simulate connected state
         self.mock_ws.client_state.name = "CONNECTED"
-        self.manager._connections.append(self.mock_ws)
+        self.manager._connections.add(self.mock_ws)
 
     async def when_queue_updated_is_broadcast(self):
         self.queue_data = [{"mr_iid": 42, "title": "Test", "status": "rebasing"}]
@@ -227,7 +227,7 @@ class Scenario__websocket_broadcasts_mr_status_changed(vedro.Scenario):
         self.mock_ws.send_json = AsyncMock()
         self.mock_ws.client_state = MagicMock()
         self.mock_ws.client_state.name = "CONNECTED"
-        self.manager._connections.append(self.mock_ws)
+        self.manager._connections.add(self.mock_ws)
 
     async def when_mr_status_changed_is_broadcast(self):
         await self.manager.broadcast_mr_status_changed(42, "queued", "rebasing")
@@ -253,7 +253,7 @@ class Scenario__websocket_broadcasts_mr_completed(vedro.Scenario):
         self.mock_ws.send_json = AsyncMock()
         self.mock_ws.client_state = MagicMock()
         self.mock_ws.client_state.name = "CONNECTED"
-        self.manager._connections.append(self.mock_ws)
+        self.manager._connections.add(self.mock_ws)
         self.finished_at = datetime.now(UTC)
 
     async def when_mr_completed_is_broadcast(self):
@@ -284,7 +284,7 @@ class Scenario__websocket_broadcasts_mr_completed_with_failure(vedro.Scenario):
         self.mock_ws.send_json = AsyncMock()
         self.mock_ws.client_state = MagicMock()
         self.mock_ws.client_state.name = "CONNECTED"
-        self.manager._connections.append(self.mock_ws)
+        self.manager._connections.add(self.mock_ws)
         self.finished_at = datetime.now(UTC)
 
     async def when_failed_mr_completed_is_broadcast(self):

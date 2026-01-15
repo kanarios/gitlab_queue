@@ -132,8 +132,8 @@ async def process_mr_with_rebase_timeout():
             # Verify state
             mr_state = await queue.get_mr_state(60)
             assert (
-                mr_state["status"] == "failed"
-            ), f"MR should be failed after timeout, got {mr_state}"
+                mr_state["status"] == "timeout"
+            ), f"MR should be timeout after rebase timeout, got {mr_state}"
 
 
 @scenario()
@@ -250,7 +250,7 @@ async def process_mr_with_pipeline_timeout():
 
             # Verify state
             mr_state = await queue.get_mr_state(61)
-            assert mr_state["status"] == "failed"
+            assert mr_state["status"] == "timeout"
 
 
 @scenario()

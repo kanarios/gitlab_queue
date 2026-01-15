@@ -1,8 +1,8 @@
 services:
   backend:
     build:
-      context: ../backend
-      dockerfile: ../docker/Dockerfile.backend
+      context: ..
+      dockerfile: ./docker/Dockerfile.backend
     container_name: gitlab-queue-backend-dev
     working_dir: /app
     env_file:

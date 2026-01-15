@@ -213,6 +213,12 @@ data/
 *.db-wal
 *.db-shm
 
+# Vedro test framework
+.vedro/
+
+# Pyscn reports
+.pyscn/
+
 # Node.js (frontend)
 node_modules/
 .npm

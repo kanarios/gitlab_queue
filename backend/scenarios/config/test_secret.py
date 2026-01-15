@@ -127,8 +127,10 @@ class Scenario__secret_not_equal_to_non_secret(vedro.Scenario):
     def when_comparing_secret_to_string(self):
         self.result = self.secret == self.string
 
-    def then_it_should_return_not_implemented(self):
-        assert self.result is NotImplemented
+    def then_they_should_not_be_equal(self):
+        # When Secret.__eq__ returns NotImplemented for non-Secret types,
+        # Python falls back to identity comparison which returns False
+        assert self.result is False
 
 
 class Scenario__secret_length(vedro.Scenario):

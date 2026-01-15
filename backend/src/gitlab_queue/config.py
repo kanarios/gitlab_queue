@@ -138,8 +138,15 @@ def _to_log_format(value: str) -> LogFormat:
         raise ValueError(msg) from None
 
 
-def _to_cors_origins_list(value: str) -> list[str]:
-    """Convert comma-separated string to list of CORS origins."""
+def _to_cors_origins_list(value: str | list[str]) -> list[str]:
+    """Convert comma-separated string to list of CORS origins.
+
+    Accepts either a comma-separated string or an already-converted list.
+    This allows both environ-config loading (string from env) and direct
+    instantiation (list in tests).
+    """
+    if isinstance(value, list):
+        return value
     origins = [origin.strip() for origin in value.split(",") if origin.strip()]
     if not origins:
         msg = "CORS origins cannot be empty"

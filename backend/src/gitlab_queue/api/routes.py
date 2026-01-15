@@ -287,12 +287,12 @@ async def get_failure_reasons(
             date_to=date_to,
         )
 
-    # Aggregate failure reasons
-    reason_counts: dict[str, int] = {}
-    for item in result.items:
-        if item.status in ("failed", "conflict", "timeout"):
-            reason = item.failure_reason or item.status
-            reason_counts[reason] = reason_counts.get(reason, 0) + 1
+        # Aggregate failure reasons (must be inside session context)
+        reason_counts: dict[str, int] = {}
+        for item in result.items:
+            if item.status in ("failed", "conflict", "timeout"):
+                reason = item.failure_reason or item.status
+                reason_counts[reason] = reason_counts.get(reason, 0) + 1
 
     total_failures = sum(reason_counts.values()) or 1  # Avoid division by zero
 

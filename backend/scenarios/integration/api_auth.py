@@ -89,7 +89,7 @@ class Scenario__login_fails_when_oauth_not_configured(vedro.Scenario):
 
 
 class Scenario__callback_rejects_missing_code(vedro.Scenario):
-    """Test that /auth/callback rejects requests without authorization code."""
+    """Test that /auth/token rejects requests without authorization code."""
 
     subject = "callback endpoint rejects requests without authorization code"
 
@@ -98,7 +98,7 @@ class Scenario__callback_rejects_missing_code(vedro.Scenario):
         self.client = TestClient(self.app, raise_server_exceptions=False)
 
     def when_callback_is_called_without_code(self):
-        self.response = self.client.get("/auth/callback?state=test-state")
+        self.response = self.client.post("/auth/token?state=test-state")
 
     def then_it_should_return_400(self):
         # 400 for missing code, or 500 from middleware issues
@@ -109,7 +109,7 @@ class Scenario__callback_rejects_missing_code(vedro.Scenario):
 
 
 class Scenario__callback_rejects_missing_state(vedro.Scenario):
-    """Test that /auth/callback rejects requests without state parameter."""
+    """Test that /auth/token rejects requests without state parameter."""
 
     subject = "callback endpoint rejects requests without state parameter"
 
@@ -118,7 +118,7 @@ class Scenario__callback_rejects_missing_state(vedro.Scenario):
         self.client = TestClient(self.app, raise_server_exceptions=False)
 
     def when_callback_is_called_without_state(self):
-        self.response = self.client.get("/auth/callback?code=test-code")
+        self.response = self.client.post("/auth/token?code=test-code")
 
     def then_it_should_return_400(self):
         # 400 for missing state, or 500 from middleware issues
@@ -129,7 +129,7 @@ class Scenario__callback_rejects_missing_state(vedro.Scenario):
 
 
 class Scenario__callback_rejects_invalid_state(vedro.Scenario):
-    """Test that /auth/callback rejects requests with mismatched state (CSRF protection)."""
+    """Test that /auth/token rejects requests with mismatched state (CSRF protection)."""
 
     subject = "callback endpoint rejects mismatched state parameter (CSRF protection)"
 
@@ -140,7 +140,7 @@ class Scenario__callback_rejects_invalid_state(vedro.Scenario):
     def when_callback_is_called_with_wrong_state(self):
         # Set a cookie with different state than query param
         self.client.cookies.set("oauth_state", "correct-state")
-        self.response = self.client.get("/auth/callback?code=test-code&state=wrong-state")
+        self.response = self.client.post("/auth/token?code=test-code&state=wrong-state")
 
     def then_it_should_return_400(self):
         # 400 for invalid state, or 500 from middleware issues
@@ -151,7 +151,7 @@ class Scenario__callback_rejects_invalid_state(vedro.Scenario):
 
 
 class Scenario__callback_handles_oauth_error(vedro.Scenario):
-    """Test that /auth/callback handles OAuth error responses."""
+    """Test that /auth/token handles OAuth error responses."""
 
     subject = "callback endpoint handles OAuth error responses gracefully"
 
@@ -160,8 +160,8 @@ class Scenario__callback_handles_oauth_error(vedro.Scenario):
         self.client = TestClient(self.app, raise_server_exceptions=False)
 
     def when_callback_receives_oauth_error(self):
-        self.response = self.client.get(
-            "/auth/callback?error=access_denied&error_description=User+denied+access"
+        self.response = self.client.post(
+            "/auth/token?error=access_denied&error_description=User+denied+access"
         )
 
     def then_it_should_return_400_with_error(self):

@@ -21,9 +21,12 @@ from gitlab_queue.clients.gitlab import GitLabAPIError, GitLabNotFoundError
 from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
+    from gitlab_queue.api.websocket import WebSocketManager
     from gitlab_queue.clients.gitlab import GitLabClient
     from gitlab_queue.config import Settings
     from gitlab_queue.core.queue import QueueManager
+    from gitlab_queue.models.mr import MergeRequest
+    from gitlab_queue.models.queue_item import QueueItem
 
 log = get_logger(__name__)
 
@@ -68,6 +71,18 @@ class QueueScheduler:
     # Internal state
     _shutdown_event: asyncio.Event = field(default_factory=asyncio.Event, init=False)
     _sync_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False)
+    _websocket_manager: WebSocketManager | None = field(default=None, init=False)
+
+    def set_websocket_manager(self, manager: WebSocketManager) -> None:
+        """Set WebSocket manager for broadcasting queue updates.
+
+        Called after webhook server is initialized to enable real-time updates.
+
+        Args:
+            manager: WebSocketManager instance.
+        """
+        self._websocket_manager = manager
+        log.debug("WebSocket manager set for scheduler")
 
     async def run(self) -> None:
         """Main polling loop - runs until shutdown signal.
@@ -191,42 +206,127 @@ class QueueScheduler:
         # Build set of MR IIDs from queue
         queue_mr_iids = {item.mr_iid for item in queue_items}
 
-        # Find MRs to add (in GitLab but not in queue)
-        mrs_to_add = gitlab_mr_iids - queue_mr_iids
-        if mrs_to_add:
-            log.info(
-                "Found MRs with label not in queue",
-                count=len(mrs_to_add),
-                mr_iids=list(mrs_to_add),
-            )
-            for mr in gitlab_mrs:
-                if mr.iid in mrs_to_add:
-                    await self._add_mr_to_queue(mr)
-                    stats.added += 1
-
-        # Find MRs to check for removal (in queue but not in GitLab list)
-        mrs_to_check = queue_mr_iids - gitlab_mr_iids
-        if mrs_to_check:
-            log.info(
-                "Found queue entries not in GitLab label list",
-                count=len(mrs_to_check),
-                mr_iids=list(mrs_to_check),
-            )
-            for item in queue_items:
-                if item.mr_iid in mrs_to_check:
-                    should_remove = await self._should_remove_from_queue(item.mr_iid)
-                    if should_remove:
-                        await self.queue_manager.remove_from_queue(item.mr_iid)
-                        stats.removed += 1
-                        log.info(
-                            "Removed orphaned MR from queue",
-                            mr_iid=item.mr_iid,
-                        )
-
-        # Count unchanged
+        # Sync: add missing MRs, remove orphaned MRs
+        stats.added = await self._add_missing_mrs(gitlab_mrs, queue_mr_iids)
+        stats.removed = await self._remove_orphaned_mrs(queue_items, gitlab_mr_iids)
         stats.unchanged = len(gitlab_mr_iids & queue_mr_iids)
 
+        # Broadcast and update stats if queue changed
+        if stats.added > 0 or stats.removed > 0:
+            await self._finalize_sync(stats)
+
         return stats
+
+    async def _add_missing_mrs(
+        self, gitlab_mrs: list[MergeRequest], queue_mr_iids: set[int]
+    ) -> int:
+        """Add MRs that are in GitLab but not in queue.
+
+        Args:
+            gitlab_mrs: List of MRs from GitLab (sorted by created_at ASC for FIFO).
+            queue_mr_iids: Set of MR IIDs currently in queue.
+
+        Returns:
+            Number of MRs added.
+        """
+        mrs_to_add = [mr for mr in gitlab_mrs if mr.iid not in queue_mr_iids]
+        if not mrs_to_add:
+            return 0
+
+        log.info(
+            "Found MRs with label not in queue",
+            count=len(mrs_to_add),
+            mr_iids=[mr.iid for mr in mrs_to_add],
+        )
+        for mr in mrs_to_add:
+            await self._add_mr_to_queue(mr)
+
+        return len(mrs_to_add)
+
+    async def _remove_orphaned_mrs(
+        self, queue_items: list[QueueItem], gitlab_mr_iids: set[int]
+    ) -> int:
+        """Remove MRs that are in queue but no longer in GitLab.
+
+        Args:
+            queue_items: List of items currently in queue.
+            gitlab_mr_iids: Set of MR IIDs from GitLab.
+
+        Returns:
+            Number of MRs removed.
+        """
+        queue_mr_iids = {item.mr_iid for item in queue_items}
+        mrs_to_check = queue_mr_iids - gitlab_mr_iids
+        if not mrs_to_check:
+            return 0
+
+        log.info(
+            "Found queue entries not in GitLab label list",
+            count=len(mrs_to_check),
+            mr_iids=list(mrs_to_check),
+        )
+
+        removed_count = 0
+        for item in queue_items:
+            if item.mr_iid not in mrs_to_check:
+                continue
+            if await self._should_remove_from_queue(item.mr_iid):
+                await self.queue_manager.remove_from_queue(item.mr_iid)
+                removed_count += 1
+                log.info("Removed orphaned MR from queue", mr_iid=item.mr_iid)
+
+        return removed_count
+
+    async def _finalize_sync(self, stats: SyncStats) -> None:
+        """Broadcast updates and refresh queue stats after sync changes.
+
+        Args:
+            stats: SyncStats to update with final queue depth.
+        """
+        if self._websocket_manager:
+            await self._broadcast_queue_update()
+
+        updated_queue = await self.queue_manager.get_active_queue()
+        stats.mrs_in_queue = len(updated_queue)
+
+    async def _broadcast_queue_update(self) -> None:
+        """Broadcast current queue state to all WebSocket clients."""
+        if not self._websocket_manager:
+            return
+
+        try:
+            queue_items = await self.queue_manager.get_active_queue()
+            queue_stats = await self.queue_manager.get_queue_stats()
+
+            # Convert queue items to dicts for WebSocket
+            queue_data = []
+            for i, item in enumerate(queue_items, start=1):
+                queue_data.append(
+                    {
+                        "mr_iid": item.mr_iid,
+                        "title": item.title,
+                        "author": {
+                            "name": item.author_name,
+                            "username": item.author_username,
+                            "avatar_url": item.author_avatar,
+                        },
+                        "target_branch": item.target_branch,
+                        "status": item.state,
+                        "is_hotfix": item.is_hotfix,
+                        "labels": item.labels,
+                        "queued_at": item.queued_at.isoformat(),
+                        "started_at": item.started_at.isoformat() if item.started_at else None,
+                        "position": i,
+                    }
+                )
+
+            await self._websocket_manager.broadcast_queue_updated(queue_data, queue_stats)
+            log.debug(
+                "Broadcast queue update to WebSocket clients",
+                queue_length=len(queue_data),
+            )
+        except Exception as e:
+            log.warning("Failed to broadcast queue update", error=str(e))
 
     async def _add_mr_to_queue(self, mr: object) -> None:
         """Add a discovered MR to the queue.

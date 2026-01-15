@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
 import vedro
@@ -21,7 +22,8 @@ from scenarios.contexts.api_helpers import (
 )
 from starlette.testclient import TestClient
 
-from gitlab_queue.models.queue_item import QueueItem
+if TYPE_CHECKING:
+    from gitlab_queue.models.queue_item import QueueItem
 
 
 def _queue_item_to_history_model(item: QueueItem) -> MagicMock:

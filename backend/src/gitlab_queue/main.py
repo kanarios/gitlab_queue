@@ -33,6 +33,7 @@ from gitlab_queue.core.processor import MergeProcessor, create_processor
 from gitlab_queue.core.queue import QueueManager
 from gitlab_queue.core.scheduler import QueueScheduler, create_scheduler
 from gitlab_queue.db.database import Database, DatabaseConnectionError
+from gitlab_queue.db.migrations import run_migrations
 from gitlab_queue.dependencies import set_database
 from gitlab_queue.health import ApplicationHealth, ComponentStatus, GitLabHealth
 from gitlab_queue.jobs import AnalyticsJobProcessor, create_analytics_processor
@@ -224,14 +225,16 @@ async def create_application(settings: Settings) -> Application:
             failure_count=0,
         )
 
-    # 5. Initialize queue manager and ensure schema
-    queue_manager = QueueManager(db=database)
-    await queue_manager.ensure_schema()
+    # 5. Run database migrations (creates all tables via Alembic)
+    await run_migrations(settings.database_url)
 
-    # 6. Initialize notifier
+    # 6. Initialize queue manager
+    queue_manager = QueueManager(db=database)
+
+    # 8. Initialize notifier
     notifier = MRNotifier(gitlab_client=gitlab_client, settings=settings)
 
-    # 7. Create processor
+    # 9. Create processor
     processor = create_processor(
         gitlab_client=gitlab_client,
         queue_manager=queue_manager,
@@ -239,23 +242,22 @@ async def create_application(settings: Settings) -> Application:
         settings=settings,
     )
 
-    # 8. Create scheduler for polling fallback
+    # 10. Create scheduler for polling fallback
     scheduler = create_scheduler(
         gitlab_client=gitlab_client,
         queue_manager=queue_manager,
         settings=settings,
     )
 
-    # 9. Initialize webhook retry manager and ensure schema
+    # 11. Initialize webhook retry manager (tables created by migrations)
     retry_manager = WebhookRetryManager(
         db=database,
         max_attempts=settings.webhook_retry_max_attempts,
         base_delay_seconds=settings.webhook_retry_base_delay_seconds,
         max_delay_seconds=settings.webhook_retry_max_delay_seconds,
     )
-    await retry_manager.ensure_schema()
 
-    # 10. Create webhook retry processor
+    # 12. Create webhook retry processor
     retry_processor = create_retry_processor(
         retry_manager=retry_manager,
         settings=settings,
@@ -327,6 +329,11 @@ def _create_webhook_server(app: Application) -> tuple[uvicorn.Server, asyncio.Ta
     """
     websocket_manager = WebSocketManager()
 
+    # Connect scheduler, processor, and retry_processor to WebSocket manager for real-time updates
+    app.scheduler.set_websocket_manager(websocket_manager)
+    app.processor.set_websocket_manager(websocket_manager)
+    app.retry_processor.set_websocket_manager(websocket_manager)
+
     webhook_state = WebhookAppState(
         settings=app.settings,
         database=app.database,
@@ -370,9 +377,20 @@ async def run_application(app: Application) -> int:
     )
 
     webhook_server_task: asyncio.Task[None] | None = None
+    uvicorn_server = None
 
     try:
-        # Start all background processors
+        # Start webhook server FIRST if enabled (sets up WebSocket manager for processors)
+        if app.settings.webhook_enabled:
+            log.info(
+                "Starting webhook server",
+                host=app.settings.webhook_host,
+                port=app.settings.webhook_port,
+            )
+            uvicorn_server, webhook_server_task = _create_webhook_server(app)
+            app.shutdown_manager.register_component("webhook_server", uvicorn_server.shutdown)
+
+        # Start all background processors (after WebSocket manager is set)
         processor_task = asyncio.create_task(app.processor.run())
         app.health.processor_running = True
 
@@ -384,16 +402,6 @@ async def run_application(app: Application) -> int:
 
         log.info("Starting analytics job processor")
         analytics_processor_task = asyncio.create_task(app.analytics_processor.run())
-
-        # Start webhook server if enabled
-        if app.settings.webhook_enabled:
-            log.info(
-                "Starting webhook server",
-                host=app.settings.webhook_host,
-                port=app.settings.webhook_port,
-            )
-            uvicorn_server, webhook_server_task = _create_webhook_server(app)
-            app.shutdown_manager.register_component("webhook_server", uvicorn_server.shutdown)
 
         # Wait for shutdown signal
         reason = await app.shutdown_manager.wait_for_shutdown()
