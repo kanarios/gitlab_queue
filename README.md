@@ -1,107 +1,290 @@
-# GitLab Merge Queue Bot
+<div align="center">
+
+# 🚂 GitLab Merge Queue Bot
 
 **Open-source alternative to GitLab Merge Trains (Premium feature)**
 
-Automates the merge process for GitLab projects using fast-forward merge strategy, eliminating race conditions and keeping your main branch always green.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/) [![React 19](https://img.shields.io/badge/react-19-61dafb.svg)](https://react.dev) [![FastAPI](https://img.shields.io/badge/FastAPI-009688.svg)](https://fastapi.tiangolo.com) [![Docker](https://img.shields.io/badge/docker-ready-2496ED.svg)](https://docker.com)
 
-## Problem
+**Stop fighting rebase wars. Let the bot handle the queue.**
 
-When using fast-forward merge in GitLab, teams face a common race condition:
+[Demo](#-demo) • [Quick Start](#-quick-start) • [Features](#-features) • [Dashboard](#-dashboard) • [Documentation](#-documentation)
+
+</div>
+
+---
+
+<div align="center">
+
+🆓 **Free** alternative to $29/user/month Premium feature &nbsp;•&nbsp; ⚡ **Real-time** dashboard with WebSocket &nbsp;•&nbsp; 🔥 **Hotfix priority** without interrupting current work
+
+🛡️ **Circuit breaker** protects against GitLab outages &nbsp;•&nbsp; 📊 **Built-in analytics** and historical insights &nbsp;•&nbsp; 🔄 **State recovery** survives restarts
+
+</div>
+
+---
+
+## 🎯 The Problem
+
+When using fast-forward merge strategy in GitLab, teams face a frustrating race condition:
 
 ```
-Dev A rebases → tries to merge
-Dev B rebases → tries to merge
-A merges first → B gets "branch out of date" error
+Developer A: rebases MR → tries to merge
+Developer B: rebases MR → tries to merge
+A merges first → B gets "branch out of date" error 😤
 B rebases again → while rebasing, C merges
-B rebases again → endless cycle
+B rebases again → endless cycle of frustration 🔄
 ```
 
-Teams waste significant time on manual rebase operations.
+**Result:** Hours wasted on manual rebase operations. Angry engineers. Slow delivery.
 
-## Solution
+## ✅ The Solution
 
-A bot that manages a merge queue:
+A bot that manages a merge queue - no more manual rebasing, no more race conditions:
 
-1. Add `merge_queue` label to your MR
-2. Bot automatically rebases your MR onto the target branch
-3. Bot waits for the pipeline to pass
-4. Bot merges your MR
-5. Next MR in queue starts processing
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                                                                             │
+│   1️⃣  Add 'merge_queue' label to your MR                                    │
+│                           ↓                                                 │
+│   2️⃣  Bot automatically rebases your MR onto target branch                  │
+│                           ↓                                                 │
+│   3️⃣  Bot waits for pipeline to pass                                        │
+│                           ↓                                                 │
+│   4️⃣  Bot merges your MR                                                    │
+│                           ↓                                                 │
+│   5️⃣  Next MR in queue starts processing                                    │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
-No more manual rebasing. No more race conditions.
+**You get:** A comment on your MR with position, ETA, and status updates. Then walk away.
 
-## Features
+---
 
-### Core
-- **FIFO Queue** - First in, first out processing
-- **Hotfix Priority** - MRs with `hotfix` label jump to front of queue
-- **Automatic Rebase** - Rebases onto target branch before merge
-- **Pipeline Waiting** - Waits for CI/CD pipeline to complete
-- **Automatic Merge** - Merges when pipeline succeeds
+## 📺 Demo
 
-### Reliability
-- **Pipeline Retry** - Retries failed pipelines once before removing from queue
-- **Conflict Detection** - Removes MRs with conflicts and notifies author
-- **Circuit Breaker** - Protects against cascading failures when GitLab is down
-- **Graceful Degradation** - Continues operating in degraded mode during outages
-- **State Recovery** - Recovers queue state after restart
+<div align="center">
 
-### Notifications
-- **MR Comments** - Posts status updates on every state change
-- **Queue Position** - Shows position and estimated wait time
-- **Error Details** - Reports conflicts, failed jobs, and required actions
+<!--
+📸 Screenshots coming soon! Add your own:
+- docs/assets/demo.gif - Main workflow demo
+- docs/assets/dashboard.png - Dashboard view
+- docs/assets/analytics.png - Analytics page
+-->
 
-### Monitoring
-- **Health Endpoints** - Liveness and readiness probes
-- **Prometheus Metrics** - Queue length, API latency, operation counters
-- **Structured Logging** - JSON logs with correlation IDs
+| Dashboard | Analytics | History |
+|:-:|:-:|:-:|
+| ![Dashboard](docs/assets/dashboard.png) | ![Analytics](docs/assets/analytics.png) | ![History](docs/assets/history.png) |
 
-### Webhook Integration
-- **Real-time Updates** - Responds instantly to GitLab events
-- **Polling Fallback** - Catches missed webhooks
-- **Retry Queue** - Dead Letter Queue for failed webhook processing
+*Real-time queue monitoring • Historical analytics • Full merge history*
 
-## Quick Start
+</div>
 
-### Prerequisites
+### How It Works
 
-- Python 3.12+
-- [uv](https://github.com/astral-sh/uv) package manager
-- GitLab Personal Access Token with `api` scope
+```
+Developer                      Bot                           GitLab
+    │                           │                              │
+    │── Add 'merge_queue' ─────►│                              │
+    │   label to MR             │                              │
+    │                           │                              │
+    │◄─ "Added to queue #3" ────│                              │
+    │                           │                              │
+    │         ... time passes, other MRs merge ...             │
+    │                           │                              │
+    │◄─ "Your turn! Rebasing" ──│                              │
+    │                           │── Rebase MR ────────────────►│
+    │                           │◄─ Rebase complete ───────────│
+    │                           │                              │
+    │◄─ "Running pipeline" ─────│                              │
+    │                           │── Wait for pipeline ────────►│
+    │                           │◄─ Pipeline success ──────────│
+    │                           │                              │
+    │                           │── Merge MR ─────────────────►│
+    │◄─ "Successfully merged!"──│◄─ Merge complete ────────────│
+    │                           │                              │
+```
 
-### Installation
+---
+
+## 🤔 Why This Over GitLab Merge Trains?
+
+| Feature | GitLab Merge Trains | This Bot |
+|:--------|:--------------------|:----------|
+| **Price** | 💰 $29/user/month (Premium) | 🆓 **Free & Open Source** |
+| **Self-hosted** | ❌ GitLab SaaS or Premium only | ✅ **Your infrastructure** |
+| **Real-time Dashboard** | ❌ Basic UI | ✅ **WebSocket live updates** |
+| **Analytics & Insights** | ❌ Limited | ✅ **Full historical data & trends** |
+| **Hotfix Priority** | ⚠️ Interrupts current work | ✅ **Non-interrupting queue jump** |
+| **Dead Letter Queue** | ❌ Lost webhooks | ✅ **Retry failed events** |
+| **Circuit Breaker** | ❌ | ✅ **Graceful degradation** |
+| **State Recovery** | ❌ | ✅ **Survives restarts** |
+| **MR Feedback** | ⚠️ Basic | ✅ **Detailed status on every change** |
+| **Single Bot Comment** | ❌ Spam comments | ✅ **One pinned, updated comment** |
+
+---
+
+## ✨ Features
+
+### 🚀 Core Queue Management
+
+| Feature | Description |
+|---------|-------------|
+| **FIFO Queue** | Fair first-in-first-out processing |
+| **Hotfix Priority** | MRs with `hotfix` label jump to front (without interrupting current work!) |
+| **Automatic Rebase** | Rebases onto target branch before merge |
+| **Pipeline Waiting** | Waits for CI/CD pipeline to complete |
+| **Pipeline Retry** | Retries failed pipelines once before failing |
+| **Automatic Merge** | Merges when pipeline succeeds |
+
+### 🛡️ Reliability & Resilience
+
+| Feature | Description |
+|---------|-------------|
+| **Circuit Breaker** | Protects against cascading failures when GitLab is down |
+| **Adaptive Rate Limiting** | Smoothly throttles requests approaching GitLab limits |
+| **Webhook + Polling** | Real-time webhooks with polling fallback for reliability |
+| **Dead Letter Queue (DLQ)** | Failed webhooks are retried with exponential backoff |
+| **State Recovery** | Recovers queue state after restart - no lost MRs |
+| **Graceful Shutdown** | Clean shutdown without losing work |
+
+### 📊 Dashboard & Analytics
+
+| Feature | Description |
+|---------|-------------|
+| **Real-time Updates** | WebSocket live queue monitoring |
+| **Queue Visualization** | See active MR progress (rebasing → testing → merging) |
+| **History & Search** | Full merge history with filtering |
+| **Analytics Dashboard** | Throughput, success rate, queue depth trends |
+| **Dark Mode** | Easy on the eyes |
+
+### 🔐 Security
+
+| Feature | Description |
+|---------|-------------|
+| **GitLab OAuth** | Secure dashboard authentication |
+| **Webhook Verification** | Signature verification for GitLab webhooks |
+| **Secret Sanitization** | Sensitive data redacted from logs |
+| **JWT Authentication** | Secure API access |
+
+### 📢 Notifications
+
+Every state change posts an update to your MR:
+
+- 📥 **Queued**: Position in queue + estimated wait time
+- 🔄 **Rebasing**: Rebase started
+- 🧪 **Testing**: Pipeline link + progress
+- ⚠️ **Conflict**: Which files have conflicts
+- ❌ **Failed**: What went wrong + how to fix
+- ✅ **Merged**: Success confirmation
+
+---
+
+## 🚀 Quick Start
+
+### Option 1: Docker (Recommended)
 
 ```bash
-# Clone the repository
-git clone https://github.com/your-org/gitlab_queue.git
+# Create data directory
+mkdir -p gitlab-queue-data
+
+# Run the bot
+docker run -d \
+  --name gitlab-queue \
+  -p 8080:8080 \
+  -v $(pwd)/gitlab-queue-data:/app/data \
+  -e GITLAB_QUEUE_GITLAB_TOKEN=glpat-xxxxxxxxxxxx \
+  -e GITLAB_QUEUE_GITLAB_PROJECT_ID=12345678 \
+  -e GITLAB_QUEUE_JWT_SECRET=$(openssl rand -hex 64) \
+  -e GITLAB_QUEUE_WEBHOOK_SECRET=your-webhook-secret \
+  -e GITLAB_QUEUE_WEBHOOK_HOST=0.0.0.0 \
+  ghcr.io/kanarios/gitlab-queue:latest
+
+# Check logs
+docker logs -f gitlab-queue
+```
+
+### Option 2: Docker Compose
+
+```bash
+git clone https://github.com/kanarios/gitlab_queue.git
+cd gitlab_queue/docker
+
+# Create .env file
+cat > ../backend/.env << 'EOF'
+GITLAB_QUEUE_GITLAB_TOKEN=glpat-xxxxxxxxxxxx
+GITLAB_QUEUE_GITLAB_PROJECT_ID=12345678
+GITLAB_QUEUE_JWT_SECRET=your-64-char-secret-key-here-generate-with-openssl-rand-hex-64
+GITLAB_QUEUE_WEBHOOK_SECRET=your-webhook-secret
+EOF
+
+# Start
+docker-compose up -d
+```
+
+### Option 3: Local Development
+
+```bash
+git clone https://github.com/kanarios/gitlab_queue.git
 cd gitlab_queue/backend
 
-# Install dependencies
+# Install dependencies (requires uv)
 uv sync
-```
 
-### Configuration
+# Set environment variables
+export GITLAB_QUEUE_GITLAB_TOKEN=glpat-xxxxxxxxxxxx
+export GITLAB_QUEUE_GITLAB_PROJECT_ID=12345678
+export GITLAB_QUEUE_JWT_SECRET=$(openssl rand -hex 64)
+export GITLAB_QUEUE_WEBHOOK_SECRET=your-webhook-secret
 
-Create a `.env` file:
-
-```bash
-# Required
-GITLAB_QUEUE_GITLAB_TOKEN=glpat-xxxxxxxxxxxxxxxxxxxx
-GITLAB_QUEUE_GITLAB_PROJECT_ID=12345678
-GITLAB_QUEUE_JWT_SECRET=$(openssl rand -hex 64)
-GITLAB_QUEUE_WEBHOOK_SECRET=your-webhook-secret
-```
-
-### Run
-
-```bash
-cd backend
+# Run
 python -m gitlab_queue
 ```
 
-The bot will start processing MRs with the `merge_queue` label.
+### 3 Steps to Get Started
 
-## Configuration Reference
+1. **Get GitLab Token**: User Settings → Access Tokens → Create with `api` scope
+2. **Get Project ID**: Your Project → Settings → General (shown at top)
+3. **Configure Webhook**: Your Project → Settings → Webhooks → Add:
+   - URL: `https://your-domain.com/webhooks/gitlab`
+   - Secret: same as `GITLAB_QUEUE_WEBHOOK_SECRET`
+   - Triggers: ✅ Merge request events, ✅ Pipeline events
+
+---
+
+## 📊 Dashboard
+
+The bot comes with a beautiful React dashboard for monitoring and analytics.
+
+### Queue View
+- **Active MR**: See current processing with live progress bar
+- **Queue List**: Upcoming MRs with position and author
+- **Connection Status**: WebSocket health indicator
+
+### Analytics View
+- **KPIs**: Total processed, avg wait time, success rate, daily throughput
+- **Charts**: Queue depth over time, hourly processing, outcome distribution
+- **Period Selection**: 7 days, 30 days, 90 days
+
+### History View
+- **Full History**: All processed MRs
+- **Filtering**: By status (merged, failed, conflict, timeout)
+- **Search**: Find specific MRs by title
+- **Details**: Failure reasons, pipeline links
+
+### Features
+- 🌙 **Dark Mode**: Toggle or follow system preference
+- ♿ **Accessible**: Full ARIA support
+- 📱 **Responsive**: Works on mobile
+- ⚡ **Real-time**: WebSocket live updates
+
+---
+
+## 📖 Documentation
+
+<details>
+<summary><strong>📋 Configuration Reference</strong></summary>
 
 ### Required Variables
 
@@ -110,11 +293,9 @@ The bot will start processing MRs with the `merge_queue` label.
 | `GITLAB_QUEUE_GITLAB_TOKEN` | GitLab personal access token with `api` scope |
 | `GITLAB_QUEUE_GITLAB_PROJECT_ID` | GitLab project ID (positive integer) |
 | `GITLAB_QUEUE_JWT_SECRET` | JWT signing secret (min 64 chars) |
-| `GITLAB_QUEUE_WEBHOOK_SECRET` | Webhook signature secret (required if webhooks enabled) |
+| `GITLAB_QUEUE_WEBHOOK_SECRET` | Webhook signature secret |
 
-### Optional Variables
-
-#### GitLab Connection
+### GitLab Connection
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -123,7 +304,7 @@ The bot will start processing MRs with the `merge_queue` label.
 | `GITLAB_QUEUE_QUEUE_LABEL` | `merge_queue` | Label to add MR to queue |
 | `GITLAB_QUEUE_HOTFIX_LABEL` | `hotfix` | Label for priority processing |
 
-#### Timing
+### Timing
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -132,14 +313,14 @@ The bot will start processing MRs with the `merge_queue` label.
 | `GITLAB_QUEUE_REBASE_TIMEOUT_SECONDS` | `300` | Max rebase wait time (5 minutes) |
 | `GITLAB_QUEUE_STALE_MR_WARNING_HOURS` | `24` | Warn about stuck MRs after this time |
 
-#### Retry Logic
+### Retry Logic
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `GITLAB_QUEUE_PIPELINE_RETRY_COUNT` | `1` | Retry failed pipelines this many times |
 | `GITLAB_QUEUE_API_MAX_RETRIES` | `5` | Max retries for API calls |
 
-#### Rate Limiting
+### Rate Limiting
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -147,7 +328,7 @@ The bot will start processing MRs with the `merge_queue` label.
 | `GITLAB_QUEUE_RATE_LIMIT_THROTTLE_DELAY_SECONDS` | `1.0` | Delay when throttling |
 | `GITLAB_QUEUE_RATE_LIMIT_CRITICAL_THRESHOLD` | `0.95` | Critical at 95% of rate limit |
 
-#### Circuit Breaker
+### Circuit Breaker
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -155,7 +336,7 @@ The bot will start processing MRs with the `merge_queue` label.
 | `GITLAB_QUEUE_CIRCUIT_BREAKER_HALF_OPEN_TIMEOUT_SECONDS` | `30` | Wait before retry attempt |
 | `GITLAB_QUEUE_CIRCUIT_BREAKER_SUCCESS_THRESHOLD` | `1` | Successes to close circuit |
 
-#### Webhook Retry Queue
+### Webhook Retry Queue
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -164,13 +345,7 @@ The bot will start processing MRs with the `merge_queue` label.
 | `GITLAB_QUEUE_WEBHOOK_RETRY_MAX_DELAY_SECONDS` | `300` | Max backoff delay (5 min) |
 | `GITLAB_QUEUE_WEBHOOK_DLQ_RETENTION_DAYS` | `30` | Keep failed events for 30 days |
 
-#### Database
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GITLAB_QUEUE_DATABASE_URL` | `sqlite+aiosqlite:///data/queue.db` | Database connection URL |
-
-#### Server
+### Server
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -179,43 +354,27 @@ The bot will start processing MRs with the `merge_queue` label.
 | `GITLAB_QUEUE_WEBHOOK_PORT` | `8080` | Server port |
 | `GITLAB_QUEUE_DASHBOARD_ENABLED` | `true` | Enable dashboard API |
 | `GITLAB_QUEUE_CORS_ORIGINS` | `http://localhost:5173` | Allowed CORS origins |
+| `GITLAB_QUEUE_DATABASE_URL` | `sqlite+aiosqlite:///data/queue.db` | Database connection URL |
 
-#### OAuth (Optional - for Dashboard Authentication)
+### OAuth (Optional - for Dashboard Authentication)
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GITLAB_QUEUE_OAUTH_CLIENT_ID` | - | GitLab OAuth Application ID |
-| `GITLAB_QUEUE_OAUTH_CLIENT_SECRET` | - | GitLab OAuth Application Secret |
-| `GITLAB_QUEUE_OAUTH_REDIRECT_URI` | - | OAuth callback URL (e.g., `https://your-domain.com/auth/callback`) |
+| Variable | Description |
+|----------|-------------|
+| `GITLAB_QUEUE_OAUTH_CLIENT_ID` | GitLab OAuth Application ID |
+| `GITLAB_QUEUE_OAUTH_CLIENT_SECRET` | GitLab OAuth Application Secret |
+| `GITLAB_QUEUE_OAUTH_REDIRECT_URI` | OAuth callback URL |
 
-See [Configure OAuth Application](#5-configure-oauth-application-optional---for-dashboard) for setup instructions.
-
-#### Logging
+### Logging
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `GITLAB_QUEUE_LOG_LEVEL` | `INFO` | Log level (DEBUG, INFO, WARNING, ERROR) |
 | `GITLAB_QUEUE_LOG_FORMAT` | `json` | Log format (json or console) |
 
-### Example `.env` File
+</details>
 
-```bash
-# Required
-GITLAB_QUEUE_GITLAB_TOKEN=glpat-xxxxxxxxxxxxxxxxxxxx
-GITLAB_QUEUE_GITLAB_PROJECT_ID=12345678
-GITLAB_QUEUE_JWT_SECRET=your-64-char-secret-key-here-generate-with-openssl-rand-hex-64
-GITLAB_QUEUE_WEBHOOK_SECRET=your-webhook-secret
-
-# Optional - customize as needed
-GITLAB_QUEUE_GITLAB_URL=https://gitlab.example.com
-GITLAB_QUEUE_TARGET_BRANCH=main
-GITLAB_QUEUE_QUEUE_LABEL=merge_queue
-GITLAB_QUEUE_HOTFIX_LABEL=hotfix
-GITLAB_QUEUE_LOG_LEVEL=INFO
-GITLAB_QUEUE_LOG_FORMAT=json
-```
-
-## GitLab Setup
+<details>
+<summary><strong>🔧 GitLab Setup</strong></summary>
 
 ### 1. Create Personal Access Token
 
@@ -243,105 +402,38 @@ GITLAB_QUEUE_LOG_FORMAT=json
 
 1. Go to project → Settings → Repository → Protected Branches
 2. For your target branch (e.g., `main`):
-   - **Allowed to merge**: Maintainers (or your preference)
+   - **Allowed to merge**: Maintainers
    - **Allowed to push**: No one (prevents direct pushes)
    - **Allowed to force push**: Disabled
 
 ### 5. Configure OAuth Application (Optional - for Dashboard)
 
-To enable dashboard authentication with GitLab OAuth:
-
-1. Go to GitLab → User Settings → Applications (or Admin → Applications for instance-wide)
+1. Go to GitLab → User Settings → Applications
 2. Create a new application:
    - **Name**: `Merge Queue Bot Dashboard`
    - **Redirect URI**: `https://your-bot-domain.com/auth/callback`
-   - **Confidential**: Yes (checked)
-   - **Scopes**: Check `read_user` and `read_api`
-3. Click "Save application"
-4. Copy the **Application ID** and **Secret**
-5. Set environment variables:
-   ```bash
-   GITLAB_QUEUE_OAUTH_CLIENT_ID=your-application-id
-   GITLAB_QUEUE_OAUTH_CLIENT_SECRET=your-application-secret
-   GITLAB_QUEUE_OAUTH_REDIRECT_URI=https://your-bot-domain.com/auth/callback
-   ```
+   - **Confidential**: Yes
+   - **Scopes**: `read_user` and `read_api`
+3. Copy Application ID and Secret to environment variables
 
-**Required OAuth Scopes:**
+</details>
 
-| Scope | Purpose |
-|-------|---------|
-| `read_user` | Access user profile (username, email, avatar) |
-| `read_api` | Verify user has access to the project |
+<details>
+<summary><strong>🚢 Deployment Options</strong></summary>
 
-**Note:** OAuth is optional. If not configured, the dashboard API will be accessible without authentication. For production deployments, OAuth is strongly recommended.
-
-## Deployment
-
-### Local Development
-
-```bash
-cd backend
-
-# Install dependencies
-uv sync
-
-# Set environment variables
-export GITLAB_QUEUE_GITLAB_TOKEN="glpat-xxxx"
-export GITLAB_QUEUE_GITLAB_PROJECT_ID="12345"
-export GITLAB_QUEUE_JWT_SECRET="$(openssl rand -hex 64)"
-export GITLAB_QUEUE_WEBHOOK_SECRET="dev-secret"
-export GITLAB_QUEUE_WEBHOOK_HOST="0.0.0.0"  # Allow external connections
-
-# Run
-python -m gitlab_queue
-```
-
-For webhook testing locally, use a tunnel like ngrok:
-
-```bash
-ngrok http 8080
-# Use the ngrok URL as your webhook URL in GitLab
-```
-
-### Docker
-
-```bash
-# Build image
-docker build -f docker/Dockerfile.backend -t gitlab-queue:latest backend/
-
-# Run container
-docker run -d \
-  --name gitlab-queue \
-  -p 8080:8080 \
-  -v gitlab-queue-data:/app/data \
-  -e GITLAB_QUEUE_GITLAB_TOKEN=glpat-xxxx \
-  -e GITLAB_QUEUE_GITLAB_PROJECT_ID=12345 \
-  -e GITLAB_QUEUE_JWT_SECRET=your-secret \
-  -e GITLAB_QUEUE_WEBHOOK_SECRET=webhook-secret \
-  -e GITLAB_QUEUE_WEBHOOK_HOST=0.0.0.0 \
-  gitlab-queue:latest
-```
-
-### Docker Compose
+### Docker Compose (Recommended)
 
 ```bash
 cd docker
-
-# Create .env file in backend/ directory
-cp ../backend/.env.example ../backend/.env
-# Edit .env with your values
-
-# Start
 docker-compose up -d
-
-# View logs
-docker-compose logs -f
-
-# Stop
-docker-compose down
 ```
 
-### Kubernetes (Hints)
+Includes:
+- Backend container
+- Frontend container
+- Caddy reverse proxy (auto SSL)
+
+### Kubernetes
 
 ```yaml
 apiVersion: apps/v1
@@ -354,7 +446,7 @@ spec:
     spec:
       containers:
       - name: gitlab-queue
-        image: gitlab-queue:latest
+        image: ghcr.io/kanarios/gitlab-queue:latest
         ports:
         - containerPort: 8080
         envFrom:
@@ -381,48 +473,81 @@ spec:
           claimName: gitlab-queue-data
 ```
 
-## API Reference
+### Local with ngrok (for testing webhooks)
+
+```bash
+# Terminal 1: Run the bot
+cd backend && python -m gitlab_queue
+
+# Terminal 2: Expose locally
+ngrok http 8080
+# Use the ngrok URL as your webhook URL in GitLab
+```
+
+</details>
+
+<details>
+<summary><strong>🔌 API Reference</strong></summary>
 
 ### Health Endpoints
 
 ```bash
-# Liveness probe - always returns 200 if process is alive
+# Liveness probe
 curl http://localhost:8080/health
 
-# Readiness probe - returns 503 if not ready to accept traffic
+# Readiness probe
 curl http://localhost:8080/ready
 
-# Detailed health - component status breakdown
+# Detailed component status
 curl http://localhost:8080/health/detailed
 
 # Prometheus metrics
 curl http://localhost:8080/metrics
 ```
 
-### Webhook Endpoint
+### Queue API
 
 ```bash
-# GitLab sends webhooks here
-POST /webhooks/gitlab
-Headers:
-  X-Gitlab-Token: your-webhook-secret
-  Content-Type: application/json
-```
-
-### Dashboard API
-
-```bash
-# Get full queue status (active queue + history + stats)
+# Get full queue status
 curl http://localhost:8080/api/queue
 
-# Get only active queue items
+# Get active queue only
 curl http://localhost:8080/api/queue/active
 
-# Get only statistics
+# Get queue statistics
 curl http://localhost:8080/api/queue/stats
 
 # Get specific MR status
 curl http://localhost:8080/api/queue/123
+```
+
+### History API
+
+```bash
+# Get merge history (paginated)
+curl "http://localhost:8080/api/history?page=1&per_page=20"
+
+# Filter by status
+curl "http://localhost:8080/api/history?status=merged"
+
+# Search by title
+curl "http://localhost:8080/api/history?search=fix%20bug"
+```
+
+### Analytics API
+
+```bash
+# Get summary KPIs
+curl "http://localhost:8080/api/analytics/summary?period=30d"
+
+# Get hourly data
+curl "http://localhost:8080/api/analytics/hourly?period=7d"
+
+# Get outcome distribution
+curl "http://localhost:8080/api/analytics/outcomes?period=30d"
+
+# Get failure reasons
+curl "http://localhost:8080/api/analytics/failure-reasons?period=30d"
 ```
 
 ### Dead Letter Queue API
@@ -434,9 +559,6 @@ curl http://localhost:8080/api/dlq
 # Get DLQ statistics
 curl http://localhost:8080/api/dlq/stats
 
-# Get single DLQ entry
-curl http://localhost:8080/api/dlq/{entry_id}
-
 # Retry a DLQ entry
 curl -X POST http://localhost:8080/api/dlq/{entry_id}/retry
 
@@ -444,83 +566,124 @@ curl -X POST http://localhost:8080/api/dlq/{entry_id}/retry
 curl -X DELETE http://localhost:8080/api/dlq/{entry_id}
 ```
 
-## Architecture
+### WebSocket API
 
-### Component Overview
+Connect: `ws://localhost:8080/ws`
+
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `queue:updated` | `{queue: MR[], stats: Stats}` | Full queue state update |
+| `mr:status_changed` | `{iid, oldStatus, newStatus}` | MR state transition |
+| `mr:completed` | `{iid, status, finishedAt, failureReason}` | MR finished processing |
+
+### Webhook Endpoint
 
 ```
-                                    ┌─────────────────┐
-                                    │    GitLab       │
-                                    │    Server       │
-                                    └────────┬────────┘
-                                             │
-                    ┌────────────────────────┼────────────────────────┐
-                    │                        │                        │
-                    ▼                        ▼                        │
-            ┌───────────────┐       ┌───────────────┐                 │
-            │   Webhooks    │       │  Polling      │                 │
-            │   /webhooks/* │       │  Scheduler    │                 │
-            └───────┬───────┘       └───────┬───────┘                 │
-                    │                       │                         │
-                    └───────────┬───────────┘                         │
-                                │                                     │
-                                ▼                                     │
-                    ┌───────────────────────┐                         │
-                    │    Queue Manager      │◄────────────────────────┤
-                    │    (SQLite)           │                         │
-                    └───────────┬───────────┘                         │
-                                │                                     │
-                                ▼                                     │
-                    ┌───────────────────────┐                         │
-                    │     Processor         │─────────────────────────┘
-                    │  (State Machine)      │
-                    └───────────┬───────────┘
-                                │
-                                ▼
-                    ┌───────────────────────┐
-                    │     Notifier          │
-                    │  (MR Comments)        │
-                    └───────────────────────┘
+POST /webhooks/gitlab
+Headers:
+  X-Gitlab-Token: your-webhook-secret
+  Content-Type: application/json
+```
+
+</details>
+
+---
+
+## 🏗️ Architecture
+
+### System Overview
+
+```
+                    ┌─────────────────────────────────────────────────────────┐
+                    │                      GitLab Server                      │
+                    └────────────────────────────┬────────────────────────────┘
+                                                 │
+                      ┌──────────────────────────┼──────────────────────────┐
+                      │                          │                          │
+                      ▼                          ▼                          │
+              ┌───────────────┐         ┌───────────────┐                   │
+              │   Webhooks    │         │   Polling     │                   │
+              │   (instant)   │         │  (fallback)   │                   │
+              └───────┬───────┘         └───────┬───────┘                   │
+                      │                         │                           │
+                      └────────────┬────────────┘                           │
+                                   │                                        │
+                      ┌────────────▼────────────┐                           │
+                      │     Queue Manager       │                           │
+                      │       (SQLite)          │◄──────────────────────────┤
+                      └────────────┬────────────┘                           │
+                                   │                                        │
+              ┌────────────────────┼────────────────────┐                   │
+              │                    │                    │                   │
+              ▼                    ▼                    ▼                   │
+      ┌───────────────┐   ┌───────────────┐   ┌───────────────┐             │
+      │  Retry/DLQ    │   │   Processor   │   │   WebSocket   │             │
+      │   Manager     │   │ State Machine │   │   Manager     │             │
+      └───────────────┘   └───────┬───────┘   └───────┬───────┘             │
+                                  │                   │                     │
+                                  │                   │                     │
+                      ┌───────────▼───────────┐       │                     │
+                      │      Notifier         │───────┘                     │
+                      │   (MR Comments)       │─────────────────────────────┘
+                      └───────────────────────┘
+                                  │
+                      ┌───────────▼───────────┐
+                      │   React Dashboard     │
+                      │   (Frontend SPA)      │
+                      └───────────────────────┘
 ```
 
 ### State Machine
 
 ```
-┌────────┐    label    ┌────────┐   ┌─────────┐   ┌─────────┐   ┌────────┐
-│  new   │ ──added──→  │ queued │ ─→│rebasing │ ─→│ testing │ ─→│merging │
-└────────┘             └────────┘   └─────────┘   └─────────┘   └────────┘
-                            ↑            │              │            │
-                            │            │              │            │
-                            │      ┌─────↓──────┐       │            │
-                            │      │   failed   │←──────┘            │
-                            │      │(conflicts) │                    │
-                            │      └────────────┘                    │
-                            │                                        ↓
-                            │                                  ┌─────────┐
-                            └──────────────────────────────────│ merged  │
-                                                               └─────────┘
+                         ┌─────────────────────────────────────────────┐
+                         │               🎯 HAPPY PATH                 │
+                         │                                             │
+┌─────────┐              │  ┌─────────┐    ┌─────────┐    ┌─────────┐  │   ┌────────┐
+│         │              │  │         │    │         │    │         │  │   │        │
+│ QUEUED  │──────────────┼─►│REBASING │───►│ TESTING │───►│ MERGING │──┼──►│ MERGED │
+│         │              │  │         │    │         │    │         │  │   │   ✅   │
+└────┬────┘              │  └────┬────┘    └────┬────┘    └────┬────┘  │   └────────┘
+     │                   │       │              │              │       │
+     │                   └───────┼──────────────┼──────────────┼───────┘
+     │                           │              │              │
+     │                           ▼              ▼              ▼
+     │                    ┌──────────────────────────────────────────┐
+     │                    │              ❌ FAILED                   │
+     │                    │   (conflict / pipeline fail / timeout)   │
+     │                    └──────────────────────────────────────────┘
+     │
+     ▼
+┌─────────┐
+│ REMOVED │ ◄── label removed or MR closed
+│   🚫    │
+└─────────┘
 ```
 
 ### Key Design Decisions
 
-1. **Single Project per Instance** - Deploy one bot per GitLab project for isolation
-2. **SQLite Storage** - Simple, single-file database for queue and history
-3. **Webhook-Primary** - Real-time updates via webhooks, polling as fallback
-4. **Non-Interrupting Hotfix** - Hotfix jumps queue but doesn't interrupt current processing
-5. **Mandatory MR Feedback** - Every state change posts a comment to the MR
+| Decision | Rationale |
+|----------|-----------|
+| **Single project per instance** | Isolation, security, simpler config |
+| **SQLite storage** | Zero dependencies, single file backup |
+| **Webhook-primary, polling-fallback** | Real-time + reliability |
+| **Non-interrupting hotfix** | Hotfix priority without wasting current work |
+| **Mandatory MR feedback** | Users always know what's happening |
+| **Single pinned comment** | Clean MR history, no spam |
 
-## Monitoring
+---
 
-### Health Check Usage
+## 📈 Monitoring
+
+### Health Checks
 
 ```bash
-# For Docker health check
+# Docker health check
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
   CMD curl -f http://localhost:8080/health || exit 1
 
-# For load balancer
-# Use /ready for traffic routing decisions
-# Use /health for container lifecycle
+# Detailed status
+curl http://localhost:8080/health/detailed | jq
 ```
 
 ### Prometheus Metrics
@@ -531,11 +694,11 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
 | `merge_queue_mr_duration_seconds` | Histogram | Time from queue to merge |
 | `merge_queue_operations_total` | Counter | Operations by type and status |
 | `merge_queue_gitlab_api_latency_seconds` | Histogram | GitLab API response time |
-| `merge_queue_circuit_breaker_state` | Gauge | Circuit breaker state (0=closed, 1=open, 2=half-open) |
+| `merge_queue_circuit_breaker_state` | Gauge | 0=closed, 1=open, 2=half-open |
 
 ### Log Format
 
-JSON logs include:
+JSON structured logs with correlation IDs:
 
 ```json
 {
@@ -548,19 +711,22 @@ JSON logs include:
 }
 ```
 
-## Troubleshooting
+---
 
-### Common Errors
+## 🔧 Troubleshooting
 
-#### "Missing required environment variable"
+<details>
+<summary><strong>Common Issues</strong></summary>
+
+### "Missing required environment variable"
 
 ```
 MissingEnvValueError: GITLAB_QUEUE_GITLAB_TOKEN is required
 ```
 
-Set all required environment variables. See Configuration Reference.
+Set all required environment variables. See [Configuration Reference](#-documentation).
 
-#### "GitLab API returned 401"
+### "GitLab API returned 401"
 
 ```
 GitLab authentication failed: 401 Unauthorized
@@ -568,15 +734,15 @@ GitLab authentication failed: 401 Unauthorized
 
 Your GitLab token is invalid or expired. Create a new token with `api` scope.
 
-#### "Circuit breaker is OPEN"
+### "Circuit breaker is OPEN"
 
 ```
 Circuit breaker is OPEN, failing fast
 ```
 
-GitLab API had multiple failures. The bot will automatically retry after the half-open timeout (default 30s). Check GitLab status.
+GitLab API had multiple failures. The bot will automatically retry after 30s. Check GitLab status.
 
-#### "Rebase conflict detected"
+### "Rebase conflict detected"
 
 ```
 Cannot rebase: conflicts in src/file.py
@@ -584,87 +750,105 @@ Cannot rebase: conflicts in src/file.py
 
 The MR has merge conflicts. Resolve them locally, push, and re-add the queue label.
 
-#### "Webhook signature verification failed"
+### "Webhook signature verification failed"
 
 ```
 Invalid webhook signature
 ```
 
-`GITLAB_QUEUE_WEBHOOK_SECRET` doesn't match the secret configured in GitLab. Update to match.
+`GITLAB_QUEUE_WEBHOOK_SECRET` doesn't match GitLab webhook config. Ensure they match exactly.
 
-### Debug Logging
+### Dashboard shows "Disconnected"
 
-Enable debug logs for detailed information:
+WebSocket connection lost. Check:
+1. Backend is running (`curl http://localhost:8080/health`)
+2. CORS origins are configured correctly
+3. No proxy blocking WebSocket upgrade
+
+### DLQ entries piling up
+
+Check `/api/dlq/stats` for failure patterns. Common causes:
+- GitLab API downtime
+- Invalid webhook payloads
+- Network issues
+
+Retry entries with `POST /api/dlq/{id}/retry` or investigate with `GET /api/dlq/{id}`.
+
+</details>
+
+<details>
+<summary><strong>Debug Mode</strong></summary>
 
 ```bash
 export GITLAB_QUEUE_LOG_LEVEL=DEBUG
-export GITLAB_QUEUE_LOG_FORMAT=console  # Easier to read
+export GITLAB_QUEUE_LOG_FORMAT=console
 python -m gitlab_queue
 ```
 
-### Checking Component Health
+</details>
 
-```bash
-curl http://localhost:8080/health/detailed | jq
-```
+---
 
-Response shows status of each component:
-- `database` - SQLite connection
-- `gitlab_api` - GitLab API availability
-- `processor` - Main processing loop
-- `webhook_server` - HTTP server
-
-## Contributing
+## 🤝 Contributing
 
 ### Development Setup
 
 ```bash
 cd backend
 
-# Install all dependencies including dev
+# Install all dependencies
 uv sync --all-extras
 
-# Run linting
-uv run ruff check .
-
-# Run type checking
-uv run mypy src/
-
-# Run formatter
-uv run ruff format .
+# Run checks
+make check    # lint + typecheck
+make format   # auto-format code
+make test     # run all tests
 ```
 
 ### Running Tests
 
 ```bash
-# Run all tests
+# All tests (Vedro BDD framework)
 uv run vedro run scenarios/
 
-# Run with verbose output
+# Verbose output
 uv run vedro run scenarios/ -v
 
-# Run specific test file
+# Single test file
 uv run vedro run scenarios/unit/queue_add_mr.py
 
-# Run in random order
+# Random order (find ordering bugs)
 uv run vedro run scenarios/ --order-random
 ```
 
 ### Code Style
 
-- **Formatter**: Ruff (line length 120)
-- **Linter**: Ruff
+- **Formatter/Linter**: Ruff (line length 100)
 - **Type Checker**: mypy (strict mode)
 - **Test Framework**: Vedro (BDD-style)
 
 ### Pull Request Process
 
-1. Create a feature branch
-2. Make changes
-3. Run `uv run ruff check . && uv run mypy src/`
-4. Run `uv run vedro run scenarios/`
+1. Fork the repository
+2. Create a feature branch
+3. Make changes
+4. Run `make check && make test`
 5. Submit PR
 
-## License
+---
 
-MIT License - see LICENSE file for details.
+## 📄 License
+
+MIT License - see [LICENSE](LICENSE) for details.
+
+---
+
+<div align="center">
+
+**[⬆ Back to Top](#-gitlab-merge-queue-bot)**
+
+Made with ❤️ for developers tired of rebase wars
+
+[![Star History](https://api.star-history.com/svg?repos=kanarios/gitlab_queue&type=Date)](https://star-history.com/#kanarios/gitlab_queue&Date)
+
+</div>
