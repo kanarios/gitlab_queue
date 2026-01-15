@@ -951,7 +951,17 @@ class QueueManager:
         if labels_raw is None:
             labels = []
         elif isinstance(labels_raw, str):
-            labels = json.loads(labels_raw) if labels_raw else []
+            if not labels_raw:
+                labels = []
+            else:
+                try:
+                    labels = json.loads(labels_raw)
+                except json.JSONDecodeError:
+                    log.warning(
+                        "Invalid JSON in labels column, using empty list",
+                        mr_iid=row.get("iid"),
+                    )
+                    labels = []
         else:
             labels = labels_raw
 
