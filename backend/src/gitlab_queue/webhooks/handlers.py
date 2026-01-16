@@ -574,9 +574,7 @@ class WebhookHandler:
             )
             await handler.handle(event)
 
-    async def validate_webhook(
-        self, payload: dict[str, Any], secret_token: str | None = None
-    ) -> bool:
+    async def validate_webhook(self, payload: dict[str, Any], secret_token: str | None = None) -> bool:
         """Validate webhook authenticity and project ID.
 
         Args:

@@ -414,9 +414,7 @@ async def run_application(app: Application) -> int:
         app.analytics_processor.request_shutdown()
 
         # Stop all tasks gracefully
-        await _stop_task_gracefully(
-            processor_task, "Processor", app.shutdown_manager.shutdown_timeout
-        )
+        await _stop_task_gracefully(processor_task, "Processor", app.shutdown_manager.shutdown_timeout)
         await _stop_task_gracefully(scheduler_task, "Scheduler")
         await _stop_task_gracefully(retry_processor_task, "Retry processor")
         await _stop_task_gracefully(analytics_processor_task, "Analytics processor")

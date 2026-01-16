@@ -84,9 +84,7 @@ class MRStateMachine(StateMachine):
     merge_failed = merging.to(failed)
 
     # Any non-final state can transition to removed
-    mark_removed = (
-        queued.to(removed) | rebasing.to(removed) | testing.to(removed) | merging.to(removed)
-    )
+    mark_removed = queued.to(removed) | rebasing.to(removed) | testing.to(removed) | merging.to(removed)
 
     # =========================================================================
     # Constructor
@@ -168,9 +166,7 @@ class MRStateMachine(StateMachine):
 
         # Broadcast WebSocket update
         if self.websocket_manager:
-            await self.websocket_manager.broadcast_mr_status_changed(
-                self.mr_iid, "queued", "rebasing"
-            )
+            await self.websocket_manager.broadcast_mr_status_changed(self.mr_iid, "queued", "rebasing")
 
     async def on_enter_testing(self) -> None:
         """Called when pipeline starts after rebase."""
@@ -195,9 +191,7 @@ class MRStateMachine(StateMachine):
 
         # Broadcast WebSocket update
         if self.websocket_manager:
-            await self.websocket_manager.broadcast_mr_status_changed(
-                self.mr_iid, "rebasing", "testing"
-            )
+            await self.websocket_manager.broadcast_mr_status_changed(self.mr_iid, "rebasing", "testing")
 
     async def on_enter_merging(self) -> None:
         """Called when pipeline passes and merge starts."""
@@ -214,9 +208,7 @@ class MRStateMachine(StateMachine):
 
         # Broadcast WebSocket update
         if self.websocket_manager:
-            await self.websocket_manager.broadcast_mr_status_changed(
-                self.mr_iid, "testing", "merging"
-            )
+            await self.websocket_manager.broadcast_mr_status_changed(self.mr_iid, "testing", "merging")
 
     async def on_enter_merged(self) -> None:
         """Called when MR is successfully merged."""

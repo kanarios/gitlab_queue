@@ -217,9 +217,7 @@ class QueueScheduler:
 
         return stats
 
-    async def _add_missing_mrs(
-        self, gitlab_mrs: list[MergeRequest], queue_mr_iids: set[int]
-    ) -> int:
+    async def _add_missing_mrs(self, gitlab_mrs: list[MergeRequest], queue_mr_iids: set[int]) -> int:
         """Add MRs that are in GitLab but not in queue.
 
         Args:
@@ -243,9 +241,7 @@ class QueueScheduler:
 
         return len(mrs_to_add)
 
-    async def _remove_orphaned_mrs(
-        self, queue_items: list[QueueItem], gitlab_mr_iids: set[int]
-    ) -> int:
+    async def _remove_orphaned_mrs(self, queue_items: list[QueueItem], gitlab_mr_iids: set[int]) -> int:
         """Remove MRs that are in queue but no longer in GitLab.
 
         Args:

@@ -35,9 +35,7 @@ class MergeRequestModel(Base):
     author_name: Mapped[str] = mapped_column(Text, nullable=False)
     author_username: Mapped[str] = mapped_column(Text, nullable=False)
     author_avatar: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(
-        Text, nullable=False, default="queued", server_default="queued"
-    )
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="queued", server_default="queued")
     is_hotfix: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     labels: Mapped[str | None] = mapped_column(Text, nullable=True)
     target_branch: Mapped[str] = mapped_column(Text, nullable=False)
@@ -49,9 +47,7 @@ class MergeRequestModel(Base):
     retry_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     stale_warning_sent: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
-    created_at: Mapped[str | None] = mapped_column(
-        Text, nullable=True, server_default="CURRENT_TIMESTAMP"
-    )
+    created_at: Mapped[str | None] = mapped_column(Text, nullable=True, server_default="CURRENT_TIMESTAMP")
 
     __table_args__ = (
         Index("idx_mr_status", "status"),
@@ -80,9 +76,7 @@ class WebhookRetryModel(Base):
     max_attempts: Mapped[int] = mapped_column(Integer, default=3, server_default="3")
     next_attempt_at: Mapped[str] = mapped_column(Text, nullable=False)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[str | None] = mapped_column(
-        Text, nullable=True, server_default="CURRENT_TIMESTAMP"
-    )
+    created_at: Mapped[str | None] = mapped_column(Text, nullable=True, server_default="CURRENT_TIMESTAMP")
 
     __table_args__ = (
         Index("idx_retry_next_attempt", "next_attempt_at"),
@@ -108,9 +102,7 @@ class WebhookDLQModel(Base):
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False)
     last_error: Mapped[str] = mapped_column(Text, nullable=False)
     original_created_at: Mapped[str] = mapped_column(Text, nullable=False)
-    moved_to_dlq_at: Mapped[str | None] = mapped_column(
-        Text, nullable=True, server_default="CURRENT_TIMESTAMP"
-    )
+    moved_to_dlq_at: Mapped[str | None] = mapped_column(Text, nullable=True, server_default="CURRENT_TIMESTAMP")
 
     __table_args__ = (
         Index("idx_dlq_moved_at", "moved_to_dlq_at"),
@@ -150,9 +142,7 @@ class MergeRequestHistoryModel(Base):
     pipeline_status: Mapped[str | None] = mapped_column(Text, nullable=True)
     pipeline_duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     pipeline_failed_jobs: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[str | None] = mapped_column(
-        Text, nullable=True, server_default="CURRENT_TIMESTAMP"
-    )
+    created_at: Mapped[str | None] = mapped_column(Text, nullable=True, server_default="CURRENT_TIMESTAMP")
 
     __table_args__ = (
         Index("idx_history_finished_at", "finished_at"),
