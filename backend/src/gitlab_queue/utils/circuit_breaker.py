@@ -206,8 +206,7 @@ class CircuitBreaker:
 
                 retry_after = self._time_until_half_open()
                 raise CircuitOpenError(
-                    f"Circuit breaker '{self.name}' is open. "
-                    f"Will attempt recovery in {retry_after:.1f}s",
+                    f"Circuit breaker '{self.name}' is open. Will attempt recovery in {retry_after:.1f}s",
                     retry_after=retry_after,
                 )
 

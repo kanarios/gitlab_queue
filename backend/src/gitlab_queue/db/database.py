@@ -116,9 +116,7 @@ class Database:
     echo: bool = False
     allowed_base_path: str | None = None
     _engine: AsyncEngine | None = field(default=None, init=False, repr=False)
-    _session_factory: async_sessionmaker[AsyncSession] | None = field(
-        default=None, init=False, repr=False
-    )
+    _session_factory: async_sessionmaker[AsyncSession] | None = field(default=None, init=False, repr=False)
     _initialized: bool = field(default=False, init=False, repr=False)
     _init_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
 
@@ -292,10 +290,7 @@ class Database:
                 # Warn about uncommitted transactions
                 if session.in_transaction():
                     await session.rollback()
-                    log.warning(
-                        "Rolled back uncommitted transaction at session exit. "
-                        "Caller should explicitly commit."
-                    )
+                    log.warning("Rolled back uncommitted transaction at session exit. Caller should explicitly commit.")
 
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[AsyncSession]:

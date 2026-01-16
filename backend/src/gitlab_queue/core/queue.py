@@ -577,13 +577,9 @@ class QueueManager:
 
         return {
             "status": row["status"],
-            "started_at": (
-                datetime.fromisoformat(row["started_at"]) if row["started_at"] else None
-            ),
+            "started_at": (datetime.fromisoformat(row["started_at"]) if row["started_at"] else None),
             "last_error": row["last_error"],
-            "finished_at": (
-                datetime.fromisoformat(row["finished_at"]) if row["finished_at"] else None
-            ),
+            "finished_at": (datetime.fromisoformat(row["finished_at"]) if row["finished_at"] else None),
         }
 
     async def update_mr_state(
@@ -724,9 +720,7 @@ class QueueManager:
             "pipeline_id": mr.pipeline_id,
             "pipeline_status": mr.pipeline_status,
             "pipeline_duration_seconds": pipeline_duration_seconds,
-            "pipeline_failed_jobs": json.dumps(pipeline_failed_jobs)
-            if pipeline_failed_jobs
-            else None,
+            "pipeline_failed_jobs": json.dumps(pipeline_failed_jobs) if pipeline_failed_jobs else None,
         }
 
         async with self.db.transaction() as session:

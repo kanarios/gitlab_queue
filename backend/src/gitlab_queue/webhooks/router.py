@@ -219,9 +219,7 @@ async def ready(request: Request) -> JSONResponse | dict[str, Any]:
     db_status = await state.database.health_check()
 
     # Update health state
-    state.health.database = (
-        ComponentStatus.HEALTHY if db_status.connected else ComponentStatus.UNHEALTHY
-    )
+    state.health.database = ComponentStatus.HEALTHY if db_status.connected else ComponentStatus.UNHEALTHY
 
     # Update GitLab health from circuit breaker
     gitlab_info: dict[str, Any] | None = None
@@ -668,9 +666,7 @@ async def get_queue_status(request: Request) -> dict[str, Any]:
     current_stats = await queue_manager.get_queue_stats()
 
     return {
-        "queue": [
-            _queue_item_to_dict(item, position=idx + 1) for idx, item in enumerate(active_queue)
-        ],
+        "queue": [_queue_item_to_dict(item, position=idx + 1) for idx, item in enumerate(active_queue)],
         "history": [_queue_item_to_dict(item) for item in recent_history],
         "stats": _dashboard_stats_to_dict(dashboard_stats, current_stats),
     }
@@ -694,9 +690,7 @@ async def get_active_queue(request: Request) -> dict[str, Any]:
     active_queue = await queue_manager.get_active_queue()
 
     return {
-        "items": [
-            _queue_item_to_dict(item, position=idx + 1) for idx, item in enumerate(active_queue)
-        ],
+        "items": [_queue_item_to_dict(item, position=idx + 1) for idx, item in enumerate(active_queue)],
         "count": len(active_queue),
     }
 

@@ -45,9 +45,7 @@ async def get_history(
     request: Request,
     page: int = Query(default=1, ge=1, description="Page number (1-indexed)"),
     per_page: int = Query(default=20, ge=1, le=100, description="Items per page (max 100)"),
-    status: str | None = Query(
-        default=None, description="Filter by status (merged, failed, conflict, timeout)"
-    ),
+    status: str | None = Query(default=None, description="Filter by status (merged, failed, conflict, timeout)"),
     date_from: date | None = Query(default=None, description="Filter from date (inclusive)"),
     date_to: date | None = Query(default=None, description="Filter to date (inclusive)"),
     search: str | None = Query(default=None, description="Search by title, author, or MR IID"),
@@ -174,9 +172,7 @@ async def get_analytics_summary(
 @analytics_router.get("/hourly")
 async def get_hourly_analytics(
     request: Request,
-    hours: int = Query(
-        default=24, ge=1, le=168, description="Number of hours to include (max 168 = 7 days)"
-    ),
+    hours: int = Query(default=24, ge=1, le=168, description="Number of hours to include (max 168 = 7 days)"),
 ) -> dict[str, Any]:
     """Get hourly analytics data points.
 

@@ -154,9 +154,7 @@ class AnalyticsJobProcessor:
                     processed_count=stats.total_processed,
                     success_count=stats.success_count,
                     failed_count=stats.failed_count,
-                    avg_wait_time_seconds=(
-                        int(stats.avg_wait_time_seconds) if stats.avg_wait_time_seconds else None
-                    ),
+                    avg_wait_time_seconds=(int(stats.avg_wait_time_seconds) if stats.avg_wait_time_seconds else None),
                 )
 
             log.info(

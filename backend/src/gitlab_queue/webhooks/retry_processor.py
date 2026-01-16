@@ -83,9 +83,7 @@ class WebhookRetryProcessor:
                     log.exception("Retry processor iteration failed", error=str(e))
 
                 # Cancellable sleep between iterations
-                if not await self._interruptible_sleep(
-                    self.settings.webhook_retry_poll_interval_seconds
-                ):
+                if not await self._interruptible_sleep(self.settings.webhook_retry_poll_interval_seconds):
                     break
 
         finally:

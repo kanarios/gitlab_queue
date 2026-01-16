@@ -499,9 +499,7 @@ class MergeProcessor:
 
             elapsed = datetime.now(UTC) - start_time
             if elapsed > timeout:
-                log.warning(
-                    "Pipeline timeout", mr_iid=mr_iid, elapsed_seconds=elapsed.total_seconds()
-                )
+                log.warning("Pipeline timeout", mr_iid=mr_iid, elapsed_seconds=elapsed.total_seconds())
                 await sm.trigger_timeout(max_wait_hours=int(timeout.total_seconds() / 3600))
                 return ProcessingResult.TIMEOUT
 
@@ -515,9 +513,7 @@ class MergeProcessor:
                 await self._interruptible_sleep(self.settings.poll_interval_seconds)
                 continue
 
-            log.debug(
-                "Pipeline status", mr_iid=mr_iid, pipeline_id=pipeline.id, status=pipeline.status
-            )
+            log.debug("Pipeline status", mr_iid=mr_iid, pipeline_id=pipeline.id, status=pipeline.status)
 
             if pipeline.status == "success":
                 log.info("Pipeline succeeded", mr_iid=mr_iid, pipeline_id=pipeline.id)

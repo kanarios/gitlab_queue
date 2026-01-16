@@ -91,9 +91,7 @@ def _sanitize_response_body(body: dict[str, Any] | str | None) -> dict[str, Any]
             elif isinstance(value, dict):
                 result[key] = redact_dict(value)
             elif isinstance(value, list):
-                result[key] = [
-                    redact_dict(item) if isinstance(item, dict) else item for item in value
-                ]
+                result[key] = [redact_dict(item) if isinstance(item, dict) else item for item in value]
             else:
                 result[key] = value
         return result
@@ -349,9 +347,7 @@ class GitLabClient:
             raise ValueError(f"Path traversal not allowed: {path}")
         return f"/projects/{self._project_id}/{path}"
 
-    def _parse_rate_limit_headers(
-        self, response: httpx.Response
-    ) -> tuple[int | None, int | None, int | None]:
+    def _parse_rate_limit_headers(self, response: httpx.Response) -> tuple[int | None, int | None, int | None]:
         """Parse rate limit headers from GitLab response.
 
         Returns:
@@ -444,9 +440,7 @@ class GitLabClient:
             self._raise_rate_limit_error(response, body, error_msg)
 
         if 500 <= status_code < 600:
-            raise GitLabServerError(
-                f"Server error: {error_msg}", status_code=status_code, response_body=body
-            )
+            raise GitLabServerError(f"Server error: {error_msg}", status_code=status_code, response_body=body)
 
         raise GitLabAPIError(f"API error: {error_msg}", status_code=status_code, response_body=body)
 
@@ -626,9 +620,7 @@ class GitLabClient:
             reraise=True,
         ):
             with attempt:
-                response = await self._execute_single_request(
-                    method, full_path, normalized_path, **kwargs
-                )
+                response = await self._execute_single_request(method, full_path, normalized_path, **kwargs)
                 return response
 
         raise AssertionError("Unreachable: retry loop completed without return or exception")
@@ -720,9 +712,7 @@ class GitLabClient:
         Returns:
             Parsed JSON response.
         """
-        response = await self._request(
-            "POST", path, project_scoped=project_scoped, json=json, params=params
-        )
+        response = await self._request("POST", path, project_scoped=project_scoped, json=json, params=params)
         result: dict[str, Any] = response.json()
         return result
 
@@ -745,9 +735,7 @@ class GitLabClient:
         Returns:
             Parsed JSON response.
         """
-        response = await self._request(
-            "PUT", path, project_scoped=project_scoped, json=json, params=params
-        )
+        response = await self._request("PUT", path, project_scoped=project_scoped, json=json, params=params)
         result: dict[str, Any] = response.json()
         return result
 

@@ -189,11 +189,7 @@ class MergeRequestRepository:
 
     async def count_active(self) -> int:
         """Count MRs in active queue states."""
-        stmt = (
-            select(func.count())
-            .select_from(MergeRequestModel)
-            .where(MergeRequestModel.status.in_(ACTIVE_STATES))
-        )
+        stmt = select(func.count()).select_from(MergeRequestModel).where(MergeRequestModel.status.in_(ACTIVE_STATES))
         result = await self._session.execute(stmt)
         return result.scalar() or 0
 
@@ -258,10 +254,7 @@ class MergeRequestRepository:
                     # Hotfixes come first, then by queued_at
                     (
                         (MergeRequestModel.is_hotfix > mr.is_hotfix)
-                        | (
-                            (MergeRequestModel.is_hotfix == mr.is_hotfix)
-                            & (MergeRequestModel.queued_at < mr.queued_at)
-                        )
+                        | ((MergeRequestModel.is_hotfix == mr.is_hotfix) & (MergeRequestModel.queued_at < mr.queued_at))
                     ),
                 )
             )
@@ -576,11 +569,7 @@ class HistoryRepository:
 
     async def get_recent(self, limit: int = 10) -> Sequence[MergeRequestHistoryModel]:
         """Get most recent history entries."""
-        stmt = (
-            select(MergeRequestHistoryModel)
-            .order_by(MergeRequestHistoryModel.finished_at.desc())
-            .limit(limit)
-        )
+        stmt = select(MergeRequestHistoryModel).order_by(MergeRequestHistoryModel.finished_at.desc()).limit(limit)
         result = await self._session.execute(stmt)
         return result.scalars().all()
 
@@ -604,18 +593,10 @@ class HistoryRepository:
         # Use CASE WHEN for SQLite compatibility (no IIF in older versions)
         stmt = select(
             func.count().label("total"),
-            func.sum(case((MergeRequestHistoryModel.status == "merged", 1), else_=0)).label(
-                "success"
-            ),
-            func.sum(case((MergeRequestHistoryModel.status == "failed", 1), else_=0)).label(
-                "failed"
-            ),
-            func.sum(case((MergeRequestHistoryModel.status == "conflict", 1), else_=0)).label(
-                "conflict"
-            ),
-            func.sum(case((MergeRequestHistoryModel.status == "timeout", 1), else_=0)).label(
-                "timeout"
-            ),
+            func.sum(case((MergeRequestHistoryModel.status == "merged", 1), else_=0)).label("success"),
+            func.sum(case((MergeRequestHistoryModel.status == "failed", 1), else_=0)).label("failed"),
+            func.sum(case((MergeRequestHistoryModel.status == "conflict", 1), else_=0)).label("conflict"),
+            func.sum(case((MergeRequestHistoryModel.status == "timeout", 1), else_=0)).label("timeout"),
             func.sum(case((MergeRequestHistoryModel.is_hotfix == 1, 1), else_=0)).label("hotfix"),
             func.avg(MergeRequestHistoryModel.wait_time_seconds).label("avg_wait"),
             func.avg(MergeRequestHistoryModel.processing_time_seconds).label("avg_processing"),
@@ -658,9 +639,7 @@ class HistoryRepository:
 
         stmt = select(
             func.count().label("total"),
-            func.sum(case((MergeRequestHistoryModel.status == "merged", 1), else_=0)).label(
-                "success"
-            ),
+            func.sum(case((MergeRequestHistoryModel.status == "merged", 1), else_=0)).label("success"),
             func.sum(
                 case(
                     (
@@ -700,9 +679,7 @@ class HistoryRepository:
         cutoff = datetime.now(UTC) - timedelta(days=retention_days)
         cutoff_str = cutoff.isoformat()
 
-        stmt = delete(MergeRequestHistoryModel).where(
-            MergeRequestHistoryModel.finished_at < cutoff_str
-        )
+        stmt = delete(MergeRequestHistoryModel).where(MergeRequestHistoryModel.finished_at < cutoff_str)
         result = await self._session.execute(stmt)
         await self._session.flush()
 
@@ -764,9 +741,7 @@ class AnalyticsRepository:
             AnalyticsDailyModel if created, None if already exists.
         """
         # Check if already aggregated
-        existing_stmt = select(AnalyticsDailyModel).where(
-            AnalyticsDailyModel.date == target_date.isoformat()
-        )
+        existing_stmt = select(AnalyticsDailyModel).where(AnalyticsDailyModel.date == target_date.isoformat())
         existing_result = await self._session.execute(existing_stmt)
         if existing_result.scalar_one_or_none():
             log.debug("Daily stats already exist", date=target_date.isoformat())
@@ -779,18 +754,10 @@ class AnalyticsRepository:
         # Query history for the day
         history_stmt = select(
             func.count().label("total"),
-            func.sum(case((MergeRequestHistoryModel.status == "merged", 1), else_=0)).label(
-                "success"
-            ),
-            func.sum(case((MergeRequestHistoryModel.status == "failed", 1), else_=0)).label(
-                "failed"
-            ),
-            func.sum(case((MergeRequestHistoryModel.status == "conflict", 1), else_=0)).label(
-                "conflict"
-            ),
-            func.sum(case((MergeRequestHistoryModel.status == "timeout", 1), else_=0)).label(
-                "timeout"
-            ),
+            func.sum(case((MergeRequestHistoryModel.status == "merged", 1), else_=0)).label("success"),
+            func.sum(case((MergeRequestHistoryModel.status == "failed", 1), else_=0)).label("failed"),
+            func.sum(case((MergeRequestHistoryModel.status == "conflict", 1), else_=0)).label("conflict"),
+            func.sum(case((MergeRequestHistoryModel.status == "timeout", 1), else_=0)).label("timeout"),
             func.sum(case((MergeRequestHistoryModel.is_hotfix == 1, 1), else_=0)).label("hotfix"),
             func.avg(MergeRequestHistoryModel.wait_time_seconds).label("avg_wait"),
             func.avg(MergeRequestHistoryModel.processing_time_seconds).label("avg_processing"),
@@ -824,9 +791,7 @@ class AnalyticsRepository:
             timeout_count=history_row.timeout or 0,
             hotfix_count=history_row.hotfix or 0,
             avg_wait_time_seconds=(int(history_row.avg_wait) if history_row.avg_wait else None),
-            avg_processing_time_seconds=(
-                int(history_row.avg_processing) if history_row.avg_processing else None
-            ),
+            avg_processing_time_seconds=(int(history_row.avg_processing) if history_row.avg_processing else None),
             max_queue_depth=max_queue_depth,
         )
 
@@ -855,18 +820,14 @@ class AnalyticsRepository:
 
         # Get current queue count
         queue_stmt = (
-            select(func.count())
-            .select_from(MergeRequestModel)
-            .where(MergeRequestModel.status.in_(ACTIVE_STATES))
+            select(func.count()).select_from(MergeRequestModel).where(MergeRequestModel.status.in_(ACTIVE_STATES))
         )
         queue_result = await self._session.execute(queue_stmt)
         total_in_queue = queue_result.scalar() or 0
 
         # Get period stats from history
         history_stmt = select(
-            func.sum(case((MergeRequestHistoryModel.status == "merged", 1), else_=0)).label(
-                "merged"
-            ),
+            func.sum(case((MergeRequestHistoryModel.status == "merged", 1), else_=0)).label("merged"),
             func.sum(
                 case(
                     (
@@ -1119,9 +1080,7 @@ class ModelConverter:
         """Convert MergeRequestHistoryModel to QueueItem for display."""
         from gitlab_queue.models.queue_item import QueueItem as QI
 
-        queued_at = (
-            datetime.fromisoformat(history.queued_at) if history.queued_at else datetime.now(UTC)
-        )
+        queued_at = datetime.fromisoformat(history.queued_at) if history.queued_at else datetime.now(UTC)
         started_at = datetime.fromisoformat(history.started_at) if history.started_at else None
         finished_at = datetime.fromisoformat(history.finished_at) if history.finished_at else None
 
