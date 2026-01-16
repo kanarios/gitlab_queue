@@ -20,9 +20,7 @@ from gitlab_queue.db.database import Database
 from gitlab_queue.models.mr import Author, MergeRequest
 
 
-class ProcessMRSuccessfully(vedro.Scenario):
-    """Test successful MR processing from queue to merge."""
-
+class Scenario(vedro.Scenario):
     subject = "processor: happy path processing"
 
     def __init__(self):
@@ -31,7 +29,6 @@ class ProcessMRSuccessfully(vedro.Scenario):
         self._db_context = None
 
     async def given_mr_in_queue_and_api_mocked(self):
-        """Setup MR in queue and GitLab API mocks."""
         # Setup test database
         self.db = Database(database_url="sqlite+aiosqlite:///:memory:")
         await self.db.initialize()
@@ -94,7 +91,6 @@ class ProcessMRSuccessfully(vedro.Scenario):
         )
 
     async def when_processor_processes_mr(self):
-        """Process the MR through the processor."""
         # Setup mocks
         get_mr_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/42")
         get_mr_response = jj.Response(status=200, json=self.mr_data)
@@ -144,7 +140,6 @@ class ProcessMRSuccessfully(vedro.Scenario):
             self.comment_history = await self.comment_mock.fetch_history()
 
     async def then_mr_is_successfully_merged(self):
-        """Verify MR was successfully processed and merged."""
         # Check processing result
         assert self.result == ProcessingResult.SUCCESS
 
@@ -159,6 +154,5 @@ class ProcessMRSuccessfully(vedro.Scenario):
         assert len(self.comment_history) >= 1, "At least one comment should be posted"
 
     async def cleanup(self):
-        """Clean up test resources."""
         if self.db:
             await self.db.close()

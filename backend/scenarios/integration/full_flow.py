@@ -14,9 +14,9 @@ from __future__ import annotations
 
 import jj
 from jj.mock import mocked
-from scenarios.contexts.gitlab_client_factory import create_test_settings
+from scenarios.contexts.gitlab_client_factory import created_test_settings
 from scenarios.contexts.jj_gitlab_mock import get_mock_url
-from scenarios.contexts.sqlite_client import test_database
+from scenarios.contexts.sqlite_client import initialized_test_database
 from vedro import given, scenario, then, when
 
 from gitlab_queue.clients.gitlab import GitLabClient
@@ -24,20 +24,21 @@ from gitlab_queue.core.notifier import MRNotifier
 from gitlab_queue.core.processor import MergeProcessor
 from gitlab_queue.core.queue import QueueManager
 from gitlab_queue.models.mr import Author, MergeRequest
+from scenarios.library import Labels, MRState, QueueState
 
 
 @scenario()
 async def full_flow_with_failures_and_recovery():
     """Test complete flow with failures and recovery mechanisms."""
 
-    async with test_database() as db:
+    async with initialized_test_database() as db:
         with given("system with various failure scenarios"):
             queue = QueueManager(db)
             await queue.ensure_schema()
 
             mock_url = get_mock_url()
 
-            settings = create_test_settings(mock_url, pipeline_retry_count=2)
+            settings = created_test_settings(mock_url, pipeline_retry_count=2)
 
             # MRs with different failure scenarios
             mrs_data = [
@@ -66,11 +67,11 @@ async def full_flow_with_failures_and_recovery():
                 test_mr = MergeRequest(
                     iid=mr_data["iid"],
                     title=mr_data["title"],
-                    state="opened",
+                    state=MRState.OPENED,
                     target_branch="main",
                     source_branch=f"feature/{mr_data['iid']}",
                     sha=mr_data["sha"],
-                    labels=["merge_queue"],
+                    labels=[Labels.MERGE_QUEUE],
                     author=Author(
                         id=mr_data["iid"],
                         name=f"User {mr_data['iid']}",
@@ -89,9 +90,9 @@ async def full_flow_with_failures_and_recovery():
                     "iid": 400,
                     "project_id": 123,
                     "title": "Flaky Pipeline",
-                    "state": "opened",
+                    "state": MRState.OPENED,
                     "sha": "flaky123",
-                    "labels": ["merge_queue"],
+                    "labels": [Labels.MERGE_QUEUE],
                     "source_branch": "feature/400",
                     "target_branch": "main",
                     "merge_status": "can_be_merged",
@@ -105,14 +106,10 @@ async def full_flow_with_failures_and_recovery():
                 jj.Response(status=202, json={"rebase_in_progress": False}),  # Retry
             ]
 
-            pipelines_400_matcher = jj.match(
-                "GET", "/api/v4/projects/123/merge_requests/400/pipelines"
-            )
+            pipelines_400_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/400/pipelines")
             pipelines_400_responses = [
                 jj.Response(status=200, json=[{"id": 8000, "status": "failed", "sha": "flaky123"}]),
-                jj.Response(
-                    status=200, json=[{"id": 8001, "status": "success", "sha": "flaky456"}]
-                ),
+                jj.Response(status=200, json=[{"id": 8001, "status": "success", "sha": "flaky456"}]),
             ]
 
             merge_400_matcher = jj.match("PUT", "/api/v4/projects/123/merge_requests/400/merge")
@@ -122,9 +119,9 @@ async def full_flow_with_failures_and_recovery():
                     "iid": 400,
                     "project_id": 123,
                     "title": "Flaky Pipeline",
-                    "state": "merged",
+                    "state": MRState.MERGED,
                     "sha": "flaky123",
-                    "labels": ["merge_queue"],
+                    "labels": [Labels.MERGE_QUEUE],
                     "source_branch": "feature/400",
                     "target_branch": "main",
                     "merge_status": "can_be_merged",
@@ -142,9 +139,9 @@ async def full_flow_with_failures_and_recovery():
                         "iid": 401,
                         "project_id": 123,
                         "title": "API Timeout",
-                        "state": "opened",
+                        "state": MRState.OPENED,
                         "sha": "timeout123",
-                        "labels": ["merge_queue"],
+                        "labels": [Labels.MERGE_QUEUE],
                         "source_branch": "feature/401",
                         "target_branch": "main",
                         "merge_status": "can_be_merged",
@@ -161,9 +158,9 @@ async def full_flow_with_failures_and_recovery():
                     "iid": 402,
                     "project_id": 123,
                     "title": "Conflict MR",
-                    "state": "opened",
+                    "state": MRState.OPENED,
                     "sha": "conflict123",
-                    "labels": ["merge_queue"],
+                    "labels": [Labels.MERGE_QUEUE],
                     "source_branch": "feature/402",
                     "target_branch": "main",
                     "merge_status": "cannot_be_merged",
@@ -174,29 +171,19 @@ async def full_flow_with_failures_and_recovery():
             rebase_402_matcher = jj.match("PUT", "/api/v4/projects/123/merge_requests/402/rebase")
             rebase_402_response = jj.Response(status=409, json={"message": "Conflict"})
 
-            conflicts_402_matcher = jj.match(
-                "GET", "/api/v4/projects/123/merge_requests/402/conflicts"
-            )
+            conflicts_402_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/402/conflicts")
             conflicts_402_response = jj.Response(status=200, json=[{"old_path": "file.py"}])
 
             # GET notes (for finding existing bot comments)
-            get_notes_matcher = jj.match(
-                "GET", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes")
-            )
+            get_notes_matcher = jj.match("GET", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes"))
             get_notes_response = jj.Response(status=200, json=[])
 
             # POST notes (for creating new comments)
-            comment_matcher = jj.match(
-                "POST", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes")
-            )
+            comment_matcher = jj.match("POST", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes"))
             comment_response = jj.Response(status=201, json={"id": 80})
 
-            failed_jobs_matcher = jj.match(
-                "GET", jj.matchers.regex(r"/api/v4/projects/123/pipelines/\d+/jobs")
-            )
-            failed_jobs_response = jj.Response(
-                status=200, json=[{"id": 9000, "name": "test", "status": "failed"}]
-            )
+            failed_jobs_matcher = jj.match("GET", jj.matchers.regex(r"/api/v4/projects/123/pipelines/\d+/jobs"))
+            failed_jobs_response = jj.Response(status=200, json=[{"id": 9000, "name": "test", "status": "failed"}])
 
         # Setup response sequences
         rebase_400_mock_1 = mocked(rebase_400_matcher, rebase_400_responses[0])
@@ -245,7 +232,7 @@ async def full_flow_with_failures_and_recovery():
                 if queue_item and queue_item.mr_iid == 401:
                     # This would normally be handled with retry logic
                     # For simplicity, marking as processed
-                    await queue.update_mr_state(401, "failed")
+                    await queue.update_mr_state(401, QueueState.FAILED)
                     results.append((401, "api_timeout_handled"))
 
                 # Process MR with conflict
@@ -270,10 +257,10 @@ async def full_flow_with_failures_and_recovery():
 
                 # Verify states
                 mr_400_state = await queue.get_mr_state(400)
-                assert mr_400_state["status"] == "merged"
+                assert mr_400_state["status"] == QueueState.MERGED
 
                 mr_402_state = await queue.get_mr_state(402)
-                assert mr_402_state["status"] == "conflict"
+                assert mr_402_state["status"] == QueueState.CONFLICT
 
 
 __all__ = [

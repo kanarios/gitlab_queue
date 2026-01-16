@@ -12,9 +12,9 @@ import asyncio
 
 import jj
 from jj.mock import mocked
-from scenarios.contexts.gitlab_client_factory import create_test_settings
+from scenarios.contexts.gitlab_client_factory import created_test_settings
 from scenarios.contexts.jj_gitlab_mock import get_mock_url
-from scenarios.contexts.sqlite_client import test_database
+from scenarios.contexts.sqlite_client import initialized_test_database
 from vedro import given, scenario, then, when
 
 from gitlab_queue.clients.gitlab import GitLabClient
@@ -28,13 +28,13 @@ from gitlab_queue.webhooks.router import WebhookHandler
 async def concurrent_webhook_and_polling_no_duplicates():
     """Test that concurrent webhook and polling don't create duplicate MRs."""
 
-    async with test_database() as db:
+    async with initialized_test_database() as db:
         with given("webhook and polling discover same MR simultaneously"):
             queue = QueueManager(db)
             await queue.ensure_schema()
 
             mock_url = get_mock_url()
-            settings = create_test_settings(mock_url)
+            settings = created_test_settings(mock_url)
 
             # MR data for both webhook and polling
             mr_data = {
@@ -132,13 +132,13 @@ async def concurrent_webhook_and_polling_no_duplicates():
 async def concurrent_multiple_webhooks_same_mr():
     """Test that multiple webhooks for same MR don't create duplicates."""
 
-    async with test_database() as db:
+    async with initialized_test_database() as db:
         with given("multiple webhook events for same MR arrive simultaneously"):
             queue = QueueManager(db)
             await queue.ensure_schema()
 
             mock_url = get_mock_url()
-            settings = create_test_settings(mock_url)
+            settings = created_test_settings(mock_url)
 
             mr_data = {
                 "iid": 50,
@@ -242,13 +242,13 @@ async def concurrent_multiple_webhooks_same_mr():
 async def concurrent_add_and_remove():
     """Test that concurrent add and remove operations are consistent."""
 
-    async with test_database() as db:
+    async with initialized_test_database() as db:
         with given("MR is being added and removed simultaneously"):
             queue = QueueManager(db)
             await queue.ensure_schema()
 
             mock_url = get_mock_url()
-            settings = create_test_settings(mock_url)
+            settings = created_test_settings(mock_url)
 
             mr_data = {
                 "iid": 60,
@@ -359,7 +359,7 @@ async def concurrent_add_and_remove():
 async def concurrent_processing_doesnt_duplicate():
     """Test that queue position updates are consistent under concurrent reads."""
 
-    async with test_database() as db:
+    async with initialized_test_database() as db:
         with given("multiple readers accessing queue position simultaneously"):
             queue = QueueManager(db)
             await queue.ensure_schema()

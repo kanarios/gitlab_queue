@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import jj
 from jj.mock import mocked
-from scenarios.contexts.gitlab_client_factory import create_test_settings
+from scenarios.contexts.gitlab_client_factory import created_test_settings
 from scenarios.contexts.jj_gitlab_mock import get_mock_url
-from scenarios.contexts.sqlite_client import test_database
+from scenarios.contexts.sqlite_client import initialized_test_database
 from vedro import given, scenario, then, when
 
 from gitlab_queue.clients.gitlab import GitLabClient
@@ -66,13 +66,13 @@ async def process_multiple_mrs_in_order():
     """Test that multiple MRs are processed in FIFO order."""
 
     # Database must stay open for entire test
-    async with test_database() as db:
+    async with initialized_test_database() as db:
         with given("3 MRs added to queue in order"):
             queue = QueueManager(db)
             await queue.ensure_schema()
 
             mock_url = get_mock_url()
-            settings = create_test_settings(mock_url)
+            settings = created_test_settings(mock_url)
 
             # Create mock data for 3 MRs
             mr_mocks = {iid: create_mr_mock(iid) for iid in [10, 20, 30]}
