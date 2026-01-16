@@ -16,7 +16,6 @@ from gitlab_queue.models.events import (
 from gitlab_queue.models.mr import Author, MergeRequest, Note
 from gitlab_queue.models.pipeline import Job, Pipeline
 from gitlab_queue.models.queue_item import QueueItem
-from gitlab_queue.models.retry import DLQItem, DLQStats, RetryQueueItem
 from gitlab_queue.models.retorts import (
     dump_queue_item,
     gitlab_retort,
@@ -31,6 +30,7 @@ from gitlab_queue.models.retorts import (
     parse_webhook_event,
     sqlite_retort,
 )
+from gitlab_queue.models.retry import DLQItem, DLQStats, RetryQueueItem
 
 __all__: list[str] = [
     "Author",

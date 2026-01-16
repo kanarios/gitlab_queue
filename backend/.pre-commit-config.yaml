@@ -1,0 +1,40 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff
+        entry: bash -c 'cd backend && uv run ruff check --fix $(echo "$@" | sed "s|backend/||g")' --
+        language: system
+        types: [python]
+        require_serial: true
+
+      - id: ruff-format
+        name: ruff-format
+        entry: bash -c 'cd backend && uv run ruff format $(echo "$@" | sed "s|backend/||g")' --
+        language: system
+        types: [python]
+        require_serial: true
+
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: bash -c 'cd backend && uv run mypy src/'
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: pyscn
+        name: pyscn
+        entry: bash -c 'cd backend && pyscn check --select complexity,deadcode --skip-clones src/'
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: backend-tests
+        name: backend tests
+        entry: bash -c 'cd backend && ./scripts/run-tests.sh'
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [pre-commit]

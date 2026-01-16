@@ -7,19 +7,19 @@ and the overall system behavior.
 from __future__ import annotations
 
 import asyncio
-import json
-from datetime import UTC, datetime
-from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
 import vedro
 from vedro import scenario
 
-if TYPE_CHECKING:
-    from gitlab_queue.core.queue import QueueManager
-    from gitlab_queue.core.scheduler import QueueScheduler
-    from gitlab_queue.db.database import Database
-    from gitlab_queue.models.mr import MergeRequest
+
+def create_mock_rate_limit_state(is_critical: bool = False) -> Mock:
+    """Create a properly configured mock for rate_limit_state."""
+    state = Mock()
+    state.is_critical = Mock(return_value=is_critical)
+    state.seconds_until_reset = 0.0
+    state.usage_ratio = 0.1
+    return state
 
 
 @scenario()
@@ -58,6 +58,7 @@ async def scheduler_integrates_with_real_queue_manager():
             has_conflicts=False,
             rebase_in_progress=False,
             author=Author(
+                id=1,
                 name="Alice",
                 username="alice",
                 avatar_url="https://example.com/alice.jpg",
@@ -77,6 +78,7 @@ async def scheduler_integrates_with_real_queue_manager():
             has_conflicts=False,
             rebase_in_progress=False,
             author=Author(
+                id=2,
                 name="Bob",
                 username="bob",
                 avatar_url="https://example.com/bob.jpg",
@@ -170,6 +172,7 @@ async def scheduler_handles_concurrent_webhook_and_polling():
             has_conflicts=False,
             rebase_in_progress=False,
             author=Author(
+                id=1,
                 name="Alice",
                 username="alice",
                 avatar_url=None,
@@ -180,7 +183,7 @@ async def scheduler_handles_concurrent_webhook_and_polling():
         # Initially empty, then returns MR
         call_count = 0
 
-        async def dynamic_list_mrs(*args, **kwargs):
+        async def dynamic_list_mrs(*_args: object, **_kwargs: object) -> list[MergeRequest]:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -272,6 +275,7 @@ async def scheduler_recovers_from_gitlab_outage():
             has_conflicts=False,
             rebase_in_progress=False,
             author=Author(
+                id=1,
                 name="Alice",
                 username="alice",
                 avatar_url=None,
@@ -282,7 +286,7 @@ async def scheduler_recovers_from_gitlab_outage():
         # Simulate outage then recovery
         call_count = 0
 
-        async def outage_then_recovery(*args, **kwargs):
+        async def outage_then_recovery(*_args: object, **_kwargs: object) -> list[MergeRequest]:
             nonlocal call_count
             call_count += 1
             if call_count <= 2:
@@ -292,12 +296,14 @@ async def scheduler_recovers_from_gitlab_outage():
             return [mr1]  # Service recovered
 
         gitlab_client.list_mrs_with_label = AsyncMock(side_effect=outage_then_recovery)
+        gitlab_client.rate_limit_state = create_mock_rate_limit_state()
 
         # Mock settings with short poll interval
         settings = Mock(
             queue_label="merge_queue",
             hotfix_label="hotfix",
             poll_interval_seconds=0.1,  # Quick polling for test
+            rate_limit_critical_threshold=0.95,
         )
 
         # Create scheduler
@@ -364,6 +370,7 @@ async def scheduler_removes_orphaned_entries_after_mr_closed():
             has_conflicts=False,
             rebase_in_progress=False,
             author=Author(
+                id=1,
                 name="Alice",
                 username="alice",
                 avatar_url=None,
@@ -383,6 +390,7 @@ async def scheduler_removes_orphaned_entries_after_mr_closed():
             has_conflicts=False,
             rebase_in_progress=False,
             author=Author(
+                id=2,
                 name="Bob",
                 username="bob",
                 avatar_url=None,
@@ -415,6 +423,7 @@ async def scheduler_removes_orphaned_entries_after_mr_closed():
             has_conflicts=False,
             rebase_in_progress=False,
             author=Author(
+                id=2,
                 name="Bob",
                 username="bob",
                 avatar_url=None,

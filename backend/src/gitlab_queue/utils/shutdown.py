@@ -63,9 +63,7 @@ class ShutdownManager:
     # Internal state (not part of constructor)
     _shutdown_event: asyncio.Event = field(default_factory=asyncio.Event, init=False)
     _shutdown_reason: ShutdownReason | None = field(default=None, init=False)
-    _components: list[tuple[str, Callable[[], Awaitable[None]]]] = field(
-        default_factory=list, init=False
-    )
+    _components: list[tuple[str, Callable[[], Awaitable[None]]]] = field(default_factory=list, init=False)
     _loop: asyncio.AbstractEventLoop | None = field(default=None, init=False)
     _signals_registered: bool = field(default=False, init=False)
 
@@ -134,9 +132,7 @@ class ShutdownManager:
             self._shutdown_reason = reason
             self._shutdown_event.set()
 
-    def _create_sync_handler(
-        self, sig: signal.Signals
-    ) -> Callable[[int, Any], None]:
+    def _create_sync_handler(self, sig: signal.Signals) -> Callable[[int, Any], None]:
         """Create synchronous signal handler for Windows.
 
         The handler schedules the async shutdown on the event loop.
@@ -202,9 +198,7 @@ class ShutdownManager:
         self._components.append((name, cleanup_func))
         log.debug("Registered component for cleanup", component=name)
 
-    def request_shutdown(
-        self, reason: ShutdownReason = ShutdownReason.PROGRAMMATIC
-    ) -> None:
+    def request_shutdown(self, reason: ShutdownReason = ShutdownReason.PROGRAMMATIC) -> None:
         """Request graceful shutdown.
 
         Thread-safe method to initiate shutdown from any context.

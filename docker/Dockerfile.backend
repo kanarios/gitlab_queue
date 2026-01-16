@@ -1,0 +1,69 @@
+# =============================================================================
+# Stage 1: Builder
+# =============================================================================
+FROM python:3.12-slim AS builder
+
+# Install uv for fast dependency management
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+WORKDIR /app
+
+# Copy dependency files and README (needed by hatchling for project metadata)
+COPY backend/pyproject.toml backend/uv.lock backend/README.md ./
+
+# Install dependencies (no dev dependencies, frozen lockfile)
+RUN uv sync --frozen --no-dev --no-install-project
+
+# Copy source code and install the project
+COPY backend/src/ ./src/
+RUN uv sync --frozen --no-dev
+
+
+# =============================================================================
+# Stage 2: Runtime
+# =============================================================================
+FROM python:3.12-slim AS runtime
+
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Create non-root user
+RUN groupadd --gid 1000 appuser \
+    && useradd --uid 1000 --gid 1000 --shell /bin/bash --create-home appuser
+
+WORKDIR /app
+
+# Copy virtual environment from builder
+USER root
+COPY --from=builder /app/.venv /app/.venv
+
+# Copy source code
+COPY --from=builder /app/src  /app/src
+
+# Copy alembic configuration and migrations
+COPY backend/alembic.ini ./
+COPY backend/migrations/ ./migrations/
+
+
+# Create data directory for SQLite with correct permissions
+RUN mkdir -p /app/data && chown -R appuser:appuser /app/data
+
+RUN chown -R appuser:appuser /app
+
+# Set environment variables
+ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Switch to non-root user
+USER appuser
+
+# Expose webhook server port
+EXPOSE 8080
+
+# Health check (using Python to avoid installing curl/wget)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')" || exit 1
+
+# Start the application (migrations are applied automatically in main.py)
+CMD ["python", "-m", "gitlab_queue"]
