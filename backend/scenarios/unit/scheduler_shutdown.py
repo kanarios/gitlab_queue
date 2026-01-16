@@ -266,27 +266,27 @@ async def scheduler_continues_after_sync_error():
 async def scheduler_sync_lock_prevents_concurrent_syncs():
     """Test that sync lock prevents concurrent sync operations."""
     with vedro.given:
-        sync_count = 0
+        sync_operations = 0
         concurrent_syncs = 0
         max_concurrent = 0
 
-        # Mock GitLab client with tracking
-        async def tracked_list_mrs(*_args: object, **_kwargs: object) -> list[object]:
-            nonlocal sync_count, concurrent_syncs, max_concurrent
+        # Track sync operations via get_active_queue (called once per sync)
+        async def tracked_get_active_queue() -> list[object]:
+            nonlocal sync_operations, concurrent_syncs, max_concurrent
             concurrent_syncs += 1
             max_concurrent = max(max_concurrent, concurrent_syncs)
-            sync_count += 1
+            sync_operations += 1
             await asyncio.sleep(0.1)  # Simulate work
             concurrent_syncs -= 1
             return []
 
         gitlab_client = AsyncMock()
-        gitlab_client.list_mrs_with_label = AsyncMock(side_effect=tracked_list_mrs)
+        gitlab_client.list_mrs_with_label = AsyncMock(return_value=[])
         gitlab_client.rate_limit_state = create_mock_rate_limit_state()
 
-        # Mock queue manager
+        # Mock queue manager with tracking
         queue_manager = AsyncMock()
-        queue_manager.get_active_queue = AsyncMock(return_value=[])
+        queue_manager.get_active_queue = AsyncMock(side_effect=tracked_get_active_queue)
 
         # Mock settings
         settings = Mock(
@@ -318,5 +318,6 @@ async def scheduler_sync_lock_prevents_concurrent_syncs():
 
     with vedro.then:
         # Verify syncs ran sequentially (lock prevented concurrency)
-        assert sync_count == 3
+        # Each sync_queue() call = 1 sync operation
+        assert sync_operations == 3
         assert max_concurrent == 1  # Never more than 1 concurrent sync
