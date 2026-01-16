@@ -100,15 +100,11 @@ async def restart_recovery_continues_processing():
                 mr_matchers.append((matcher, response))
 
             # GET notes (for finding existing bot comments)
-            get_notes_matcher = jj.match(
-                "GET", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes")
-            )
+            get_notes_matcher = jj.match("GET", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes"))
             get_notes_response = jj.Response(status=200, json=[])
 
             # POST notes (for creating new comments)
-            comment_matcher = jj.match(
-                "POST", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes")
-            )
+            comment_matcher = jj.match("POST", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes"))
             comment_response = jj.Response(status=201, json={"id": 1})
 
         async with (
@@ -215,15 +211,11 @@ async def restart_detects_merged_mr_in_gitlab():
             list_mrs_response = jj.Response(status=200, json=[])
 
             # GET notes (for finding existing bot comments)
-            get_notes_matcher = jj.match(
-                "GET", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes")
-            )
+            get_notes_matcher = jj.match("GET", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes"))
             get_notes_response = jj.Response(status=200, json=[])
 
             # POST notes (for creating new comments)
-            comment_matcher = jj.match(
-                "POST", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes")
-            )
+            comment_matcher = jj.match("POST", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes"))
             comment_response = jj.Response(status=201, json={"id": 1})
 
         async with (
@@ -303,15 +295,11 @@ async def restart_detects_closed_mr_in_gitlab():
             list_mrs_response = jj.Response(status=200, json=[])
 
             # GET notes (for finding existing bot comments)
-            get_notes_matcher = jj.match(
-                "GET", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes")
-            )
+            get_notes_matcher = jj.match("GET", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes"))
             get_notes_response = jj.Response(status=200, json=[])
 
             # POST notes (for creating new comments)
-            comment_matcher = jj.match(
-                "POST", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes")
-            )
+            comment_matcher = jj.match("POST", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes"))
             comment_response = jj.Response(status=201, json={"id": 1})
 
         async with (

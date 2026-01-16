@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import vedro
-from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, create_test_client
-from scenarios.contexts.jj_gitlab_mock import mocked_gitlab_get_mr
+from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, created_test_client
+from scenarios.transports import GitLabMockTransport
 
 from ._helpers import create_mr_api_response
 
@@ -12,11 +12,14 @@ from ._helpers import create_mr_api_response
 class Scenario(vedro.Scenario):
     subject = "get_mr returns MergeRequest model"
 
-    async def given_mock_gitlab_with_mr(self):
+    def given_mock_gitlab_with_mr(self):
         self.mr_data = create_mr_api_response(iid=42, title="Test MR")
-        self._mock_ctx = mocked_gitlab_get_mr(TEST_PROJECT_ID, 42, self.mr_data)
-        await self._mock_ctx.__aenter__()
-        self.client = create_test_client()
+        self.transport = GitLabMockTransport()
+        self.transport.register_get(
+            f"/api/v4/projects/{TEST_PROJECT_ID}/merge_requests/42",
+            json_data=self.mr_data,
+        )
+        self.client = created_test_client(transport=self.transport)
 
     async def when_get_mr_is_called(self):
         self.result = await self.client.get_mr(42)
@@ -40,4 +43,3 @@ class Scenario(vedro.Scenario):
 
     async def do_cleanup(self):
         await self.client.close()
-        await self._mock_ctx.__aexit__(None, None, None)

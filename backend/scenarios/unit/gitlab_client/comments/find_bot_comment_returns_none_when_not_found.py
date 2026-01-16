@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import vedro
-from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, create_test_client
-from scenarios.contexts.jj_gitlab_mock import mocked_gitlab_get_notes
+from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, created_test_client
+from scenarios.transports import GitLabMockTransport
 
 from ._helpers import create_note_response
 
@@ -12,14 +12,17 @@ from ._helpers import create_note_response
 class Scenario(vedro.Scenario):
     subject = "_find_bot_comment returns None when no bot comment"
 
-    async def given_mock_gitlab_without_bot_comment(self):
+    def given_mock_gitlab_without_bot_comment(self):
         self.notes_data = [
             create_note_response(1, "Regular comment 1"),
             create_note_response(2, "Regular comment 2"),
         ]
-        self._mock_ctx = mocked_gitlab_get_notes(TEST_PROJECT_ID, 42, self.notes_data)
-        await self._mock_ctx.__aenter__()
-        self.client = create_test_client()
+        self.transport = GitLabMockTransport()
+        self.transport.register_get(
+            f"/api/v4/projects/{TEST_PROJECT_ID}/merge_requests/42/notes",
+            json_data=self.notes_data,
+        )
+        self.client = created_test_client(transport=self.transport)
 
     async def when_find_bot_comment_is_called(self):
         self.result = await self.client._find_bot_comment(42)
@@ -29,4 +32,3 @@ class Scenario(vedro.Scenario):
 
     async def do_cleanup(self):
         await self.client.close()
-        await self._mock_ctx.__aexit__(None, None, None)

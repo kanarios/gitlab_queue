@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import vedro
-from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, create_test_client
-from scenarios.contexts.jj_gitlab_mock import mocked_gitlab_add_comment
+from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, created_test_client
+from scenarios.transports import GitLabMockTransport
+from scenarios.transports.responses import note_response
 
 
 class Scenario(vedro.Scenario):
     subject = "add_comment creates a new note"
 
-    async def given_mock_gitlab_for_adding_comment(self):
-        self._mock_ctx = mocked_gitlab_add_comment(TEST_PROJECT_ID, 42, note_id=123)
-        await self._mock_ctx.__aenter__()
-        self.client = create_test_client()
+    def given_mock_gitlab_for_adding_comment(self):
+        self.transport = GitLabMockTransport()
+        self.transport.register_post(
+            f"/api/v4/projects/{TEST_PROJECT_ID}/merge_requests/42/notes",
+            json_data=note_response(note_id=123, body="Test comment body"),
+        )
+        self.client = created_test_client(transport=self.transport)
 
     async def when_add_comment_is_called(self):
         self.result = await self.client.add_comment(42, "Test comment body")
@@ -26,4 +30,3 @@ class Scenario(vedro.Scenario):
 
     async def do_cleanup(self):
         await self.client.close()
-        await self._mock_ctx.__aexit__(None, None, None)

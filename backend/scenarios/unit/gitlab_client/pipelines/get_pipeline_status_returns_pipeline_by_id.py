@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import vedro
-from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, create_test_client
-from scenarios.contexts.jj_gitlab_mock import mocked_gitlab_pipeline
+from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, created_test_client
+from scenarios.transports import GitLabMockTransport
 
 from ._helpers import create_pipeline_response
 
@@ -12,16 +12,19 @@ from ._helpers import create_pipeline_response
 class Scenario(vedro.Scenario):
     subject = "get_pipeline_status returns pipeline by ID"
 
-    async def given_mock_gitlab_with_pipeline(self):
+    def given_mock_gitlab_with_pipeline(self):
         self.pipeline_data = create_pipeline_response(
             456,
             status="running",
             sha="running123",
             ref="main",
         )
-        self._mock_ctx = mocked_gitlab_pipeline(TEST_PROJECT_ID, 456, self.pipeline_data)
-        await self._mock_ctx.__aenter__()
-        self.client = create_test_client()
+        self.transport = GitLabMockTransport()
+        self.transport.register_get(
+            f"/api/v4/projects/{TEST_PROJECT_ID}/pipelines/456",
+            json_data=self.pipeline_data,
+        )
+        self.client = created_test_client(transport=self.transport)
 
     async def when_get_pipeline_status_is_called(self):
         self.result = await self.client.get_pipeline_status(456)
@@ -38,4 +41,3 @@ class Scenario(vedro.Scenario):
 
     async def do_cleanup(self):
         await self.client.close()
-        await self._mock_ctx.__aexit__(None, None, None)

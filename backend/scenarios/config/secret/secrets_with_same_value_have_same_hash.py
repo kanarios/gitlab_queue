@@ -1,6 +1,8 @@
 """Unit tests for Secret class."""
 
 import vedro
+from d42 import fake
+from scenarios.schemas import SecretValueSchema
 
 from gitlab_queue.config import Secret
 
@@ -9,8 +11,9 @@ class Scenario(vedro.Scenario):
     subject = "secrets with same value have same hash"
 
     def given_two_secrets_with_same_value(self):
-        self.secret1 = Secret("identical")
-        self.secret2 = Secret("identical")
+        value = fake(SecretValueSchema)
+        self.secret1 = Secret(value)
+        self.secret2 = Secret(value)
 
     def when_getting_hashes(self):
         self.hash1 = hash(self.secret1)

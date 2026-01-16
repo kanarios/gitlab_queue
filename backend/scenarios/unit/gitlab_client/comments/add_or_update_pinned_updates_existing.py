@@ -3,31 +3,37 @@
 from __future__ import annotations
 
 import vedro
-from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, create_test_client
-from scenarios.contexts.jj_gitlab_mock import mocked_gitlab_get_notes, mocked_gitlab_update_comment
+from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, created_test_client
+from scenarios.transports import GitLabMockTransport
+from scenarios.transports.responses import note_response
 
 from gitlab_queue.clients.gitlab import GitLabClient
 
-from ._helpers import create_note_response
+from ._helpers import create_note_response as create_note_data
 
 
 class Scenario(vedro.Scenario):
     subject = "add_or_update_pinned_comment updates existing bot comment"
 
-    async def given_mock_gitlab_with_existing_bot_comment(self):
+    def given_mock_gitlab_with_existing_bot_comment(self):
+        self.transport = GitLabMockTransport()
         # Mock: existing bot comment
         notes_data = [
-            create_note_response(
+            create_note_data(
                 777,
                 f"{GitLabClient.BOT_COMMENT_SIGNATURE}\nOld status",
             ),
         ]
-        self._notes_mock = mocked_gitlab_get_notes(TEST_PROJECT_ID, 42, notes_data)
-        await self._notes_mock.__aenter__()
+        self.transport.register_get(
+            f"/api/v4/projects/{TEST_PROJECT_ID}/merge_requests/42/notes",
+            json_data=notes_data,
+        )
         # Mock: update comment endpoint
-        self._update_mock = mocked_gitlab_update_comment(TEST_PROJECT_ID, 42, note_id=777)
-        await self._update_mock.__aenter__()
-        self.client = create_test_client()
+        self.transport.register_put(
+            f"/api/v4/projects/{TEST_PROJECT_ID}/merge_requests/42/notes/777",
+            json_data=note_response(note_id=777, body="New status"),
+        )
+        self.client = created_test_client(transport=self.transport)
 
     async def when_add_or_update_is_called(self):
         self.result = await self.client.add_or_update_pinned_comment(42, "New status")
@@ -40,5 +46,3 @@ class Scenario(vedro.Scenario):
 
     async def do_cleanup(self):
         await self.client.close()
-        await self._update_mock.__aexit__(None, None, None)
-        await self._notes_mock.__aexit__(None, None, None)

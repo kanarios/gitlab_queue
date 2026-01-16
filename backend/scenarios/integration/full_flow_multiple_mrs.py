@@ -94,15 +94,11 @@ async def process_multiple_mrs_in_order():
                 await queue.add_to_queue(test_mr, is_hotfix=False)
 
             # GET notes (for finding existing bot comments)
-            get_notes_matcher = jj.match(
-                "GET", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes")
-            )
+            get_notes_matcher = jj.match("GET", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes"))
             get_notes_response = jj.Response(status=200, json=[])
 
             # Generic comment matcher
-            comment_matcher = jj.match(
-                "POST", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes")
-            )
+            comment_matcher = jj.match("POST", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes"))
             comment_response = jj.Response(status=201, json={"id": 1})
 
         # Setup all mocks

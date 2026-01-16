@@ -3,19 +3,25 @@
 from __future__ import annotations
 
 import vedro
-from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, create_test_client
-from scenarios.contexts.jj_gitlab_mock import mocked_gitlab_add_comment, mocked_gitlab_get_notes
+from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, created_test_client
+from scenarios.transports import GitLabMockTransport
+from scenarios.transports.responses import note_response
 
 
 class Scenario(vedro.Scenario):
     subject = "add_or_update_pinned_comment adds signature if missing"
 
-    async def given_mock_gitlab_without_existing_comment(self):
-        self._notes_mock = mocked_gitlab_get_notes(TEST_PROJECT_ID, 42, [])
-        await self._notes_mock.__aenter__()
-        self._add_mock = mocked_gitlab_add_comment(TEST_PROJECT_ID, 42, note_id=111)
-        await self._add_mock.__aenter__()
-        self.client = create_test_client()
+    def given_mock_gitlab_without_existing_comment(self):
+        self.transport = GitLabMockTransport()
+        self.transport.register_get(
+            f"/api/v4/projects/{TEST_PROJECT_ID}/merge_requests/42/notes",
+            json_data=[],
+        )
+        self.transport.register_post(
+            f"/api/v4/projects/{TEST_PROJECT_ID}/merge_requests/42/notes",
+            json_data=note_response(note_id=111, body="Status without signature"),
+        )
+        self.client = created_test_client(transport=self.transport)
 
     async def when_add_or_update_is_called_without_signature(self):
         # Body doesn't contain signature - should be added automatically
@@ -26,5 +32,3 @@ class Scenario(vedro.Scenario):
 
     async def do_cleanup(self):
         await self.client.close()
-        await self._add_mock.__aexit__(None, None, None)
-        await self._notes_mock.__aexit__(None, None, None)

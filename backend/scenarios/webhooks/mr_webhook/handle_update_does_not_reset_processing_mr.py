@@ -4,12 +4,13 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import vedro
+from scenarios.library import Labels
 
 from gitlab_queue.models.queue_item import QueueItem
 from gitlab_queue.webhooks.handlers import MRWebhookHandler
 
 from ._helpers import (
-    create_mock_gitlab_client,
+    create_gitlab_client_with_transport,
     create_mock_queue_manager,
     create_mr_event,
     created_mock_settings,
@@ -21,7 +22,10 @@ class Scenario(vedro.Scenario):
 
     def given_handler_with_processing_mr(self):
         self.settings = created_mock_settings()
-        self.gitlab_client = create_mock_gitlab_client()
+        self.gitlab_client, self.transport = create_gitlab_client_with_transport(
+            mr_iid=123,
+            labels=[Labels.MERGE_QUEUE],
+        )
         self.queue_manager = create_mock_queue_manager()
         self.queue_manager.get_queue_item = AsyncMock(
             return_value=QueueItem(
@@ -39,7 +43,7 @@ class Scenario(vedro.Scenario):
             gitlab_client=self.gitlab_client,
             queue_manager=self.queue_manager,
         )
-        self.event = create_mr_event(action="update")
+        self.event = create_mr_event(iid=123, action="update")
 
     async def when_event_is_handled(self):
         await self.handler.handle(self.event)
@@ -47,3 +51,6 @@ class Scenario(vedro.Scenario):
     def then_mr_state_should_not_be_changed(self):
         # MR updates don't reset state to avoid race conditions with bot-initiated rebases
         self.queue_manager.update_mr_state.assert_not_called()
+
+    async def cleanup(self):
+        await self.gitlab_client.close()

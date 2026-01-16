@@ -510,19 +510,13 @@ async def webhook_authentication_validation():
         )
 
         # Test with correct secret (would be in headers in real implementation)
-        valid_result = await webhook_handler.validate_webhook(
-            valid_payload, secret_token="correct-secret"
-        )
+        valid_result = await webhook_handler.validate_webhook(valid_payload, secret_token="correct-secret")
 
         # Test with wrong secret
-        invalid_secret_result = await webhook_handler.validate_webhook(
-            valid_payload, secret_token="wrong-secret"
-        )
+        invalid_secret_result = await webhook_handler.validate_webhook(valid_payload, secret_token="wrong-secret")
 
         # Test with wrong project
-        invalid_project_result = await webhook_handler.validate_webhook(
-            invalid_payload, secret_token="correct-secret"
-        )
+        invalid_project_result = await webhook_handler.validate_webhook(invalid_payload, secret_token="correct-secret")
 
     with then("only valid webhooks are accepted"):
         assert valid_result is True, "Valid webhook should be accepted"

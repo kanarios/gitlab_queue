@@ -6,6 +6,10 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/) [![React 19](https://img.shields.io/badge/react-19-61dafb.svg)](https://react.dev) [![FastAPI](https://img.shields.io/badge/FastAPI-009688.svg)](https://fastapi.tiangolo.com) [![Docker](https://img.shields.io/badge/docker-ready-2496ED.svg)](https://docker.com)
 
+[![Backend Image](https://img.shields.io/badge/ghcr.io-backend-blue?logo=docker)](https://ghcr.io/kanarios/gitlab_queue-backend) [![Frontend Image](https://img.shields.io/badge/ghcr.io-frontend-blue?logo=docker)](https://ghcr.io/kanarios/gitlab_queue-frontend)
+
+[![Status: Alpha](https://img.shields.io/badge/status-alpha-orange)](https://github.com/kanarios/gitlab_queue) [![Built with Claude Code](https://img.shields.io/badge/built%20with-Claude%20Code-blueviolet)](https://claude.ai/code)
+
 **Stop fighting rebase wars. Let the bot handle the queue.**
 
 [Demo](#-demo) • [Quick Start](#-quick-start) • [Features](#-features) • [Dashboard](#-dashboard) • [Documentation](#-documentation)
@@ -183,47 +187,84 @@ Every state change posts an update to your MR:
 
 ## 🚀 Quick Start
 
-### Option 1: Docker (Recommended)
+### Option 1: One-Line Install (Recommended)
+
+**Interactive mode:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/kanarios/gitlab_queue/main/install.sh | bash
+```
+
+**Non-interactive mode (CI/CD):**
+```bash
+# Using environment variables
+export GITLAB_TOKEN=glpat-xxxxxxxxxxxx
+export GITLAB_PROJECT_ID=12345678
+export WEBHOOK_SECRET=my-webhook-secret
+curl -fsSL https://raw.githubusercontent.com/kanarios/gitlab_queue/main/install.sh | bash
+
+# Or using command-line flags
+curl -fsSL .../install.sh | bash -s -- \
+  --token glpat-xxxxxxxxxxxx \
+  --project-id 12345678 \
+  --webhook-secret my-secret \
+  --no-dashboard \
+  --auto-start
+```
+
+The installer will:
+- Auto-detect interactive vs CI/CD mode
+- Use environment variables or flags in CI/CD
+- Generate all necessary files
+- Optionally start the bot
+
+### Option 2: Manual Docker Compose
 
 ```bash
-# Create data directory
-mkdir -p gitlab-queue-data
+# Create a directory for the bot
+mkdir gitlab-queue && cd gitlab-queue
 
-# Run the bot
+# Download the required files
+curl -O https://raw.githubusercontent.com/kanarios/gitlab_queue/main/docker/docker-compose.prod.yml
+curl -O https://raw.githubusercontent.com/kanarios/gitlab_queue/main/docker/Caddyfile
+curl -O https://raw.githubusercontent.com/kanarios/gitlab_queue/main/docker/.env.prod.example
+
+# Create your .env file
+cp .env.prod.example .env
+nano .env  # Edit with your settings
+
+# Start the bot
+docker compose -f docker-compose.prod.yml up -d
+```
+
+### Option 3: Single Container (Backend Only)
+
+```bash
 docker run -d \
   --name gitlab-queue \
   -p 8080:8080 \
-  -v $(pwd)/gitlab-queue-data:/app/data \
+  -v gitlab-queue-data:/app/data \
   -e GITLAB_QUEUE_GITLAB_TOKEN=glpat-xxxxxxxxxxxx \
   -e GITLAB_QUEUE_GITLAB_PROJECT_ID=12345678 \
   -e GITLAB_QUEUE_JWT_SECRET=$(openssl rand -hex 64) \
   -e GITLAB_QUEUE_WEBHOOK_SECRET=your-webhook-secret \
   -e GITLAB_QUEUE_WEBHOOK_HOST=0.0.0.0 \
-  ghcr.io/kanarios/gitlab-queue:latest
-
-# Check logs
-docker logs -f gitlab-queue
+  ghcr.io/kanarios/gitlab_queue-backend:latest
 ```
 
-### Option 2: Docker Compose
+### Option 4: Build from Source
 
 ```bash
 git clone https://github.com/kanarios/gitlab_queue.git
 cd gitlab_queue/docker
 
-# Create .env file
-cat > ../backend/.env << 'EOF'
-GITLAB_QUEUE_GITLAB_TOKEN=glpat-xxxxxxxxxxxx
-GITLAB_QUEUE_GITLAB_PROJECT_ID=12345678
-GITLAB_QUEUE_JWT_SECRET=your-64-char-secret-key-here-generate-with-openssl-rand-hex-64
-GITLAB_QUEUE_WEBHOOK_SECRET=your-webhook-secret
-EOF
+# Create .env file and edit with your settings
+cp .env.prod.example .env && nano .env
 
-# Start
-docker-compose up -d
+# Build and start
+docker compose up -d --build
 ```
 
-### Option 3: Local Development
+### Option 5: Local Development
 
 ```bash
 git clone https://github.com/kanarios/gitlab_queue.git
@@ -282,6 +323,91 @@ The bot comes with a beautiful React dashboard for monitoring and analytics.
 ---
 
 ## 📖 Documentation
+
+<details>
+<summary><strong>🚀 Installation Script Reference</strong></summary>
+
+The `install.sh` script supports both interactive and non-interactive (CI/CD) modes.
+
+### Interactive Mode
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kanarios/gitlab_queue/main/install.sh | bash
+```
+
+### Non-Interactive Mode (CI/CD)
+
+```bash
+# Using environment variables
+export GITLAB_TOKEN=glpat-xxxxxxxxxxxx
+export GITLAB_PROJECT_ID=12345678
+curl -fsSL https://raw.githubusercontent.com/kanarios/gitlab_queue/main/install.sh | bash
+
+# Or using flags
+curl -fsSL .../install.sh | bash -s -- \
+  --token glpat-xxx --project-id 12345 --no-dashboard --auto-start
+```
+
+<details>
+<summary>All available options</summary>
+
+| Flag | Environment Variable | Default | Description |
+|------|---------------------|---------|-------------|
+| `--token` | `GITLAB_TOKEN` | - | GitLab Personal Access Token (required) |
+| `--project-id` | `GITLAB_PROJECT_ID` | - | GitLab Project ID (required) |
+| `--webhook-secret` | `WEBHOOK_SECRET` | auto-generated | Webhook signature secret |
+| `--gitlab-url` | `GITLAB_URL` | `https://gitlab.com` | GitLab instance URL |
+| `--target-branch` | `TARGET_BRANCH` | `master` | Target branch for merges |
+| `--queue-label` | `QUEUE_LABEL` | `merge_queue` | Label to trigger queue |
+| `--hotfix-label` | `HOTFIX_LABEL` | `hotfix` | Label for priority MRs |
+| `--install-dir` | `INSTALL_DIR` | `gitlab-queue` | Installation directory |
+| `--port` | `HTTP_PORT` | `80` | HTTP port |
+| `--https-port` | `HTTPS_PORT` | `443` | HTTPS port |
+| `--dashboard` | `INSTALL_DASHBOARD=true` | `true` | Install with dashboard |
+| `--no-dashboard` | `INSTALL_DASHBOARD=false` | - | Backend only |
+| `--auto-start` | `AUTO_START=true` | `false` in CI | Start after install |
+| `--no-start` | `AUTO_START=false` | - | Don't start services |
+
+</details>
+
+<details>
+<summary>GitLab CI example</summary>
+
+```yaml
+deploy-merge-queue:
+  stage: deploy
+  image: docker:latest
+  services:
+    - docker:dind
+  variables:
+    GITLAB_TOKEN: $MERGE_QUEUE_TOKEN
+    GITLAB_PROJECT_ID: $CI_PROJECT_ID
+    WEBHOOK_SECRET: $MERGE_QUEUE_WEBHOOK_SECRET
+    AUTO_START: "true"
+  script:
+    - apk add --no-cache curl bash
+    - curl -fsSL https://raw.githubusercontent.com/kanarios/gitlab_queue/main/install.sh | bash
+```
+
+</details>
+
+<details>
+<summary>GitHub Actions example</summary>
+
+```yaml
+- name: Install Merge Queue Bot
+  env:
+    GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+    GITLAB_PROJECT_ID: ${{ secrets.GITLAB_PROJECT_ID }}
+    WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+    AUTO_START: "true"
+  run: |
+    curl -fsSL https://raw.githubusercontent.com/kanarios/gitlab_queue/main/install.sh | bash
+```
+
+</details>
+
+</details>
 
 <details>
 <summary><strong>📋 Configuration Reference</strong></summary>
@@ -446,7 +572,7 @@ spec:
     spec:
       containers:
       - name: gitlab-queue
-        image: ghcr.io/kanarios/gitlab-queue:latest
+        image: ghcr.io/kanarios/gitlab_queue-backend:latest
         ports:
         - containerPort: 8080
         envFrom:

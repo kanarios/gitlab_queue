@@ -2,10 +2,10 @@ from datetime import datetime
 
 import vedro
 from scenarios.core.queue_manager._helpers import create_mock_database, create_mock_row
+from scenarios.library import QueueState
 
 from gitlab_queue.core.queue import QueueManager
 from gitlab_queue.models.queue_item import QueueItem
-from scenarios.library import QueueState
 
 
 class Scenario(vedro.Scenario):
