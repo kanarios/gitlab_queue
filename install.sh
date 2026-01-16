@@ -68,8 +68,24 @@ BACKEND_IMAGE="ghcr.io/kanarios/gitlab_queue-backend:latest"
 FRONTEND_IMAGE="ghcr.io/kanarios/gitlab_queue-frontend:latest"
 
 # Detect if running interactively
+# Supports: direct run, curl|bash, ./install.sh | tee install.log
 is_interactive() {
-    [[ -t 0 ]] && [[ -z "$CI" ]] && [[ -z "$GITLAB_CI" ]] && [[ -z "$GITHUB_ACTIONS" ]]
+    # Check for CI environments first
+    if [[ -n "$CI" ]] || [[ -n "$GITLAB_CI" ]] || [[ -n "$GITHUB_ACTIONS" ]] || [[ -n "$NONINTERACTIVE" ]]; then
+        return 1
+    fi
+    
+    # Check if either stdin (-t 0) or stdout (-t 1) is a TTY
+    # This handles: ./install.sh | tee install.log (stdin is TTY)
+    #               curl ... | bash (stdout is TTY)
+    if [[ -t 0 ]] || [[ -t 1 ]]; then
+        # Also verify /dev/tty is available for prompts (readable and writable)
+        if [[ -r /dev/tty && -w /dev/tty ]]; then
+            return 0
+        fi
+    fi
+    
+    return 1
 }
 
 # =============================================================================
@@ -127,14 +143,14 @@ prompt() {
         return
     fi
 
-    # Interactive prompt
+    # Interactive prompt (read from /dev/tty to handle curl|bash)
     if [[ -n "$default_value" ]]; then
-        echo -en "${BOLD}$prompt_text${NC} [${default_value}]: "
-        read -r result
+        echo -en "${BOLD}$prompt_text${NC} [${default_value}]: " >/dev/tty
+        read -r result </dev/tty
         echo "${result:-$default_value}"
     else
-        echo -en "${BOLD}$prompt_text${NC}: "
-        read -r result
+        echo -en "${BOLD}$prompt_text${NC}: " >/dev/tty
+        read -r result </dev/tty
         echo "$result"
     fi
 }
@@ -156,10 +172,10 @@ prompt_secret() {
         return
     fi
 
-    # Interactive prompt
-    echo -en "${BOLD}$prompt_text${NC}: "
-    read -rs result
-    echo
+    # Interactive prompt (read from /dev/tty to handle curl|bash)
+    echo -en "${BOLD}$prompt_text${NC}: " >/dev/tty
+    read -rs result </dev/tty
+    echo >/dev/tty
     echo "$result"
 }
 
@@ -181,17 +197,20 @@ prompt_yes_no() {
         return
     fi
 
-    # Interactive prompt
+    # Interactive prompt (read from /dev/tty to handle curl|bash)
     if [[ "$default" == "y" ]]; then
-        echo -en "${BOLD}$prompt_text${NC} [Y/n]: "
+        echo -en "${BOLD}$prompt_text${NC} [Y/n]: " >/dev/tty
     else
-        echo -en "${BOLD}$prompt_text${NC} [y/N]: "
+        echo -en "${BOLD}$prompt_text${NC} [y/N]: " >/dev/tty
     fi
 
-    read -r result
+    read -r result </dev/tty
     result="${result:-$default}"
+    
+    # Convert to lowercase (compatible with bash 3.x on macOS)
+    result=$(echo "$result" | tr '[:upper:]' '[:lower:]')
 
-    [[ "${result,,}" == "y" || "${result,,}" == "yes" ]]
+    [[ "$result" == "y" || "$result" == "yes" ]]
 }
 
 check_command() {
@@ -370,10 +389,8 @@ main() {
     HTTP_PORT="${HTTP_PORT:-80}"
     HTTPS_PORT="${HTTPS_PORT:-443}"
     
-    # Default for dashboard: true for interactive, configurable for CI
-    if [[ -z "$INSTALL_DASHBOARD" ]]; then
-        INSTALL_DASHBOARD="true"
-    fi
+    # Default for dashboard: only set if explicitly provided via env/flag
+    # Don't set default here - let interactive mode prompt for it
 
     # Default for auto-start: true for interactive, false for CI
     if [[ -z "$AUTO_START" ]]; then
@@ -412,18 +429,20 @@ main() {
     # Dashboard configuration
     print_step "Configuration options..."
     
-    if is_interactive; then
+    if is_interactive && [[ -z "$INSTALL_DASHBOARD" ]]; then
         echo
         print_info "The dashboard provides a web UI for monitoring the queue,"
         print_info "viewing history, and analytics. It's optional but recommended."
         echo
         
-        if prompt_yes_no "Install dashboard (web UI)?" "y" "INSTALL_DASHBOARD"; then
+        if prompt_yes_no "Install dashboard (web UI)?" "y"; then
             INSTALL_DASHBOARD="true"
         else
             INSTALL_DASHBOARD="false"
         fi
     else
+        # Set default if not provided
+        INSTALL_DASHBOARD="${INSTALL_DASHBOARD:-true}"
         if [[ "$INSTALL_DASHBOARD" == "true" ]]; then
             print_info "Installing with dashboard"
         else
@@ -436,7 +455,13 @@ main() {
 
     # Token
     if [[ -z "$GITLAB_TOKEN" ]]; then
-        GITLAB_TOKEN=$(prompt_secret "GitLab Token (glpat-...)" "GITLAB_TOKEN")
+        if is_interactive; then
+            echo
+            print_info "You need a GitLab Personal Access Token with 'api' scope."
+            print_info "Create one at: GitLab -> User Settings -> Access Tokens"
+            echo
+        fi
+        GITLAB_TOKEN=$(prompt_secret "GitLab Token (glpat-...)")
     fi
     
     if [[ -z "$GITLAB_TOKEN" ]]; then
@@ -448,7 +473,12 @@ main() {
 
     # Project ID
     if [[ -z "$GITLAB_PROJECT_ID" ]]; then
-        GITLAB_PROJECT_ID=$(prompt "GitLab Project ID" "" "GITLAB_PROJECT_ID")
+        if is_interactive; then
+            echo
+            print_info "Find your Project ID at: Your Project -> Settings -> General"
+            echo
+        fi
+        GITLAB_PROJECT_ID=$(prompt "GitLab Project ID" "")
     fi
     
     if [[ ! "$GITLAB_PROJECT_ID" =~ ^[0-9]+$ ]]; then
@@ -479,7 +509,11 @@ main() {
         
         if [[ -z "$WEBHOOK_SECRET" ]]; then
             WEBHOOK_SECRET=$(generate_secret | head -c 32)
-            print_success "Generated webhook secret: $WEBHOOK_SECRET"
+            if is_interactive; then
+                print_success "Generated webhook secret: $WEBHOOK_SECRET"
+            else
+                print_success "Generated webhook secret (see .env file)"
+            fi
         fi
     else
         print_success "Using provided webhook secret"
@@ -700,14 +734,22 @@ EOF
     echo "  Queue label:            $QUEUE_LABEL"
     echo "  Dashboard:              $([ "$INSTALL_DASHBOARD" == "true" ] && echo "Yes" || echo "No")"
     echo "  HTTP Port:              $HTTP_PORT"
-    echo "  Webhook secret:         $WEBHOOK_SECRET"
+    if is_interactive; then
+        echo "  Webhook secret:         $WEBHOOK_SECRET"
+    else
+        echo "  Webhook secret:         (check .env file)"
+    fi
     echo
 
     # Webhook instructions
     echo "Next Steps:"
     echo "  1. Configure GitLab Webhook:"
     echo "     URL: http://YOUR_SERVER:$HTTP_PORT/webhooks/gitlab"
-    echo "     Secret: $WEBHOOK_SECRET"
+    if is_interactive; then
+        echo "     Secret: $WEBHOOK_SECRET"
+    else
+        echo "     Secret: (check .env file)"
+    fi
     echo "     Triggers: Merge request events, Pipeline events"
     echo
     echo "  2. Start: cd $(pwd) && $COMPOSE_CMD up -d"
