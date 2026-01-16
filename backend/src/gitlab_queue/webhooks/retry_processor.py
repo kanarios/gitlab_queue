@@ -15,6 +15,7 @@ from gitlab_queue.models.retorts import parse_webhook_event
 from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
+    from gitlab_queue.api.websocket import WebSocketManager
     from gitlab_queue.clients.gitlab import GitLabClient
     from gitlab_queue.config import Settings
     from gitlab_queue.core.notifier import MRNotifier
@@ -52,11 +53,20 @@ class WebhookRetryProcessor:
     gitlab_client: GitLabClient
     queue_manager: QueueManager
     notifier: MRNotifier
+    websocket_manager: WebSocketManager | None = None
 
     # Internal state
     _shutdown_event: asyncio.Event = field(default_factory=asyncio.Event, init=False)
     _processing_count: int = field(default=0, init=False)
     _processing_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False)
+
+    def set_websocket_manager(self, manager: WebSocketManager) -> None:
+        """Set WebSocket manager for broadcasting queue updates.
+
+        Args:
+            manager: WebSocket manager instance.
+        """
+        self.websocket_manager = manager
 
     async def run(self) -> None:
         """Main processing loop - runs until shutdown signal.
@@ -73,9 +83,7 @@ class WebhookRetryProcessor:
                     log.exception("Retry processor iteration failed", error=str(e))
 
                 # Cancellable sleep between iterations
-                if not await self._interruptible_sleep(
-                    self.settings.webhook_retry_poll_interval_seconds
-                ):
+                if not await self._interruptible_sleep(self.settings.webhook_retry_poll_interval_seconds):
                     break
 
         finally:
@@ -150,9 +158,7 @@ class WebhookRetryProcessor:
 
         except Exception as e:
             # Failed - schedule next retry or move to DLQ
-            moved_to_dlq = await self.retry_manager.mark_retry_failed(
-                item.id, str(e)
-            )
+            moved_to_dlq = await self.retry_manager.mark_retry_failed(item.id, str(e))
 
             if moved_to_dlq:
                 log.warning(
@@ -188,6 +194,7 @@ class WebhookRetryProcessor:
             settings=self.settings,
             gitlab_client=self.gitlab_client,
             queue_manager=self.queue_manager,
+            websocket_manager=self.websocket_manager,
         )
 
         await handler.handle(event)
@@ -206,6 +213,7 @@ class WebhookRetryProcessor:
             gitlab_client=self.gitlab_client,
             queue_manager=self.queue_manager,
             notifier=self.notifier,
+            websocket_manager=self.websocket_manager,
         )
 
         await handler.handle(event)
@@ -268,6 +276,7 @@ def create_retry_processor(
     gitlab_client: GitLabClient,
     queue_manager: QueueManager,
     notifier: MRNotifier,
+    websocket_manager: WebSocketManager | None = None,
 ) -> WebhookRetryProcessor:
     """Create a configured WebhookRetryProcessor instance.
 
@@ -277,6 +286,7 @@ def create_retry_processor(
         gitlab_client: GitLab API client.
         queue_manager: Queue manager for MR storage.
         notifier: Notifier for MR comments.
+        websocket_manager: WebSocket manager for real-time UI updates.
 
     Returns:
         Configured WebhookRetryProcessor ready to run.
@@ -287,6 +297,7 @@ def create_retry_processor(
         gitlab_client=gitlab_client,
         queue_manager=queue_manager,
         notifier=notifier,
+        websocket_manager=websocket_manager,
     )
 
 

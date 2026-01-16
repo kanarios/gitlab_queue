@@ -18,11 +18,25 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.responses import Response
 
+from gitlab_queue.api.routes import analytics_router, history_router
+from gitlab_queue.api.websocket import WebSocketManager, ws_router
+from gitlab_queue.auth.middleware import AuthenticationMiddleware
+from gitlab_queue.auth.routes import auth_router
+from gitlab_queue.clients.gitlab import GitLabCircuitOpenError
+from gitlab_queue.health import ApplicationHealth, ComponentStatus, GitLabHealth
+from gitlab_queue.metrics import (
+    METRICS_CONTENT_TYPE,
+    get_metrics_output,
+    update_gitlab_metrics,
+    update_queue_metrics,
+)
 from gitlab_queue.models.events import MergeRequestEvent, PipelineEvent, validate_webhook_token
 from gitlab_queue.models.retorts import parse_webhook_event
-from gitlab_queue.utils.logging import get_logger
-from gitlab_queue.webhooks.handlers import MRWebhookHandler, PipelineWebhookHandler
+from gitlab_queue.utils.logging import LogContext, generate_request_id, get_logger
+from gitlab_queue.webhooks.handlers import MRWebhookHandler, PipelineWebhookHandler, WebhookHandler
 from gitlab_queue.webhooks.retry_manager import DLQItemNotFoundError
 
 if TYPE_CHECKING:
@@ -33,6 +47,7 @@ if TYPE_CHECKING:
     from gitlab_queue.core.notifier import MRNotifier
     from gitlab_queue.core.queue import QueueManager
     from gitlab_queue.db.database import Database
+    from gitlab_queue.models.queue_item import DashboardStats, QueueItem
     from gitlab_queue.models.retry import DLQItem, DLQStats
     from gitlab_queue.webhooks.retry_manager import WebhookRetryManager
 
@@ -58,6 +73,8 @@ class WebhookAppState:
         queue_manager: Queue manager for MR queue operations.
         notifier: MR notifier for state machine notifications.
         retry_manager: Webhook retry queue manager.
+        health: Application health state for status endpoints.
+        websocket_manager: WebSocket manager for real-time dashboard updates.
     """
 
     settings: Settings
@@ -66,6 +83,8 @@ class WebhookAppState:
     queue_manager: QueueManager
     notifier: MRNotifier
     retry_manager: WebhookRetryManager
+    health: ApplicationHealth
+    websocket_manager: WebSocketManager
 
 
 # =============================================================================
@@ -100,6 +119,51 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 # =============================================================================
+# Correlation ID Middleware
+# =============================================================================
+
+
+class CorrelationIdMiddleware(BaseHTTPMiddleware):
+    """Middleware that adds correlation IDs to all requests.
+
+    Generates a unique request ID for each incoming request and sets it
+    in the logging context. Also adds the X-Request-Id header to responses.
+
+    The correlation ID format is: {timestamp_ms}-{random_hex}
+    Example: "1733500000000-a1b2c3d4"
+    """
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        """Process request with correlation ID context."""
+        request_id = generate_request_id()
+
+        # Add to request state for access in handlers
+        request.state.request_id = request_id
+
+        # Log with correlation ID context
+        with LogContext(request_id=request_id):
+            log.debug(
+                "Request started",
+                method=request.method,
+                path=request.url.path,
+            )
+
+            response = await call_next(request)
+
+            # Add correlation ID to response headers
+            response.headers["X-Request-Id"] = request_id
+
+            log.debug(
+                "Request completed",
+                method=request.method,
+                path=request.url.path,
+                status_code=response.status_code,
+            )
+
+        return response
+
+
+# =============================================================================
 # Health Check Router
 # =============================================================================
 
@@ -107,37 +171,65 @@ health_router = APIRouter(tags=["health"])
 
 
 @health_router.get("/health")
-async def health() -> dict[str, str]:
+async def health(request: Request) -> dict[str, Any]:
     """Liveness probe endpoint.
 
     Returns 200 OK if the process is running. Used by container
     orchestration systems (Docker, Kubernetes) to determine if
     the container should be restarted.
 
+    Includes component status for debugging but always returns 200.
+    For readiness, use /ready endpoint.
+
     Returns:
-        dict: Status indicating the server is healthy.
+        dict: Status with component details.
     """
-    return {"status": "healthy"}
+    state: WebhookAppState = request.app.state.webhook_state
+
+    # Update GitLab health from circuit breaker
+    if state.gitlab_client and state.gitlab_client.circuit_breaker:
+        state.health.gitlab = GitLabHealth.from_circuit_breaker(state.gitlab_client.circuit_breaker)
+
+    return {
+        "status": "healthy",
+        "mode": state.health.mode.value,
+        "components": state.health.to_dict(),
+    }
 
 
-@health_router.get("/ready")
+@health_router.get("/ready", response_model=None)
 async def ready(request: Request) -> JSONResponse | dict[str, Any]:
     """Readiness probe endpoint.
 
-    Checks if the application is ready to receive traffic by verifying
-    database connectivity. Used by load balancers and orchestration
-    systems to determine if traffic should be routed to this instance.
+    Checks if the application is ready to receive traffic:
+    - Database must be connected (required)
+    - GitLab status is reported but doesn't affect readiness
+      (webhooks can be queued even if GitLab is down)
 
     Args:
         request: FastAPI request object for accessing app state.
 
     Returns:
-        200 with status if healthy, 503 with error details if unhealthy.
+        200 if ready to accept traffic (database healthy).
+        503 if database is unhealthy.
     """
     state: WebhookAppState = request.app.state.webhook_state
 
     # Check database health
     db_status = await state.database.health_check()
+
+    # Update health state
+    state.health.database = ComponentStatus.HEALTHY if db_status.connected else ComponentStatus.UNHEALTHY
+
+    # Update GitLab health from circuit breaker
+    gitlab_info: dict[str, Any] | None = None
+    if state.gitlab_client and state.gitlab_client.circuit_breaker:
+        state.health.gitlab = GitLabHealth.from_circuit_breaker(state.gitlab_client.circuit_breaker)
+        gitlab_info = {
+            "status": state.health.gitlab.status.value,
+            "circuit_state": state.health.gitlab.circuit_state,
+            "retry_after_seconds": state.health.gitlab.retry_after_seconds,
+        }
 
     if not db_status.connected:
         log.warning(
@@ -147,17 +239,106 @@ async def ready(request: Request) -> JSONResponse | dict[str, Any]:
         return JSONResponse(
             content={
                 "status": "unhealthy",
-                "database": "disconnected",
-                "error": db_status.error,
+                "reason": "database_unavailable",
+                "database": {
+                    "connected": False,
+                    "error": db_status.error,
+                },
+                "gitlab": gitlab_info,
             },
             status_code=503,
         )
 
+    # Ready even if GitLab is down (events will be queued)
     return {
         "status": "healthy",
-        "database": "connected",
-        "wal_mode": db_status.wal_mode_enabled,
+        "mode": state.health.mode.value,
+        "database": {
+            "connected": True,
+            "wal_mode": db_status.wal_mode_enabled,
+        },
+        "gitlab": gitlab_info,
     }
+
+
+@health_router.get("/health/detailed")
+async def health_detailed(request: Request) -> dict[str, Any]:
+    """Detailed health endpoint for debugging and monitoring.
+
+    Returns comprehensive health information including all
+    component states, circuit breaker details, and rate limit status.
+
+    This endpoint always returns 200 (for observability) but
+    includes all details needed to diagnose issues.
+
+    Returns:
+        dict: Comprehensive health information for all components.
+    """
+    state: WebhookAppState = request.app.state.webhook_state
+
+    # Database health
+    db_status = await state.database.health_check()
+
+    # GitLab health from circuit breaker
+    cb = state.gitlab_client.circuit_breaker
+    gitlab_health = GitLabHealth.from_circuit_breaker(cb)
+
+    # Rate limit state
+    rate_limit = state.gitlab_client.rate_limit_state
+
+    return {
+        "status": "ok",
+        "mode": state.health.mode.value,
+        "database": {
+            "connected": db_status.connected,
+            "wal_mode_enabled": db_status.wal_mode_enabled,
+            "foreign_keys_enabled": db_status.foreign_keys_enabled,
+            "error": db_status.error,
+        },
+        "gitlab": {
+            "status": gitlab_health.status.value,
+            "circuit_breaker": {
+                "state": cb.state.value,
+                "failure_count": cb.failure_count,
+                "failure_threshold": cb.failure_threshold,
+                "half_open_timeout_seconds": cb.half_open_timeout,
+                "retry_after_seconds": gitlab_health.retry_after_seconds,
+            },
+            "rate_limit": {
+                "limit": rate_limit.limit,
+                "remaining": rate_limit.remaining,
+                "usage_ratio": rate_limit.usage_ratio,
+                "seconds_until_reset": rate_limit.seconds_until_reset,
+            },
+        },
+        "processor_running": state.health.processor_running,
+        "webhook_server_running": state.health.webhook_server_running,
+    }
+
+
+@health_router.get("/metrics", include_in_schema=False)
+async def metrics(request: Request) -> Response:
+    """Prometheus metrics endpoint.
+
+    Exposes application metrics in Prometheus text format for scraping.
+    Updates queue and GitLab metrics on each request to ensure fresh data.
+
+    Args:
+        request: FastAPI request object for accessing app state.
+
+    Returns:
+        Response with Prometheus text format metrics.
+    """
+    state: WebhookAppState = request.app.state.webhook_state
+
+    # Update current metrics from application state
+    await update_queue_metrics(state.queue_manager)
+    update_gitlab_metrics(state.gitlab_client)
+
+    return Response(
+        content=get_metrics_output(),
+        media_type=METRICS_CONTENT_TYPE,
+    )
 
 
 # =============================================================================
@@ -167,29 +348,48 @@ async def ready(request: Request) -> JSONResponse | dict[str, Any]:
 webhook_router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 
-@webhook_router.post("/gitlab")
-async def handle_gitlab_webhook(
-    request: Request,
-    x_gitlab_token: str = Header(alias="X-Gitlab-Token"),
-) -> dict[str, str]:
-    """Handle incoming GitLab webhook events.
-
-    Validates the webhook token, parses the event payload, and routes
-    to the appropriate handler based on event type.
+async def _route_webhook_event(
+    state: WebhookAppState,
+    event: MergeRequestEvent | PipelineEvent,
+) -> None:
+    """Route webhook event to appropriate handler.
 
     Args:
-        request: FastAPI request object.
-        x_gitlab_token: GitLab webhook secret token from header.
+        state: Webhook application state.
+        event: Parsed webhook event.
+    """
+    if isinstance(event, MergeRequestEvent):
+        handler = MRWebhookHandler(
+            settings=state.settings,
+            gitlab_client=state.gitlab_client,
+            queue_manager=state.queue_manager,
+            websocket_manager=state.websocket_manager,
+        )
+        await handler.handle(event)
+    elif isinstance(event, PipelineEvent):
+        pipeline_handler = PipelineWebhookHandler(
+            settings=state.settings,
+            gitlab_client=state.gitlab_client,
+            queue_manager=state.queue_manager,
+            notifier=state.notifier,
+            websocket_manager=state.websocket_manager,
+        )
+        await pipeline_handler.handle(event)
 
-    Returns:
-        Status dict indicating event processing result.
+
+def _validate_webhook_request(
+    state: WebhookAppState,
+    x_gitlab_token: str,
+) -> None:
+    """Validate webhook token.
+
+    Args:
+        state: Webhook application state.
+        x_gitlab_token: Token from request header.
 
     Raises:
-        HTTPException: 401 if webhook token is invalid.
+        HTTPException: If validation fails.
     """
-    state: WebhookAppState = request.app.state.webhook_state
-
-    # Validate webhook token
     if state.settings.webhook_secret is None:
         log.error("Webhook secret not configured")
         raise HTTPException(status_code=500, detail="Webhook secret not configured")
@@ -201,7 +401,17 @@ async def handle_gitlab_webhook(
         log.warning("Invalid webhook token received")
         raise HTTPException(status_code=401, detail="Invalid webhook token")
 
-    # Parse event payload
+
+@webhook_router.post("/gitlab", response_model=None)
+async def handle_gitlab_webhook(
+    request: Request,
+    x_gitlab_token: str = Header(alias="X-Gitlab-Token"),
+) -> dict[str, str] | JSONResponse:
+    """Handle incoming GitLab webhook events."""
+    state: WebhookAppState = request.app.state.webhook_state
+
+    _validate_webhook_request(state, x_gitlab_token)
+
     payload = await request.json()
     event = parse_webhook_event(payload)
 
@@ -209,7 +419,6 @@ async def handle_gitlab_webhook(
         log.debug("Unknown event type ignored", object_kind=payload.get("object_kind"))
         return {"status": "ignored"}
 
-    # Validate project ID
     if event.project_id != state.settings.gitlab_project_id:
         log.debug(
             "Event for different project ignored",
@@ -218,32 +427,35 @@ async def handle_gitlab_webhook(
         )
         return {"status": "ignored"}
 
-    # Route to appropriate handler
+    # Only route MR and Pipeline events
+    if not isinstance(event, MergeRequestEvent | PipelineEvent):
+        log.debug("Unsupported event type ignored", event_type=type(event).__name__)
+        return {"status": "ignored"}
+
     try:
-        if isinstance(event, MergeRequestEvent):
-            handler = MRWebhookHandler(
-                settings=state.settings,
-                gitlab_client=state.gitlab_client,
-                queue_manager=state.queue_manager,
-            )
-            await handler.handle(event)
-        elif isinstance(event, PipelineEvent):
-            pipeline_handler = PipelineWebhookHandler(
-                settings=state.settings,
-                gitlab_client=state.gitlab_client,
-                queue_manager=state.queue_manager,
-                notifier=state.notifier,
-            )
-            await pipeline_handler.handle(event)
+        await _route_webhook_event(state, event)
+    except GitLabCircuitOpenError as e:
+        log.warning(
+            "Webhook handling failed: GitLab circuit open",
+            event_type=type(event).__name__,
+            retry_after=e.retry_after,
+        )
+        return JSONResponse(
+            content={
+                "status": "service_unavailable",
+                "error": "GitLab API temporarily unavailable",
+                "retry_after": int(e.retry_after or 30),
+            },
+            status_code=503,
+            headers={"Retry-After": str(int(e.retry_after or 30))},
+        )
     except Exception as e:
-        # Log error and add to retry queue
         log.exception(
             "Error handling webhook event",
             event_type=type(event).__name__,
             project_id=event.project_id,
         )
 
-        # Add to retry queue for later processing
         try:
             retry_id = await state.retry_manager.add_to_retry_queue(
                 event_type=event.object_kind,
@@ -426,6 +638,186 @@ def _dlq_stats_to_dict(stats: DLQStats) -> dict[str, Any]:
 
 
 # =============================================================================
+# Queue Dashboard API Router
+# =============================================================================
+
+queue_router = APIRouter(prefix="/api/queue", tags=["queue"])
+
+
+@queue_router.get("")
+async def get_queue_status(request: Request) -> dict[str, Any]:
+    """Get complete queue status for dashboard.
+
+    Returns the current queue state, recent history, and aggregate
+    statistics for display on the status dashboard.
+
+    Args:
+        request: FastAPI request object.
+
+    Returns:
+        Dict with queue, history, and stats sections.
+    """
+    state: WebhookAppState = request.app.state.webhook_state
+    queue_manager = state.queue_manager
+
+    active_queue = await queue_manager.get_active_queue()
+    recent_history = await queue_manager.get_recent_history(limit=10)
+    dashboard_stats = await queue_manager.get_dashboard_stats(days=7)
+    current_stats = await queue_manager.get_queue_stats()
+
+    return {
+        "queue": [_queue_item_to_dict(item, position=idx + 1) for idx, item in enumerate(active_queue)],
+        "history": [_queue_item_to_dict(item) for item in recent_history],
+        "stats": _dashboard_stats_to_dict(dashboard_stats, current_stats),
+    }
+
+
+@queue_router.get("/active")
+async def get_active_queue(request: Request) -> dict[str, Any]:
+    """Get only the active queue items.
+
+    Lighter-weight endpoint for just the current queue state.
+
+    Args:
+        request: FastAPI request object.
+
+    Returns:
+        Dict with queue items and count.
+    """
+    state: WebhookAppState = request.app.state.webhook_state
+    queue_manager = state.queue_manager
+
+    active_queue = await queue_manager.get_active_queue()
+
+    return {
+        "items": [_queue_item_to_dict(item, position=idx + 1) for idx, item in enumerate(active_queue)],
+        "count": len(active_queue),
+    }
+
+
+@queue_router.get("/stats")
+async def get_queue_statistics(request: Request) -> dict[str, Any]:
+    """Get queue statistics only.
+
+    Args:
+        request: FastAPI request object.
+
+    Returns:
+        Dict with current and historical statistics.
+    """
+    state: WebhookAppState = request.app.state.webhook_state
+    queue_manager = state.queue_manager
+
+    dashboard_stats = await queue_manager.get_dashboard_stats(days=7)
+    current_stats = await queue_manager.get_queue_stats()
+
+    return _dashboard_stats_to_dict(dashboard_stats, current_stats)
+
+
+@queue_router.get("/{mr_iid}")
+async def get_queue_item(request: Request, mr_iid: int) -> dict[str, Any]:
+    """Get a specific MR's queue status.
+
+    Args:
+        request: FastAPI request object.
+        mr_iid: The MR's internal ID.
+
+    Returns:
+        Dict with MR queue item details and position.
+
+    Raises:
+        HTTPException: 404 if MR not found in queue.
+    """
+    state: WebhookAppState = request.app.state.webhook_state
+    queue_manager = state.queue_manager
+
+    item = await queue_manager.get_queue_item(mr_iid)
+    if item is None:
+        raise HTTPException(status_code=404, detail=f"MR !{mr_iid} not found in queue")
+
+    position = await queue_manager.get_queue_position(mr_iid)
+
+    return _queue_item_to_dict(item, position=position)
+
+
+def _queue_item_to_dict(item: QueueItem, position: int | None = None) -> dict[str, Any]:
+    """Convert QueueItem to dict for JSON response.
+
+    Args:
+        item: The queue item to serialize.
+        position: Optional position in queue (1-indexed).
+
+    Returns:
+        Dict suitable for JSON serialization.
+    """
+    result: dict[str, Any] = {
+        "mr_iid": item.mr_iid,
+        "title": item.title,
+        "author": {
+            "name": item.author_name,
+            "username": item.author_username,
+            "avatar_url": item.author_avatar,
+        },
+        "target_branch": item.target_branch,
+        "state": item.state,
+        "is_hotfix": item.is_hotfix,
+        "labels": item.labels,
+        "queued_at": item.queued_at.isoformat(),
+        "started_at": item.started_at.isoformat() if item.started_at else None,
+        "finished_at": item.finished_at.isoformat() if item.finished_at else None,
+    }
+
+    # Add position for active queue items
+    if position is not None:
+        result["position"] = position
+
+    # Add pipeline info if available
+    if item.pipeline_id is not None:
+        result["pipeline"] = {
+            "id": item.pipeline_id,
+            "status": item.pipeline_status,
+        }
+
+    # Add error info for failed items
+    if item.last_error:
+        result["last_error"] = item.last_error
+        result["retry_count"] = item.retry_count
+
+    return result
+
+
+def _dashboard_stats_to_dict(
+    stats: DashboardStats,
+    current_stats: dict[str, int],
+) -> dict[str, Any]:
+    """Convert dashboard stats to dict for JSON response.
+
+    Args:
+        stats: Aggregate statistics from DashboardStats.
+        current_stats: Current queue counts by status.
+
+    Returns:
+        Dict with all statistics.
+    """
+    return {
+        "current": {
+            "total": stats.total_in_queue,
+            "by_status": current_stats,
+        },
+        "historical": {
+            "window_days": stats.stats_window_days,
+            "merged_count": stats.merged_count,
+            "failed_count": stats.failed_count,
+            "success_rate_percent": stats.success_rate,
+        },
+        "timing": {
+            "avg_wait_seconds": stats.avg_wait_seconds,
+            "avg_processing_seconds": stats.avg_processing_seconds,
+        },
+    }
+
+
+# =============================================================================
 # Application Factory
 # =============================================================================
 
@@ -480,10 +872,22 @@ def create_webhook_app(state: WebhookAppState) -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Add authentication middleware for protected routes
+    # Skips public paths: /health, /ready, /auth/*, /webhooks/*
+    app.add_middleware(AuthenticationMiddleware, settings=state.settings)
+
+    # Add correlation ID middleware for request tracking
+    app.add_middleware(CorrelationIdMiddleware)
+
     # Register routers
     app.include_router(health_router)
     app.include_router(webhook_router)
     app.include_router(dlq_router)
+    app.include_router(queue_router)
+    app.include_router(history_router)
+    app.include_router(analytics_router)
+    app.include_router(auth_router)
+    app.include_router(ws_router)
 
     log.debug(
         "Webhook app configured",
@@ -496,8 +900,14 @@ def create_webhook_app(state: WebhookAppState) -> FastAPI:
 
 __all__: list[str] = [
     "WebhookAppState",
+    "WebhookHandler",
+    "analytics_router",
+    "auth_router",
     "create_webhook_app",
     "dlq_router",
     "health_router",
+    "history_router",
+    "queue_router",
     "webhook_router",
+    "ws_router",
 ]

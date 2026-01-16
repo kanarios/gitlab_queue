@@ -20,17 +20,21 @@ from typing import TYPE_CHECKING
 
 from gitlab_queue.clients.gitlab import (
     GitLabAPIError,
+    GitLabCircuitOpenError,
     GitLabConflictError,
     GitLabNotFoundError,
 )
 from gitlab_queue.core.state_machine import MRStateMachine, create_state_machine_for_mr
+from gitlab_queue.metrics import MR_DURATION
 from gitlab_queue.utils.logging import LogContext, get_logger
 
 if TYPE_CHECKING:
+    from gitlab_queue.api.websocket import WebSocketManager
     from gitlab_queue.clients.gitlab import GitLabClient
     from gitlab_queue.config import Settings
     from gitlab_queue.core.notifier import MRNotifier
     from gitlab_queue.core.queue import QueueManager
+    from gitlab_queue.models.pipeline import Pipeline
     from gitlab_queue.models.queue_item import QueueItem
 
 log = get_logger(__name__)
@@ -96,6 +100,16 @@ class MergeProcessor:
     _shutdown_event: asyncio.Event = field(default_factory=asyncio.Event, init=False)
     _current_mr_iid: int | None = field(default=None, init=False)
     _processing_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False)
+    _websocket_manager: WebSocketManager | None = field(default=None, init=False)
+
+    def set_websocket_manager(self, manager: WebSocketManager) -> None:
+        """Set WebSocket manager for broadcasting queue updates.
+
+        Args:
+            manager: WebSocketManager instance.
+        """
+        self._websocket_manager = manager
+        log.debug("WebSocket manager set for processor")
 
     # =========================================================================
     # Main Loop
@@ -111,12 +125,23 @@ class MergeProcessor:
         log.info("Merge processor starting")
 
         try:
-            # Recovery check on startup
+            # Recovery on startup: clean up interrupted state and sync with GitLab
             await self._recover_interrupted_state()
+            await self._sync_missing_mrs_from_gitlab()
 
             while not self._shutdown_event.is_set():
                 try:
                     await self._process_iteration()
+                except GitLabCircuitOpenError as e:
+                    # Circuit breaker is open - wait before retrying
+                    wait_time = e.retry_after or 30
+                    log.warning(
+                        "GitLab API circuit open, pausing processing",
+                        retry_after=wait_time,
+                    )
+                    if not await self._interruptible_sleep(wait_time):
+                        break  # Shutdown requested during sleep
+                    continue  # Skip normal sleep, go to next iteration
                 except Exception as e:
                     # Errors don't stop the loop
                     log.exception("Iteration failed", error=str(e))
@@ -130,6 +155,9 @@ class MergeProcessor:
     async def _process_iteration(self) -> None:
         """Execute one iteration of the processing loop."""
         log.debug("Processing iteration started")
+
+        # Check for stale MRs and send warnings
+        await self._check_stale_mrs()
 
         # Get next MR from queue
         queue_item = await self.queue_manager.get_next_mr()
@@ -173,6 +201,7 @@ class MergeProcessor:
         """
         mr_iid = queue_item.mr_iid
         start_time = datetime.now(UTC)
+        result = ProcessingResult.ERROR  # Default for unexpected exits
 
         with LogContext(mr_iid=mr_iid, operation="process_mr"):
             try:
@@ -182,6 +211,7 @@ class MergeProcessor:
                     notifier=self.notifier,
                     queue_manager=self.queue_manager,
                     target_branch=self.settings.target_branch,
+                    websocket_manager=self._websocket_manager,
                 )
 
                 ctx = ProcessingContext(
@@ -193,17 +223,24 @@ class MergeProcessor:
                 # Check if MR still has the queue label
                 if not await self._verify_mr_in_queue(mr_iid):
                     await sm.trigger_mark_removed(reason="label_removed")
-                    return ProcessingResult.REMOVED
+                    result = ProcessingResult.REMOVED
+                    return result
 
                 # Execute workflow based on current state
-                return await self._execute_workflow(ctx)
+                result = await self._execute_workflow(ctx)
+                return result
 
             except asyncio.CancelledError:
                 log.warning("MR processing cancelled", mr_iid=mr_iid)
                 raise
             except Exception as e:
                 log.exception("Unexpected error processing MR", mr_iid=mr_iid, error=str(e))
-                return ProcessingResult.ERROR
+                result = ProcessingResult.ERROR
+                return result
+            finally:
+                # Record MR processing duration
+                duration = (datetime.now(UTC) - start_time).total_seconds()
+                MR_DURATION.labels(result=result.value).observe(duration)
 
     async def _execute_workflow(self, ctx: ProcessingContext) -> ProcessingResult:
         """Execute the full workflow for an MR based on its current state.
@@ -271,8 +308,10 @@ class MergeProcessor:
             await self.gitlab_client.rebase_mr(mr_iid)
         except GitLabConflictError as e:
             log.warning("Rebase conflict on initiation", mr_iid=mr_iid, error=str(e))
+            # Try to get conflicted files for better reporting
+            conflicted_files = await self.gitlab_client.get_mr_conflicts(mr_iid)
             await sm.trigger_rebase_failed(
-                conflicted_files=[],  # GitLab doesn't provide files on initial conflict
+                conflicted_files=conflicted_files,
                 error_message=str(e),
             )
             return ProcessingResult.CONFLICT
@@ -322,8 +361,10 @@ class MergeProcessor:
 
             if has_conflicts:
                 log.warning("Rebase has conflicts", mr_iid=mr_iid)
+                # Fetch conflicted files for detailed reporting
+                conflicted_files = await self.gitlab_client.get_mr_conflicts(mr_iid)
                 await sm.trigger_rebase_failed(
-                    conflicted_files=[],  # GitLab API doesn't provide conflicted files
+                    conflicted_files=conflicted_files,
                     error_message="Rebase failed due to merge conflicts",
                 )
                 return ProcessingResult.CONFLICT
@@ -351,15 +392,97 @@ class MergeProcessor:
     # Pipeline Step
     # =========================================================================
 
-    async def _wait_for_pipeline(self, ctx: ProcessingContext) -> ProcessingResult:
-        """Poll pipeline status until success/failure or timeout.
-
-        Args:
-            ctx: Processing context.
+    async def _handle_pipeline_failure_retry(
+        self,
+        ctx: ProcessingContext,
+        pipeline: Pipeline,
+        failed_jobs: list[str],
+        retry_count: int,
+        max_retries: int,
+    ) -> tuple[bool, datetime | None]:
+        """Handle pipeline failure with potential retry.
 
         Returns:
-            ProcessingResult indicating outcome.
+            Tuple of (should_continue, new_start_time). If should_continue is True,
+            the pipeline wait loop should continue with the new start time.
         """
+        mr_iid = ctx.mr_iid
+        sm = ctx.state_machine
+
+        if retry_count >= max_retries:
+            await sm.trigger_pipeline_failed(
+                failed_jobs=failed_jobs,
+                retry_count=retry_count,
+                error_message=f"Pipeline {pipeline.status}",
+            )
+            return False, None
+
+        log.info("Retrying pipeline", mr_iid=mr_iid, retry_count=retry_count + 1)
+
+        old_pipeline_id = pipeline.id
+        old_pipeline_url = self.notifier.build_pipeline_url(old_pipeline_id)
+
+        try:
+            await self.gitlab_client.rebase_mr(mr_iid)
+            await self._wait_for_rebase_quick(ctx)
+        except (GitLabConflictError, GitLabAPIError) as e:
+            log.exception("Retry rebase failed", mr_iid=mr_iid, error=str(e))
+            await sm.trigger_pipeline_failed(
+                failed_jobs=failed_jobs,
+                retry_count=retry_count + 1,
+                error_message=str(e),
+            )
+            return False, None
+
+        # Wait for new pipeline to be created (GitLab creates it asynchronously)
+        max_wait_seconds = 30
+        poll_interval = 3
+        waited = 0
+        new_pipeline = None
+
+        while waited < max_wait_seconds:
+            new_pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
+            if new_pipeline and new_pipeline.id != old_pipeline_id:
+                log.info(
+                    "New pipeline detected after retry rebase",
+                    mr_iid=mr_iid,
+                    old_pipeline_id=old_pipeline_id,
+                    new_pipeline_id=new_pipeline.id,
+                    waited_seconds=waited,
+                )
+                break
+            await asyncio.sleep(poll_interval)
+            waited += poll_interval
+
+        if new_pipeline and new_pipeline.id != old_pipeline_id:
+            new_pipeline_url = self.notifier.build_pipeline_url(new_pipeline.id)
+            await sm.notify_pipeline_retry(
+                old_pipeline_id=old_pipeline_id,
+                old_pipeline_url=old_pipeline_url,
+                new_pipeline_id=new_pipeline.id,
+                new_pipeline_url=new_pipeline_url,
+                retry_count=retry_count + 1,
+                max_retries=max_retries,
+                failed_jobs=failed_jobs,
+            )
+            return True, datetime.now(UTC)
+
+        # Rebase succeeded but no new pipeline was created after waiting - mark as failed
+        log.warning(
+            "No new pipeline after retry rebase",
+            mr_iid=mr_iid,
+            old_pipeline_id=old_pipeline_id,
+            waited_seconds=waited,
+        )
+        await sm.trigger_pipeline_failed(
+            failed_jobs=failed_jobs,
+            retry_count=retry_count + 1,
+            error_message="No new pipeline created after retry rebase",
+        )
+        return False, None
+
+    async def _wait_for_pipeline(self, ctx: ProcessingContext) -> ProcessingResult:
+        """Poll pipeline status until success/failure or timeout."""
         mr_iid = ctx.mr_iid
         sm = ctx.state_machine
         timeout = timedelta(seconds=self.settings.pipeline_timeout_seconds)
@@ -367,47 +490,30 @@ class MergeProcessor:
         retry_count = 0
         max_retries = self.settings.pipeline_retry_count
 
-        log.info(
-            "Waiting for pipeline",
-            mr_iid=mr_iid,
-            timeout_seconds=timeout.total_seconds(),
-        )
+        log.info("Waiting for pipeline", mr_iid=mr_iid, timeout_seconds=timeout.total_seconds())
 
         while True:
-            # Check shutdown
             if self._shutdown_event.is_set():
                 log.info("Shutdown requested during pipeline wait", mr_iid=mr_iid)
                 return ProcessingResult.ERROR
 
-            # Check timeout
             elapsed = datetime.now(UTC) - start_time
             if elapsed > timeout:
-                log.warning(
-                    "Pipeline timeout",
-                    mr_iid=mr_iid,
-                    elapsed_seconds=elapsed.total_seconds(),
-                )
+                log.warning("Pipeline timeout", mr_iid=mr_iid, elapsed_seconds=elapsed.total_seconds())
                 await sm.trigger_timeout(max_wait_hours=int(timeout.total_seconds() / 3600))
                 return ProcessingResult.TIMEOUT
 
-            # Check MR still in queue
             if not await self._verify_mr_in_queue(mr_iid):
                 await sm.trigger_mark_removed(reason="label_removed")
                 return ProcessingResult.REMOVED
 
-            # Get latest pipeline status
             pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
             if pipeline is None:
                 log.warning("No pipeline found", mr_iid=mr_iid)
                 await self._interruptible_sleep(self.settings.poll_interval_seconds)
                 continue
 
-            log.debug(
-                "Pipeline status",
-                mr_iid=mr_iid,
-                pipeline_id=pipeline.id,
-                status=pipeline.status,
-            )
+            log.debug("Pipeline status", mr_iid=mr_iid, pipeline_id=pipeline.id, status=pipeline.status)
 
             if pipeline.status == "success":
                 log.info("Pipeline succeeded", mr_iid=mr_iid, pipeline_id=pipeline.id)
@@ -415,64 +521,43 @@ class MergeProcessor:
                 return ProcessingResult.SUCCESS
 
             if pipeline.status in ("failed", "canceled"):
+                failed_jobs = await self._get_failed_jobs(pipeline.id)
                 log.warning(
                     "Pipeline failed",
                     mr_iid=mr_iid,
                     pipeline_id=pipeline.id,
-                    status=pipeline.status,
-                )
-
-                # Get failed jobs for notification
-                failed_jobs = await self._get_failed_jobs(pipeline.id)
-
-                if retry_count < max_retries:
-                    # Retry by triggering a new pipeline (re-rebase)
-                    retry_count += 1
-                    log.info("Retrying pipeline", mr_iid=mr_iid, retry_count=retry_count)
-
-                    old_pipeline_id = pipeline.id
-                    old_pipeline_url = self.notifier.build_pipeline_url(old_pipeline_id)
-
-                    # Trigger new rebase to create new pipeline
-                    try:
-                        await self.gitlab_client.rebase_mr(mr_iid)
-                        # Wait briefly for rebase
-                        await self._wait_for_rebase_quick(ctx)
-                    except (GitLabConflictError, GitLabAPIError) as e:
-                        log.exception("Retry rebase failed", mr_iid=mr_iid, error=str(e))
-                        await sm.trigger_pipeline_failed(
-                            failed_jobs=failed_jobs,
-                            retry_count=retry_count,
-                            error_message=str(e),
-                        )
-                        return ProcessingResult.PIPELINE_FAILED
-
-                    # Get new pipeline
-                    new_pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
-                    if new_pipeline and new_pipeline.id != old_pipeline_id:
-                        new_pipeline_url = self.notifier.build_pipeline_url(new_pipeline.id)
-                        await sm.notify_pipeline_retry(
-                            old_pipeline_id=old_pipeline_id,
-                            old_pipeline_url=old_pipeline_url,
-                            new_pipeline_id=new_pipeline.id,
-                            new_pipeline_url=new_pipeline_url,
-                            retry_count=retry_count,
-                            max_retries=max_retries,
-                            failed_jobs=failed_jobs,
-                        )
-                        # Reset start time for new pipeline
-                        start_time = datetime.now(UTC)
-                        continue
-
-                # No more retries
-                await sm.trigger_pipeline_failed(
+                    pipeline_status=pipeline.status,
                     failed_jobs=failed_jobs,
                     retry_count=retry_count,
-                    error_message=f"Pipeline {pipeline.status}",
+                    max_retries=max_retries,
+                )
+
+                should_continue, new_start = await self._handle_pipeline_failure_retry(
+                    ctx, pipeline, failed_jobs, retry_count, max_retries
+                )
+                if should_continue and new_start:
+                    retry_count += 1
+                    start_time = new_start
+                    continue
+                return ProcessingResult.PIPELINE_FAILED
+
+            # Handle non-actionable terminal statuses that require manual intervention
+            # These statuses will never automatically transition to success/failed
+            non_actionable_statuses = ("skipped", "manual", "waiting_for_resource", "blocked")
+            if pipeline.status in non_actionable_statuses:
+                log.warning(
+                    "Pipeline in non-actionable state requiring manual intervention",
+                    mr_iid=mr_iid,
+                    pipeline_id=pipeline.id,
+                    status=pipeline.status,
+                )
+                await sm.trigger_pipeline_failed(
+                    failed_jobs=[],
+                    retry_count=retry_count,
+                    error_message=f"Pipeline status is '{pipeline.status}' - requires manual intervention",
                 )
                 return ProcessingResult.PIPELINE_FAILED
 
-            # Pipeline still running (pending, running, etc.)
             await self._interruptible_sleep(self.settings.poll_interval_seconds)
 
     async def _wait_for_rebase_quick(self, ctx: ProcessingContext) -> None:
@@ -496,14 +581,17 @@ class MergeProcessor:
             rebase_in_progress, has_conflicts = await self.gitlab_client.check_rebase_status(mr_iid)
 
             if has_conflicts:
-                raise GitLabConflictError("Rebase conflict during retry")
+                # Fetch conflicted files for better error reporting
+                conflicted_files = await self.gitlab_client.get_mr_conflicts(mr_iid)
+                files_info = f": {conflicted_files}" if conflicted_files else ""
+                raise GitLabConflictError(f"Rebase conflict during retry{files_info}")
 
             if not rebase_in_progress:
                 return
 
             await asyncio.sleep(3)
 
-    async def _get_failed_jobs(self, pipeline_id: int) -> list[str]:  # noqa: ARG002
+    async def _get_failed_jobs(self, pipeline_id: int) -> list[str]:
         """Get list of failed job names from a pipeline.
 
         Args:
@@ -512,9 +600,24 @@ class MergeProcessor:
         Returns:
             List of failed job names (may be empty).
         """
-        # TODO: Implement when GitLab client has get_pipeline_jobs method
-        # For now, return empty list
-        return []
+        try:
+            jobs = await self.gitlab_client.get_pipeline_jobs(pipeline_id)
+            failed_jobs = [job.name for job in jobs if job.status in ("failed", "canceled")]
+            if failed_jobs:
+                log.info(
+                    "Found failed jobs in pipeline",
+                    pipeline_id=pipeline_id,
+                    failed_jobs=failed_jobs,
+                    count=len(failed_jobs),
+                )
+            return failed_jobs
+        except Exception as e:
+            log.warning(
+                "Failed to fetch pipeline jobs",
+                pipeline_id=pipeline_id,
+                error=str(e),
+            )
+            return []
 
     # =========================================================================
     # Merge Step
@@ -535,10 +638,19 @@ class MergeProcessor:
         log.info("Executing merge", mr_iid=mr_iid)
 
         try:
-            merged_mr = await self.gitlab_client.merge_mr(mr_iid)
+            # Add 30-second timeout for merge operation to prevent hanging
+            merged_mr = await asyncio.wait_for(
+                self.gitlab_client.merge_mr(mr_iid),
+                timeout=30.0,
+            )
             log.info("Merge successful", mr_iid=mr_iid, state=merged_mr.state)
             await sm.trigger_merge_success()
             return ProcessingResult.SUCCESS
+
+        except TimeoutError:
+            log.warning("Merge operation timeout", mr_iid=mr_iid)
+            await sm.trigger_timeout(max_wait_hours=0)  # 0 indicates merge timeout
+            return ProcessingResult.TIMEOUT
 
         except GitLabConflictError as e:
             log.warning("Merge conflict", mr_iid=mr_iid, error=str(e))
@@ -553,6 +665,40 @@ class MergeProcessor:
     # =========================================================================
     # Helper Methods
     # =========================================================================
+
+    async def _check_stale_mrs(self) -> None:
+        """Check for MRs that have been in queue too long and send warnings.
+
+        Runs periodically to detect MRs exceeding stale_mr_warning_hours.
+        Sends a single warning per MR (tracked via stale_warning_sent field).
+        """
+        warning_hours = self.settings.stale_mr_warning_hours
+        stale_items = await self.queue_manager.get_stale_mrs(warning_hours)
+
+        for item in stale_items:
+            # Only warn once (check is already done in SQL query, but double-check here)
+            if not item.stale_warning_sent:
+                try:
+                    sm = await create_state_machine_for_mr(
+                        mr_iid=item.mr_iid,
+                        notifier=self.notifier,
+                        queue_manager=self.queue_manager,
+                        target_branch=self.settings.target_branch,
+                        websocket_manager=self._websocket_manager,
+                    )
+                    await sm.notify_stale_warning(warning_hours=warning_hours)
+                    await self.queue_manager.mark_stale_warning_sent(item.mr_iid)
+                    log.info(
+                        "Stale MR warning sent",
+                        mr_iid=item.mr_iid,
+                        warning_hours=warning_hours,
+                    )
+                except Exception as e:
+                    log.exception(
+                        "Failed to send stale warning",
+                        mr_iid=item.mr_iid,
+                        error=str(e),
+                    )
 
     async def _interruptible_sleep(self, seconds: float) -> bool:
         """Sleep that can be interrupted by shutdown event.
@@ -603,52 +749,169 @@ class MergeProcessor:
     async def _recover_interrupted_state(self) -> None:
         """Recover MRs that were in intermediate states when processor stopped.
 
-        Handles:
-        - rebasing -> reset to queued (will re-process)
-        - testing -> check pipeline status, may continue
-        - merging -> check if merged, otherwise reset
+        Handles all active states (queued, rebasing, testing, merging):
+        - Verifies each MR still exists in GitLab
+        - Verifies queue label is still present
+        - Marks removed if MR was closed, merged, or label removed
+        - Resets intermediate states (rebasing, testing, merging) to queued
+
+        Gracefully handles GitLab unavailability - if GitLab is down,
+        skips recovery and lets the scheduler handle sync when GitLab recovers.
         """
         log.info("Checking for interrupted MRs")
 
-        active_items = await self.queue_manager.get_active_queue()
+        try:
+            active_items = await self.queue_manager.get_active_queue()
+        except Exception as e:
+            log.warning("Failed to get active queue during recovery", error=str(e))
+            return
 
         for item in active_items:
-            if item.state in ("rebasing", "testing", "merging"):
-                log.warning(
-                    "Found MR in intermediate state",
-                    mr_iid=item.mr_iid,
-                    state=item.state,
-                )
+            log.debug(
+                "Checking MR state during recovery",
+                mr_iid=item.mr_iid,
+                state=item.state,
+            )
 
-                # Check actual GitLab state
-                try:
-                    mr = await self.gitlab_client.get_mr(item.mr_iid)
+            # Check actual GitLab state for all active MRs
+            try:
+                mr = await self.gitlab_client.get_mr(item.mr_iid)
 
-                    if mr.state == "merged":
-                        # Already merged - update DB
-                        await self.queue_manager.update_mr_state(item.mr_iid, "merged")
-                        log.info("MR was already merged", mr_iid=item.mr_iid)
+                if mr.state == "merged":
+                    # Already merged - update DB
+                    await self.queue_manager.update_mr_state(item.mr_iid, "merged")
+                    log.info("MR was already merged", mr_iid=item.mr_iid)
 
-                    elif mr.state != "opened":
-                        # MR closed - mark as removed
-                        await self.queue_manager.update_mr_state(item.mr_iid, "removed")
-                        log.info("MR was closed", mr_iid=item.mr_iid)
-
-                    elif self.settings.queue_label not in mr.labels:
-                        # Label removed - mark as removed
-                        await self.queue_manager.update_mr_state(item.mr_iid, "removed")
-                        log.info("MR label was removed", mr_iid=item.mr_iid)
-
-                    else:
-                        # Reset to queued for re-processing
-                        await self.queue_manager.update_mr_state(item.mr_iid, "queued")
-                        log.info("Reset MR to queued", mr_iid=item.mr_iid)
-
-                except GitLabNotFoundError:
+                elif mr.state != "opened":
+                    # MR closed - mark as removed
                     await self.queue_manager.update_mr_state(item.mr_iid, "removed")
-                    log.warning("MR not found during recovery", mr_iid=item.mr_iid)
+                    log.info("MR was closed", mr_iid=item.mr_iid)
+
+                elif self.settings.queue_label not in mr.labels:
+                    # Label removed - mark as removed (orphaned entry cleanup)
+                    await self.queue_manager.update_mr_state(item.mr_iid, "removed")
+                    log.info("MR label was removed", mr_iid=item.mr_iid)
+
+                elif item.state in ("rebasing", "testing", "merging"):
+                    # Reset intermediate states to queued for re-processing
+                    await self.queue_manager.update_mr_state(item.mr_iid, "queued")
+                    log.info(
+                        "Reset MR to queued",
+                        mr_iid=item.mr_iid,
+                        previous_state=item.state,
+                    )
+                # else: MR is in 'queued' state and still valid - no action needed
+
+            except GitLabCircuitOpenError:
+                log.warning(
+                    "GitLab circuit open during recovery, skipping MR",
+                    mr_iid=item.mr_iid,
+                )
+                continue
+
+            except GitLabNotFoundError:
+                await self.queue_manager.update_mr_state(item.mr_iid, "removed")
+                log.warning("MR not found during recovery", mr_iid=item.mr_iid)
+
+            except GitLabAPIError as e:
+                log.warning(
+                    "GitLab API error during recovery, skipping MR",
+                    mr_iid=item.mr_iid,
+                    error=str(e),
+                )
+                continue
 
         log.info("State recovery complete")
+
+    async def _sync_missing_mrs_from_gitlab(self) -> None:
+        """Add MRs that have the queue label in GitLab but aren't in the queue.
+
+        This handles the case where MRs were labeled while the processor was down.
+
+        Gracefully handles GitLab unavailability - if GitLab is down,
+        skips sync and lets the scheduler handle it when GitLab recovers.
+        """
+        log.info("Syncing missing MRs from GitLab")
+
+        # Get all open MRs with queue label from GitLab
+        try:
+            gitlab_mrs = await self.gitlab_client.list_mrs_with_label(
+                self.settings.queue_label,
+                state="opened",
+            )
+        except GitLabCircuitOpenError:
+            log.warning("GitLab circuit open, skipping initial sync")
+            return
+        except GitLabAPIError as e:
+            log.warning("Failed to fetch MRs from GitLab during sync", error=str(e))
+            return
+
+        # Get current queue IIDs
+        active_items = await self.queue_manager.get_active_queue()
+        queued_iids = {item.mr_iid for item in active_items}
+
+        # Add missing MRs to queue
+        added_count = 0
+        for mr in gitlab_mrs:
+            if mr.iid not in queued_iids:
+                is_hotfix = self.settings.hotfix_label in mr.labels
+                await self.queue_manager.add_to_queue(mr, is_hotfix=is_hotfix)
+                log.info(
+                    "Added missing MR to queue",
+                    mr_iid=mr.iid,
+                    title=mr.title,
+                    is_hotfix=is_hotfix,
+                )
+                added_count += 1
+
+        log.info(
+            "GitLab sync complete",
+            gitlab_mrs_count=len(gitlab_mrs),
+            added_count=added_count,
+        )
+
+        # Broadcast queue update if MRs were added
+        if added_count > 0 and self._websocket_manager:
+            await self._broadcast_queue_update()
+
+    async def _broadcast_queue_update(self) -> None:
+        """Broadcast current queue state to all WebSocket clients."""
+        if not self._websocket_manager:
+            return
+
+        try:
+            queue_items = await self.queue_manager.get_active_queue()
+            queue_stats = await self.queue_manager.get_queue_stats()
+
+            # Convert queue items to dicts for WebSocket
+            queue_data = []
+            for i, item in enumerate(queue_items, start=1):
+                queue_data.append(
+                    {
+                        "mr_iid": item.mr_iid,
+                        "title": item.title,
+                        "author": {
+                            "name": item.author_name,
+                            "username": item.author_username,
+                            "avatar_url": item.author_avatar,
+                        },
+                        "target_branch": item.target_branch,
+                        "status": item.state,
+                        "is_hotfix": item.is_hotfix,
+                        "labels": item.labels,
+                        "queued_at": item.queued_at.isoformat(),
+                        "started_at": item.started_at.isoformat() if item.started_at else None,
+                        "position": i,
+                    }
+                )
+
+            await self._websocket_manager.broadcast_queue_updated(queue_data, queue_stats)
+            log.debug(
+                "Broadcast queue update to WebSocket clients",
+                queue_length=len(queue_data),
+            )
+        except Exception as e:
+            log.warning("Failed to broadcast queue update", error=str(e))
 
     # =========================================================================
     # Shutdown Control

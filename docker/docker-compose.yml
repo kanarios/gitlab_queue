@@ -1,0 +1,59 @@
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: ./docker/Dockerfile.backend
+    container_name: gitlab-queue-backend
+    env_file:
+      - ../backend/.env
+    environment:
+      # Listen on all interfaces inside container
+      GITLAB_QUEUE_WEBHOOK_HOST: "0.0.0.0"
+      # Persist SQLite database on a named volume (4 slashes for absolute path)
+      GITLAB_QUEUE_DATABASE_URL: "sqlite+aiosqlite:////app/data/queue.db"
+    volumes:
+      - queue-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: ./docker/Dockerfile.frontend
+      args:
+        VITE_API_URL: /api
+        VITE_WS_URL: /ws
+        VITE_GITLAB_URL: ${VITE_GITLAB_URL:-https://gitlab.com}
+        VITE_GITLAB_PROJECT_PATH: ${VITE_GITLAB_PROJECT_PATH:-}
+    container_name: gitlab-queue-frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: gitlab-queue-caddy
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+
+volumes:
+  queue-data:
+  caddy-data:
+  caddy-config:

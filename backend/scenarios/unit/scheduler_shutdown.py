@@ -6,14 +6,20 @@ Tests the scheduler's graceful shutdown functionality and cancellation handling.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, Mock, patch
+import contextlib
+from unittest.mock import AsyncMock, Mock
 
 import vedro
 from vedro import scenario
 
-if TYPE_CHECKING:
-    from gitlab_queue.core.scheduler import QueueScheduler
+
+def create_mock_rate_limit_state(is_critical: bool = False) -> Mock:
+    """Create a properly configured mock for rate_limit_state."""
+    state = Mock()
+    state.is_critical = Mock(return_value=is_critical)
+    state.seconds_until_reset = 0.0
+    state.usage_ratio = 0.1
+    return state
 
 
 @scenario()
@@ -23,6 +29,7 @@ async def scheduler_shutdown_stops_polling_loop():
         # Mock GitLab client
         gitlab_client = AsyncMock()
         gitlab_client.list_mrs_with_label = AsyncMock(return_value=[])
+        gitlab_client.rate_limit_state = create_mock_rate_limit_state()
 
         # Mock queue manager
         queue_manager = AsyncMock()
@@ -33,6 +40,7 @@ async def scheduler_shutdown_stops_polling_loop():
             queue_label="merge_queue",
             hotfix_label="hotfix",
             poll_interval_seconds=0.1,  # 100ms for quick test
+            rate_limit_critical_threshold=0.95,
         )
 
         # Create scheduler
@@ -58,13 +66,11 @@ async def scheduler_shutdown_stops_polling_loop():
         try:
             await asyncio.wait_for(scheduler_task, timeout=1.0)
             shutdown_successful = True
-        except asyncio.TimeoutError:
+        except TimeoutError:
             shutdown_successful = False
             scheduler_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await scheduler_task
-            except asyncio.CancelledError:
-                pass
 
     with vedro.then:
         # Verify scheduler stopped gracefully
@@ -80,7 +86,7 @@ async def scheduler_completes_current_sync_before_shutdown():
         sync_completed = asyncio.Event()
 
         # Mock GitLab client with slow operation
-        async def slow_list_mrs(*args, **kwargs):
+        async def slow_list_mrs(*_args: object, **_kwargs: object) -> list[object]:
             sync_started.set()
             await asyncio.sleep(0.2)  # Simulate slow API call
             sync_completed.set()
@@ -88,6 +94,7 @@ async def scheduler_completes_current_sync_before_shutdown():
 
         gitlab_client = AsyncMock()
         gitlab_client.list_mrs_with_label = AsyncMock(side_effect=slow_list_mrs)
+        gitlab_client.rate_limit_state = create_mock_rate_limit_state()
 
         # Mock queue manager
         queue_manager = AsyncMock()
@@ -98,6 +105,7 @@ async def scheduler_completes_current_sync_before_shutdown():
             queue_label="merge_queue",
             hotfix_label="hotfix",
             poll_interval_seconds=10,  # Long interval so only one sync runs
+            rate_limit_critical_threshold=0.95,
         )
 
         # Create scheduler
@@ -123,13 +131,11 @@ async def scheduler_completes_current_sync_before_shutdown():
         try:
             await asyncio.wait_for(scheduler_task, timeout=1.0)
             shutdown_successful = True
-        except asyncio.TimeoutError:
+        except TimeoutError:
             shutdown_successful = False
             scheduler_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await scheduler_task
-            except asyncio.CancelledError:
-                pass
 
     with vedro.then:
         # Verify sync was completed before shutdown
@@ -144,6 +150,7 @@ async def scheduler_handles_cancellation_during_sleep():
         # Mock GitLab client
         gitlab_client = AsyncMock()
         gitlab_client.list_mrs_with_label = AsyncMock(return_value=[])
+        gitlab_client.rate_limit_state = create_mock_rate_limit_state()
 
         # Mock queue manager
         queue_manager = AsyncMock()
@@ -154,6 +161,7 @@ async def scheduler_handles_cancellation_during_sleep():
             queue_label="merge_queue",
             hotfix_label="hotfix",
             poll_interval_seconds=60,  # Long sleep period
+            rate_limit_critical_threshold=0.95,
         )
 
         # Create scheduler
@@ -196,7 +204,7 @@ async def scheduler_continues_after_sync_error():
         call_count = 0
 
         # Mock GitLab client that fails first time, succeeds second time
-        async def failing_then_success(*args, **kwargs):
+        async def failing_then_success(*_args: object, **_kwargs: object) -> list[object]:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -207,6 +215,7 @@ async def scheduler_continues_after_sync_error():
 
         gitlab_client = AsyncMock()
         gitlab_client.list_mrs_with_label = AsyncMock(side_effect=failing_then_success)
+        gitlab_client.rate_limit_state = create_mock_rate_limit_state()
 
         # Mock queue manager
         queue_manager = AsyncMock()
@@ -217,6 +226,7 @@ async def scheduler_continues_after_sync_error():
             queue_label="merge_queue",
             hotfix_label="hotfix",
             poll_interval_seconds=0.1,  # Quick polling for test
+            rate_limit_critical_threshold=0.95,
         )
 
         # Create scheduler
@@ -241,12 +251,10 @@ async def scheduler_continues_after_sync_error():
         # Wait for task to complete
         try:
             await asyncio.wait_for(scheduler_task, timeout=1.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             scheduler_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await scheduler_task
-            except asyncio.CancelledError:
-                pass
 
     with vedro.then:
         # Verify scheduler continued after error and made multiple attempts
@@ -263,7 +271,7 @@ async def scheduler_sync_lock_prevents_concurrent_syncs():
         max_concurrent = 0
 
         # Mock GitLab client with tracking
-        async def tracked_list_mrs(*args, **kwargs):
+        async def tracked_list_mrs(*_args: object, **_kwargs: object) -> list[object]:
             nonlocal sync_count, concurrent_syncs, max_concurrent
             concurrent_syncs += 1
             max_concurrent = max(max_concurrent, concurrent_syncs)
@@ -274,6 +282,7 @@ async def scheduler_sync_lock_prevents_concurrent_syncs():
 
         gitlab_client = AsyncMock()
         gitlab_client.list_mrs_with_label = AsyncMock(side_effect=tracked_list_mrs)
+        gitlab_client.rate_limit_state = create_mock_rate_limit_state()
 
         # Mock queue manager
         queue_manager = AsyncMock()
@@ -284,6 +293,7 @@ async def scheduler_sync_lock_prevents_concurrent_syncs():
             queue_label="merge_queue",
             hotfix_label="hotfix",
             poll_interval_seconds=30,
+            rate_limit_critical_threshold=0.95,
         )
 
         # Create scheduler

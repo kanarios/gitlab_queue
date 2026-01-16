@@ -26,9 +26,9 @@ log = get_logger(__name__)
 
 COMMENT_TEMPLATES: dict[str, str] = {
     # === QUEUE EVENTS ===
-    "queued": """## Merge Queue Bot
+    "queued": """## 🤖 Merge Queue Bot
 
-**Status:** Added to queue
+**Status:** ⏳ Added to queue
 **Position:** {position} of {total}
 **Estimated wait:** ~{estimated_minutes} min
 **Queued at:** {queued_at}
@@ -37,9 +37,9 @@ COMMENT_TEMPLATES: dict[str, str] = {
 _Bot will automatically rebase and merge when your turn comes._
 _Remove `{queue_label}` label to exit queue._
 """,
-    "position_changed": """## Merge Queue Bot
+    "position_changed": """## 🤖 Merge Queue Bot
 
-**Status:** Waiting in queue
+**Status:** ⏳ Waiting in queue
 **Position:** {position} of {total} _(was {old_position})_
 **Estimated wait:** ~{estimated_minutes} min
 
@@ -47,9 +47,9 @@ _Remove `{queue_label}` label to exit queue._
 _Your position changed because MRs ahead were processed._
 """,
     # === PROCESSING EVENTS ===
-    "rebasing": """## Merge Queue Bot
+    "rebasing": """## 🤖 Merge Queue Bot
 
-**Status:** Rebasing
+**Status:** 🔄 Rebasing
 **Started at:** {started_at}
 
 Your turn! Rebasing onto `{target_branch}`...
@@ -57,9 +57,9 @@ Your turn! Rebasing onto `{target_branch}`...
 ---
 _This usually takes 1-2 minutes._
 """,
-    "rebase_complete": """## Merge Queue Bot
+    "rebase_complete": """## 🤖 Merge Queue Bot
 
-**Status:** Rebase complete
+**Status:** ✅ Rebase complete
 **Rebased at:** {rebased_at}
 
 Waiting for pipeline to start...
@@ -67,9 +67,9 @@ Waiting for pipeline to start...
 ---
 _Pipeline should start automatically._
 """,
-    "testing": """## Merge Queue Bot
+    "testing": """## 🤖 Merge Queue Bot
 
-**Status:** Pipeline running
+**Status:** 🧪 Pipeline running
 **Pipeline:** [{pipeline_id}]({pipeline_url})
 **Started at:** {started_at}
 
@@ -78,9 +78,9 @@ Waiting for pipeline to complete...
 ---
 _If pipeline fails, bot will retry once before removing from queue._
 """,
-    "pipeline_retry": """## Merge Queue Bot
+    "pipeline_retry": """## 🤖 Merge Queue Bot
 
-**Status:** Pipeline retry ({retry_count}/{max_retries})
+**Status:** 🔁 Pipeline retry ({retry_count}/{max_retries})
 **Previous pipeline:** [{old_pipeline_id}]({old_pipeline_url}) - Failed
 **New pipeline:** [{pipeline_id}]({pipeline_url})
 
@@ -90,28 +90,28 @@ Retrying due to failed jobs: {failed_jobs}
 _This is the last retry attempt._
 """,
     # === SUCCESS EVENTS ===
-    "merging": """## Merge Queue Bot
+    "merging": """## 🤖 Merge Queue Bot
 
-**Status:** Merging
+**Status:** 🚀 Merging
 **Pipeline:** [{pipeline_id}]({pipeline_url}) - Passed
 
 Pipeline passed! Merging into `{target_branch}`...
 """,
-    "merged": """## Merge Queue Bot
+    "merged": """## 🤖 Merge Queue Bot
 
-**Status:** Successfully merged!
+**Status:** ✅ Successfully merged!
 **Merged at:** {merged_at}
 **Time in queue:** {duration}
 
-Your changes are now in `{target_branch}`.
+🎉 Your changes are now in `{target_branch}`.
 
 ---
 _Thank you for using Merge Queue Bot!_
 """,
     # === FAILURE EVENTS ===
-    "conflict": """## Merge Queue Bot
+    "conflict": """## 🤖 Merge Queue Bot
 
-**Status:** Rebase conflict
+**Status:** ❌ Rebase conflict
 **Failed at:** {failed_at}
 
 Cannot rebase onto `{target_branch}` due to conflicts in:
@@ -125,9 +125,9 @@ Cannot rebase onto `{target_branch}` due to conflicts in:
 ---
 _MR has been removed from queue._
 """,
-    "pipeline_failed": """## Merge Queue Bot
+    "pipeline_failed": """## 🤖 Merge Queue Bot
 
-**Status:** Pipeline failed
+**Status:** ❌ Pipeline failed
 **Pipeline:** [{pipeline_id}]({pipeline_url})
 **Failed at:** {failed_at}
 
@@ -144,9 +144,9 @@ Pipeline failed after {retry_count} attempt(s).
 ---
 _MR has been removed from queue._
 """,
-    "timeout": """## Merge Queue Bot
+    "timeout": """## 🤖 Merge Queue Bot
 
-**Status:** Timeout
+**Status:** ⏰ Timeout
 **Failed at:** {failed_at}
 **Time in queue:** {duration}
 
@@ -162,10 +162,30 @@ Re-add `{queue_label}` label to rejoin queue.
 ---
 _MR has been removed from queue._
 """,
-    # === REMOVAL EVENTS ===
-    "removed_label": """## Merge Queue Bot
+    # === WARNING EVENTS ===
+    "stale_warning": """## 🤖 Merge Queue Bot
 
-**Status:** Removed from queue
+**Status:** ⚠️ Warning: Long wait time
+**In queue since:** {queued_at}
+**Time in queue:** {duration}
+
+This MR has been waiting for more than {warning_hours} hours.
+
+**Possible reasons:**
+- MRs ahead are taking longer than expected
+- High queue volume
+
+**Options:**
+- Wait for your turn (current position: {position})
+- Remove `{queue_label}` label to exit queue and rejoin later
+
+---
+_This is a warning notification. MR is still in queue._
+""",
+    # === REMOVAL EVENTS ===
+    "removed_label": """## 🤖 Merge Queue Bot
+
+**Status:** 🚪 Removed from queue
 **Removed at:** {removed_at}
 **Was at position:** {position}
 
@@ -174,9 +194,9 @@ Label `{queue_label}` was removed.
 ---
 _Add label back to rejoin queue._
 """,
-    "removed_closed": """## Merge Queue Bot
+    "removed_closed": """## 🤖 Merge Queue Bot
 
-**Status:** Removed from queue
+**Status:** 🚪 Removed from queue
 **Removed at:** {removed_at}
 
 MR was closed.
@@ -342,6 +362,27 @@ class MRNotifier:
         """
         base = self.settings.gitlab_url.rstrip("/")
         return f"{base}/-/pipelines/{pipeline_id}"
+
+    async def remove_queue_label(self, mr_iid: int) -> None:
+        """Remove the queue label from an MR.
+
+        Called when MR processing completes (merged, failed, removed)
+        to prevent re-queueing by the scheduler.
+
+        Args:
+            mr_iid: Internal ID of the merge request.
+        """
+        try:
+            await self.gitlab_client.remove_mr_label(mr_iid, self.settings.queue_label)
+            log.info("Queue label removed from MR", mr_iid=mr_iid, label=self.settings.queue_label)
+        except Exception as e:
+            # Don't fail the whole operation if label removal fails
+            log.warning(
+                "Failed to remove queue label from MR",
+                mr_iid=mr_iid,
+                label=self.settings.queue_label,
+                error=str(e),
+            )
 
 
 __all__: list[str] = [
