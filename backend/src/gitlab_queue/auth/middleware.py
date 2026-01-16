@@ -31,8 +31,10 @@ log = get_logger(__name__)
 
 # Public paths that don't require authentication
 # Note: /ws/ handles its own JWT validation in the WebSocket handler
+# Note: /health/detailed requires auth (contains config info), but /health and /ready are public
 PUBLIC_PATH_PREFIXES: tuple[str, ...] = (
-    "/health",
+    "/health/metrics",
+    "/health/ready",
     "/ready",
     "/auth/",
     "/webhooks/",
@@ -41,6 +43,9 @@ PUBLIC_PATH_PREFIXES: tuple[str, ...] = (
     "/openapi.json",
     "/redoc",
 )
+
+# Exact public paths (not prefixes)
+PUBLIC_PATHS_EXACT: tuple[str, ...] = ("/health",)
 
 
 class AuthenticationMiddleware(BaseHTTPMiddleware):
@@ -117,6 +122,10 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         Returns:
             True if the path is public, False otherwise.
         """
+        # Check exact matches first
+        if path in PUBLIC_PATHS_EXACT:
+            return True
+        # Then check prefixes
         return path.startswith(PUBLIC_PATH_PREFIXES)
 
     def _extract_and_validate_token(
@@ -179,6 +188,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
 
 
 __all__: list[str] = [
+    "PUBLIC_PATHS_EXACT",
     "PUBLIC_PATH_PREFIXES",
     "AuthenticationMiddleware",
 ]

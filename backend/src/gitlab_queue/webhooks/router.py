@@ -289,6 +289,12 @@ async def health_detailed(request: Request) -> dict[str, Any]:
     return {
         "status": "ok",
         "mode": state.health.mode.value,
+        "config": {
+            "gitlab_project_id": state.settings.gitlab_project_id,
+            "target_branch": state.settings.target_branch,
+            "queue_label": state.settings.queue_label,
+            "hotfix_label": state.settings.hotfix_label,
+        },
         "database": {
             "connected": db_status.connected,
             "wal_mode_enabled": db_status.wal_mode_enabled,
@@ -406,7 +412,7 @@ def _validate_webhook_request(
 async def handle_gitlab_webhook(
     request: Request,
     x_gitlab_token: str = Header(alias="X-Gitlab-Token"),
-) -> dict[str, str] | JSONResponse:
+) -> dict[str, Any] | JSONResponse:
     """Handle incoming GitLab webhook events."""
     state: WebhookAppState = request.app.state.webhook_state
 
@@ -417,7 +423,11 @@ async def handle_gitlab_webhook(
 
     if event is None:
         log.debug("Unknown event type ignored", object_kind=payload.get("object_kind"))
-        return {"status": "ignored"}
+        return {
+            "status": "ignored",
+            "reason": "unknown_event_type",
+            "details": {"object_kind": payload.get("object_kind")},
+        }
 
     if event.project_id != state.settings.gitlab_project_id:
         log.debug(
@@ -425,12 +435,23 @@ async def handle_gitlab_webhook(
             event_project_id=event.project_id,
             configured_project_id=state.settings.gitlab_project_id,
         )
-        return {"status": "ignored"}
+        return {
+            "status": "ignored",
+            "reason": "project_id_mismatch",
+            "details": {
+                "event_project_id": event.project_id,
+                "configured_project_id": state.settings.gitlab_project_id,
+            },
+        }
 
     # Only route MR and Pipeline events
     if not isinstance(event, MergeRequestEvent | PipelineEvent):
         log.debug("Unsupported event type ignored", event_type=type(event).__name__)
-        return {"status": "ignored"}
+        return {
+            "status": "ignored",
+            "reason": "unsupported_event_type",
+            "details": {"event_type": type(event).__name__},
+        }
 
     try:
         await _route_webhook_event(state, event)

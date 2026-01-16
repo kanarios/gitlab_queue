@@ -2,6 +2,7 @@
 
 import vedro
 from fastapi.testclient import TestClient
+from scenarios.contexts.api_helpers import created_test_jwt
 from scenarios.schemas.status_code import OkStatusSchema
 
 from gitlab_queue.webhooks.router import create_webhook_app
@@ -13,12 +14,16 @@ class Scenario(vedro.Scenario):
     subject = "health detailed endpoint returns comprehensive status"
 
     def given_webhook_app(self):
-        state = create_webhook_state()
-        self.app = create_webhook_app(state)
+        self.state = create_webhook_state()
+        self.app = create_webhook_app(self.state)
         self.client = TestClient(self.app)
+        self.token = created_test_jwt(self.state.settings)
 
     def when_health_detailed_endpoint_is_called(self):
-        self.response = self.client.get("/health/detailed")
+        self.response = self.client.get(
+            "/health/detailed",
+            headers={"Authorization": f"Bearer {self.token}"},
+        )
 
     def then_it_should_return_all_component_details(self):
         assert self.response.status_code == OkStatusSchema
@@ -53,3 +58,10 @@ class Scenario(vedro.Scenario):
         assert "limit" in rl
         assert "remaining" in rl
         assert "usage_ratio" in rl
+
+        # Check config section
+        assert "config" in data
+        assert "gitlab_project_id" in data["config"]
+        assert "target_branch" in data["config"]
+        assert "queue_label" in data["config"]
+        assert "hotfix_label" in data["config"]

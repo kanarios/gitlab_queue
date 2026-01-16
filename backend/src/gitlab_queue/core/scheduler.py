@@ -188,12 +188,28 @@ class QueueScheduler:
         """
         stats = SyncStats()
 
-        # Get current state from GitLab
-        log.debug("Fetching MRs with queue label from GitLab")
-        gitlab_mrs = await self.gitlab_client.list_mrs_with_label(
+        # Get current state from GitLab - fetch MRs with queue label OR hotfix label
+        log.debug("Fetching MRs with queue or hotfix label from GitLab")
+
+        # Fetch MRs with queue label
+        queue_label_mrs = await self.gitlab_client.list_mrs_with_label(
             self.settings.queue_label,
             state="opened",
         )
+
+        # Fetch MRs with hotfix label
+        hotfix_label_mrs = await self.gitlab_client.list_mrs_with_label(
+            self.settings.hotfix_label,
+            state="opened",
+        )
+
+        # Merge both lists, removing duplicates (MR might have both labels)
+        gitlab_mrs_dict = {mr.iid: mr for mr in queue_label_mrs}
+        for mr in hotfix_label_mrs:
+            if mr.iid not in gitlab_mrs_dict:
+                gitlab_mrs_dict[mr.iid] = mr
+        gitlab_mrs = list(gitlab_mrs_dict.values())
+
         stats.mrs_in_gitlab = len(gitlab_mrs)
 
         # Build set of MR IIDs from GitLab
@@ -352,7 +368,7 @@ class QueueScheduler:
         An MR should be removed if:
         - It no longer exists in GitLab (404)
         - It is closed or merged
-        - It no longer has the queue label
+        - It no longer has the queue label AND no longer has the hotfix label
 
         Args:
             mr_iid: MR IID to check.
@@ -372,10 +388,13 @@ class QueueScheduler:
                 )
                 return True
 
-            # Queue label removed - remove
-            if self.settings.queue_label not in mr.labels:
+            # Check if MR has any trigger label (queue or hotfix)
+            has_queue_label = self.settings.queue_label in mr.labels
+            has_hotfix_label = self.settings.hotfix_label in mr.labels
+
+            if not has_queue_label and not has_hotfix_label:
                 log.debug(
-                    "MR no longer has queue label, marking for removal",
+                    "MR no longer has queue or hotfix label, marking for removal",
                     mr_iid=mr_iid,
                 )
                 return True

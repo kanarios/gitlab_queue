@@ -75,26 +75,39 @@ class MRWebhookHandler:
     async def _handle_labeled(self, event: MergeRequestEvent) -> None:
         """Handle label addition to MR.
 
-        Adds MR to queue if queue_label was added.
+        Adds MR to queue if queue_label or hotfix_label was added.
+        Hotfix label acts as both queue trigger and priority flag.
 
         Args:
             event: The merge request webhook event.
         """
-        if not self._was_queue_label_added(event):
+        queue_label_added = self._was_queue_label_added(event)
+        hotfix_label_added = self._was_hotfix_label_added(event)
+
+        if not queue_label_added and not hotfix_label_added:
             log.debug(
-                "Queue label not added, ignoring",
+                "Neither queue nor hotfix label added, ignoring",
                 mr_iid=event.object_attributes.iid,
                 queue_label=self.settings.queue_label,
+                hotfix_label=self.settings.hotfix_label,
             )
             return
 
         mr_iid = event.object_attributes.iid
 
-        # Fetch full MR data from API
-        mr = await self.gitlab_client.get_mr(mr_iid)
-
-        # Detect if this is a hotfix
+        # Hotfix if hotfix label is present (either just added or already there)
         is_hotfix = self.settings.hotfix_label in event.labels
+
+        # Check if MR is already in queue
+        existing_item = await self.queue_manager.get_queue_item(mr_iid)
+
+        if existing_item is not None:
+            # MR already in queue - refresh metadata to keep it current
+            await self._refresh_queue_item_metadata(mr_iid, event)
+            return
+
+        # Fetch full MR data from API for new queue entry
+        mr = await self.gitlab_client.get_mr(mr_iid)
 
         # Add to queue
         await self.queue_manager.add_to_queue(mr, is_hotfix=is_hotfix)
@@ -109,17 +122,29 @@ class MRWebhookHandler:
     async def _handle_unlabeled(self, event: MergeRequestEvent) -> None:
         """Handle label removal from MR.
 
-        Removes MR from queue if queue_label was removed.
+        Removes MR from queue if queue_label was removed, or if hotfix_label
+        was removed and queue_label is not present.
 
         Args:
             event: The merge request webhook event.
         """
-        if not self._was_queue_label_removed(event):
-            log.debug(
-                "Queue label not removed, ignoring",
-                mr_iid=event.object_attributes.iid,
-                queue_label=self.settings.queue_label,
-            )
+        queue_label_removed = self._was_queue_label_removed(event)
+        hotfix_label_removed = self._was_hotfix_label_removed(event)
+
+        # Check if MR still has a trigger label after removal
+        has_queue_label = self.settings.queue_label in event.labels
+        has_hotfix_label = self.settings.hotfix_label in event.labels
+
+        # Remove from queue if:
+        # 1. Queue label was removed AND hotfix is not present, OR
+        # 2. Hotfix label was removed AND queue label is not present
+        queue_trigger_lost = queue_label_removed and not has_hotfix_label
+        hotfix_trigger_lost = hotfix_label_removed and not has_queue_label
+        should_remove = queue_trigger_lost or hotfix_trigger_lost
+
+        if not should_remove:
+            # MR stays in queue - refresh metadata to keep it current
+            await self._refresh_queue_item_metadata(event.object_attributes.iid, event)
             return
 
         mr_iid = event.object_attributes.iid
@@ -169,7 +194,7 @@ class MRWebhookHandler:
     async def _handle_update(self, event: MergeRequestEvent) -> None:
         """Handle MR update event.
 
-        If MR has queue label but is not in active queue, adds it.
+        If MR has queue label or hotfix label but is not in active queue, adds it.
         Does NOT reset state for MRs already being processed - this avoids race conditions
         with bot-initiated rebases.
 
@@ -178,8 +203,10 @@ class MRWebhookHandler:
         """
         mr_iid = event.object_attributes.iid
 
-        # Check if MR has the queue label
+        # Check if MR has a trigger label (queue_label OR hotfix_label)
         has_queue_label = self.settings.queue_label in event.labels
+        has_hotfix_label = self.settings.hotfix_label in event.labels
+        has_trigger_label = has_queue_label or has_hotfix_label
 
         # Check if MR is in queue
         queue_item = await self.queue_manager.get_queue_item(mr_iid)
@@ -189,10 +216,10 @@ class MRWebhookHandler:
         is_in_active_queue = queue_item is not None and queue_item.state not in terminal_states
 
         if not is_in_active_queue:
-            if has_queue_label:
+            if has_trigger_label:
                 # MR has label but not in active queue - add it
                 mr = await self.gitlab_client.get_mr(mr_iid)
-                is_hotfix = self.settings.hotfix_label in event.labels
+                is_hotfix = has_hotfix_label
                 await self.queue_manager.add_to_queue(mr, is_hotfix=is_hotfix)
                 log.info(
                     "MR added to queue via update webhook",
@@ -203,7 +230,7 @@ class MRWebhookHandler:
                 # Broadcast queue update to UI
                 await self._broadcast_queue_update()
             else:
-                log.debug("Updated MR not in queue and no queue label", mr_iid=mr_iid)
+                log.debug("Updated MR not in queue and no trigger label", mr_iid=mr_iid)
             return
 
         # Log update but don't reset state - this avoids race conditions with bot rebases
@@ -255,35 +282,75 @@ class MRWebhookHandler:
         except Exception as e:
             log.warning("Failed to broadcast queue update", error=str(e))
 
-    def _was_queue_label_added(self, event: MergeRequestEvent) -> bool:
-        """Check if queue label was added in this event.
+    async def _refresh_queue_item_metadata(
+        self,
+        mr_iid: int,
+        event: MergeRequestEvent,
+    ) -> None:
+        """Refresh labels and is_hotfix for a queued MR.
+
+        Called when labels change but MR stays in queue, to keep
+        the queue/UI metadata current.
+
+        Args:
+            mr_iid: The MR's internal ID.
+            event: The merge request webhook event with current labels.
+        """
+        is_hotfix = self.settings.hotfix_label in event.labels
+        await self.queue_manager.update_hotfix_status(
+            mr_iid=mr_iid,
+            is_hotfix=is_hotfix,
+            labels=list(event.labels),
+        )
+        log.info(
+            "Refreshed MR queue metadata",
+            mr_iid=mr_iid,
+            is_hotfix=is_hotfix,
+            labels_count=len(event.labels),
+        )
+
+    def _was_label_changed(
+        self,
+        event: MergeRequestEvent,
+        label: str,
+        *,
+        added: bool,
+    ) -> bool:
+        """Check if a specific label was added or removed in this event.
 
         Args:
             event: The merge request webhook event.
+            label: The label to check for.
+            added: If True, check if label was added; if False, check if removed.
 
         Returns:
-            True if queue_label was added, False otherwise.
+            True if the label change occurred, False otherwise.
         """
         if not event.label_changes:
             return False
 
-        added = set(event.label_changes.current) - set(event.label_changes.previous)
-        return self.settings.queue_label in added
+        if added:
+            changed = set(event.label_changes.current) - set(event.label_changes.previous)
+        else:
+            changed = set(event.label_changes.previous) - set(event.label_changes.current)
+
+        return label in changed
+
+    def _was_queue_label_added(self, event: MergeRequestEvent) -> bool:
+        """Check if queue label was added in this event."""
+        return self._was_label_changed(event, self.settings.queue_label, added=True)
 
     def _was_queue_label_removed(self, event: MergeRequestEvent) -> bool:
-        """Check if queue label was removed in this event.
+        """Check if queue label was removed in this event."""
+        return self._was_label_changed(event, self.settings.queue_label, added=False)
 
-        Args:
-            event: The merge request webhook event.
+    def _was_hotfix_label_added(self, event: MergeRequestEvent) -> bool:
+        """Check if hotfix label was added in this event."""
+        return self._was_label_changed(event, self.settings.hotfix_label, added=True)
 
-        Returns:
-            True if queue_label was removed, False otherwise.
-        """
-        if not event.label_changes:
-            return False
-
-        removed = set(event.label_changes.previous) - set(event.label_changes.current)
-        return self.settings.queue_label in removed
+    def _was_hotfix_label_removed(self, event: MergeRequestEvent) -> bool:
+        """Check if hotfix label was removed in this event."""
+        return self._was_label_changed(event, self.settings.hotfix_label, added=False)
 
 
 @dataclass
