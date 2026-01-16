@@ -102,24 +102,18 @@ class MRWebhookHandler:
         existing_item = await self.queue_manager.get_queue_item(mr_iid)
 
         if existing_item is not None:
-            # MR already in queue - update hotfix status if hotfix label was just added
-            if hotfix_label_added and not existing_item.is_hotfix:
-                await self.queue_manager.update_hotfix_status(
-                    mr_iid=mr_iid,
-                    is_hotfix=True,
-                    labels=list(event.labels),
-                )
-                log.info(
-                    "Updated MR hotfix status after label addition",
-                    mr_iid=mr_iid,
-                    is_hotfix=True,
-                )
-            else:
-                log.debug(
-                    "MR already in queue, no hotfix status change needed",
-                    mr_iid=mr_iid,
-                    is_hotfix=existing_item.is_hotfix,
-                )
+            # MR already in queue - always refresh labels and is_hotfix to keep metadata current
+            await self.queue_manager.update_hotfix_status(
+                mr_iid=mr_iid,
+                is_hotfix=is_hotfix,
+                labels=list(event.labels),
+            )
+            log.info(
+                "Updated MR metadata for existing queue item",
+                mr_iid=mr_iid,
+                is_hotfix=is_hotfix,
+                labels_count=len(event.labels),
+            )
             return
 
         # Fetch full MR data from API for new queue entry
@@ -159,26 +153,20 @@ class MRWebhookHandler:
         should_remove = queue_trigger_lost or hotfix_trigger_lost
 
         if not should_remove:
-            # MR stays in queue, but if hotfix label was removed, update is_hotfix status
-            if hotfix_label_removed and has_queue_label:
-                mr_iid = event.object_attributes.iid
-                await self.queue_manager.update_hotfix_status(
-                    mr_iid=mr_iid,
-                    is_hotfix=False,
-                    labels=list(event.labels),
-                )
-                log.info(
-                    "Updated MR hotfix status after label removal",
-                    mr_iid=mr_iid,
-                    is_hotfix=False,
-                )
-            else:
-                log.debug(
-                    "MR still has trigger label, not removing from queue",
-                    mr_iid=event.object_attributes.iid,
-                    has_queue_label=has_queue_label,
-                    has_hotfix_label=has_hotfix_label,
-                )
+            # MR stays in queue - always refresh labels and is_hotfix to keep metadata current
+            mr_iid = event.object_attributes.iid
+            is_hotfix = self.settings.hotfix_label in event.labels
+            await self.queue_manager.update_hotfix_status(
+                mr_iid=mr_iid,
+                is_hotfix=is_hotfix,
+                labels=list(event.labels),
+            )
+            log.info(
+                "Updated MR metadata after label change",
+                mr_iid=mr_iid,
+                is_hotfix=is_hotfix,
+                labels_count=len(event.labels),
+            )
             return
 
         mr_iid = event.object_attributes.iid
