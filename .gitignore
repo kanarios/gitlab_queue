@@ -237,3 +237,10 @@ frontend/dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# Internal docs (keep locally, don't commit)
+CLAUDE.md
+todos/
+**/BUGS_TO_FIX.md
+**/ADOPTION_PLAN*.md
+**/codestyle/
