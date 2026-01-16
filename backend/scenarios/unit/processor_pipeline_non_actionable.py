@@ -92,9 +92,7 @@ async def process_mr_with_non_actionable_pipeline_status(status: str):
         rebase_matcher = jj.match("PUT", f"/api/v4/projects/123/merge_requests/{mr_iid}/rebase")
         rebase_response = jj.Response(status=202, json={"rebase_in_progress": False})
 
-        pipelines_matcher = jj.match(
-            "GET", f"/api/v4/projects/123/merge_requests/{mr_iid}/pipelines"
-        )
+        pipelines_matcher = jj.match("GET", f"/api/v4/projects/123/merge_requests/{mr_iid}/pipelines")
         pipelines_response = jj.Response(status=200, json=[non_actionable_pipeline])
 
         comment_matcher = jj.match("POST", f"/api/v4/projects/123/merge_requests/{mr_iid}/notes")
@@ -138,9 +136,9 @@ async def process_mr_with_non_actionable_pipeline_status(status: str):
             result = await processor._process_mr(queue_item)
 
         with then("MR is immediately marked as failed"):
-            assert (
-                result == ProcessingResult.PIPELINE_FAILED
-            ), f"Expected PIPELINE_FAILED for '{status}' status, got {result}"
+            assert result == ProcessingResult.PIPELINE_FAILED, (
+                f"Expected PIPELINE_FAILED for '{status}' status, got {result}"
+            )
 
         with then("failure comment was posted"):
             comment_history = await comment_mock.fetch_history()
@@ -208,9 +206,7 @@ async def non_actionable_status_does_not_retry():
         rebase_matcher = jj.match("PUT", f"/api/v4/projects/123/merge_requests/{mr_iid}/rebase")
         rebase_response = jj.Response(status=202, json={"rebase_in_progress": False})
 
-        pipelines_matcher = jj.match(
-            "GET", f"/api/v4/projects/123/merge_requests/{mr_iid}/pipelines"
-        )
+        pipelines_matcher = jj.match("GET", f"/api/v4/projects/123/merge_requests/{mr_iid}/pipelines")
         pipelines_response = jj.Response(status=200, json=[manual_pipeline])
 
         comment_matcher = jj.match("POST", f"/api/v4/projects/123/merge_requests/{mr_iid}/notes")
@@ -258,9 +254,7 @@ async def non_actionable_status_does_not_retry():
 
         with then("rebase was only called once (initial rebase, no retry)"):
             rebase_history = await rebase_mock.fetch_history()
-            assert (
-                len(rebase_history) == 1
-            ), f"Rebase should be called only once, called {len(rebase_history)} times"
+            assert len(rebase_history) == 1, f"Rebase should be called only once, called {len(rebase_history)} times"
 
         with then("pipeline was checked minimal times (no retry loop)"):
             # Pipeline is checked once in _wait_for_rebase (to get pipeline id)
@@ -268,8 +262,7 @@ async def non_actionable_status_does_not_retry():
             # Total: 2 checks, not more (no retry polling loop)
             pipelines_history = await pipelines_mock.fetch_history()
             assert len(pipelines_history) == 2, (
-                f"Pipeline should be checked exactly twice (rebase + wait), "
-                f"checked {len(pipelines_history)} times"
+                f"Pipeline should be checked exactly twice (rebase + wait), checked {len(pipelines_history)} times"
             )
 
 

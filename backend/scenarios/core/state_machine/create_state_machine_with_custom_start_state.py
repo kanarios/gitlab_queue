@@ -1,12 +1,12 @@
 """Test creating state machine with custom start state."""
 
 import vedro
-from scenarios.library import QueueState
 from scenarios.contexts.state_machine_helpers import (
     create_mock_notifier,
     create_mock_queue_manager,
     create_state_machine,
 )
+from scenarios.library import QueueState
 
 
 class Scenario(vedro.Scenario):

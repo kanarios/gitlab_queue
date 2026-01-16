@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import vedro
-from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, create_test_client
-from scenarios.contexts.jj_gitlab_mock import mocked_gitlab_get_mr
+from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, created_test_client
+from scenarios.transports import GitLabMockTransport
 
 from gitlab_queue.clients.gitlab import GitLabConflictError
 
@@ -14,16 +14,19 @@ from ._helpers import create_mr_response
 class Scenario(vedro.Scenario):
     subject = "try to merge mr when mr is not mergeable"
 
-    async def given_mock_gitlab_with_unmergeable_mr(self):
+    def given_mock_gitlab_with_unmergeable_mr(self):
         # MR has conflicts - cannot be merged
         mr_data = create_mr_response(
             iid=42,
             merge_status="cannot_be_merged",
             has_conflicts=True,
         )
-        self._get_mock = mocked_gitlab_get_mr(TEST_PROJECT_ID, 42, mr_data)
-        await self._get_mock.__aenter__()
-        self.client = create_test_client()
+        self.transport = GitLabMockTransport()
+        self.transport.register_get(
+            f"/api/v4/projects/{TEST_PROJECT_ID}/merge_requests/42",
+            json_data=mr_data,
+        )
+        self.client = created_test_client(transport=self.transport)
 
     async def when_merge_mr_is_called(self):
         self.error = None
@@ -43,4 +46,3 @@ class Scenario(vedro.Scenario):
 
     async def do_cleanup(self):
         await self.client.close()
-        await self._get_mock.__aexit__(None, None, None)

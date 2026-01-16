@@ -1,6 +1,8 @@
 """Unit tests for Secret class."""
 
 import vedro
+from d42 import fake
+from scenarios.schemas import SecretValueSchema
 
 from gitlab_queue.config import Secret
 
@@ -9,7 +11,7 @@ class Scenario(vedro.Scenario):
     subject = "create secret and hide value in str representation"
 
     def given_secret_value(self):
-        self.secret_value = "glpat-super-secret-token"
+        self.secret_value = fake(SecretValueSchema)
 
     def when_secret_is_created(self):
         self.secret = Secret(self.secret_value)

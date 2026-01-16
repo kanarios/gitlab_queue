@@ -2,9 +2,9 @@
 
 import vedro
 from scenarios.core.queue_manager._helpers import create_mock_database, create_mock_row
+from scenarios.library import Labels
 
 from gitlab_queue.core.queue import QueueManager
-from scenarios.library import Labels
 
 
 class Scenario(vedro.Scenario):

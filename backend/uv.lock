@@ -498,6 +498,7 @@ dev = [
     { name = "pre-commit" },
     { name = "ruff" },
     { name = "vedro" },
+    { name = "vedro-d42-validator" },
     { name = "watchfiles" },
 ]
 
@@ -529,6 +530,7 @@ requires-dist = [
     { name = "tenacity", specifier = ">=9.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
     { name = "vedro", marker = "extra == 'dev'", specifier = ">=1.12" },
+    { name = "vedro-d42-validator", marker = "extra == 'dev'", specifier = ">=0.1.0" },
     { name = "watchfiles", marker = "extra == 'dev'", specifier = ">=1.0" },
 ]
 provides-extras = ["dev"]
@@ -1553,6 +1555,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/8c/15/7e5cc6440a0f42ef3fa5a00273a87ab5424a760d41f60cf6da4a443d9c73/vedro-1.15.1.tar.gz", hash = "sha256:6722207cf60231fedd202e16b3da3a83cd9e641675163f411e997b68da55d2b2", size = 159055, upload-time = "2025-10-04T07:40:31.135Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f7/9c/27e06e4eae3c46c866f4cbbb23666a14e956db0c86d610c686c4b987a453/vedro-1.15.1-py3-none-any.whl", hash = "sha256:21327d97d21c0e92e1ab78bd3b6f2df27ab8883af951e9a52ae4ea3c13184cac", size = 235388, upload-time = "2025-10-04T07:40:29.814Z" },
+]
+
+[[package]]
+name = "vedro-d42-validator"
+version = "1.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "d42" },
+    { name = "vedro" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b8/77/4ea21d55fec3b3637c547402068e1b240c9c918508df892f96996e638f3a/vedro_d42_validator-1.4.0.tar.gz", hash = "sha256:f3ce5ccd2dec9eb9635a9ff282093353fafe671bf2166931dfdda4da19a2aa5e", size = 8083, upload-time = "2025-10-14T16:12:18.408Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b0/a4/57bc0387c76fa8700739a9b21f7d630cea95a974f0e23bae77129ae13153/vedro_d42_validator-1.4.0-py3-none-any.whl", hash = "sha256:17c6be29a4c4f7c0a9b413204258af648116bfb4a0685f70f591c53a4bb2a9c2", size = 7875, upload-time = "2025-10-14T16:12:17.327Z" },
 ]
 
 [[package]]

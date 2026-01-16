@@ -4,11 +4,11 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import vedro
-from scenarios.library import QueueState
 from scenarios.contexts.state_machine_helpers import (
     create_mock_notifier,
     create_mock_queue_manager,
 )
+from scenarios.library import QueueState
 
 from gitlab_queue.core.state_machine import create_state_machine_for_mr
 from gitlab_queue.models.queue_item import QueueItem

@@ -274,10 +274,7 @@ async def processor_state_recovery_after_shutdown():
         list_mrs_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests")
         list_mrs_response = jj.Response(
             status=200,
-            json=[
-                {"iid": mr_iid, "state": "opened", "labels": ["merge_queue"]}
-                for mr_iid, _ in mrs_data
-            ],
+            json=[{"iid": mr_iid, "state": "opened", "labels": ["merge_queue"]} for mr_iid, _ in mrs_data],
         )
 
         settings = Settings(
@@ -460,9 +457,7 @@ async def concurrent_processing_during_shutdown():
         rebase_response = jj.Response(status=202, json={"rebase_in_progress": False})
 
         pipelines_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/75/pipelines")
-        pipelines_response = jj.Response(
-            status=200, json=[{"id": 8001, "status": "running", "sha": "concurrent123"}]
-        )
+        pipelines_response = jj.Response(status=200, json=[{"id": 8001, "status": "running", "sha": "concurrent123"}])
 
         comment_matcher = jj.match("POST", "/api/v4/projects/123/merge_requests/75/notes")
         comment_response = jj.Response(status=201, json={"id": 41})
@@ -533,9 +528,7 @@ async def concurrent_processing_during_shutdown():
             # We check that shutdown was properly requested and processed
             assert processor.is_shutdown_requested, "Shutdown should be requested"
             # Result should indicate error due to shutdown
-            assert (
-                result == ProcessingResult.ERROR
-            ), f"Should return error due to shutdown, got {result}"
+            assert result == ProcessingResult.ERROR, f"Should return error due to shutdown, got {result}"
             assert not processor.is_processing, "Should not be processing after shutdown"
 
 

@@ -1,6 +1,8 @@
 """Unit tests for Secret class."""
 
 import vedro
+from d42 import fake
+from scenarios.schemas import SecretValueSchema
 
 from gitlab_queue.config import Secret
 
@@ -9,7 +11,7 @@ class Scenario(vedro.Scenario):
     subject = "retrieve actual secret value"
 
     def given_secret(self):
-        self.secret_value = "my-api-key-12345"
+        self.secret_value = fake(SecretValueSchema)
         self.secret = Secret(self.secret_value)
 
     def when_getting_secret_value(self):

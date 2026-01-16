@@ -3,22 +3,25 @@
 from __future__ import annotations
 
 import vedro
-from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, create_test_client
-from scenarios.contexts.jj_gitlab_mock import mocked_gitlab_get_conflicts
+from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, created_test_client
+from scenarios.transports import GitLabMockTransport
 
 
 class Scenario(vedro.Scenario):
     subject = "get_mr_conflicts returns list of conflicted files"
 
-    async def given_mock_gitlab_with_conflicts(self):
+    def given_mock_gitlab_with_conflicts(self):
         self.conflicts_data = [
             {"old_path": "src/main.py", "new_path": "src/main.py"},
             {"old_path": "config.yml", "new_path": "config.yml"},
             {"old_path": "old/file.py", "new_path": "new/file.py"},
         ]
-        self._mock_ctx = mocked_gitlab_get_conflicts(TEST_PROJECT_ID, 42, self.conflicts_data)
-        await self._mock_ctx.__aenter__()
-        self.client = create_test_client()
+        self.transport = GitLabMockTransport()
+        self.transport.register_get(
+            f"/api/v4/projects/{TEST_PROJECT_ID}/merge_requests/42/conflicts",
+            json_data=self.conflicts_data,
+        )
+        self.client = created_test_client(transport=self.transport)
 
     async def when_get_mr_conflicts_is_called(self):
         self.result = await self.client.get_mr_conflicts(42)
@@ -34,4 +37,3 @@ class Scenario(vedro.Scenario):
 
     async def do_cleanup(self):
         await self.client.close()
-        await self._mock_ctx.__aexit__(None, None, None)

@@ -17,6 +17,7 @@ from jj.mock import mocked
 from scenarios.contexts.gitlab_client_factory import created_test_settings
 from scenarios.contexts.jj_gitlab_mock import get_mock_url
 from scenarios.contexts.sqlite_client import initialized_test_database
+from scenarios.library import Labels, MRState, QueueState
 from vedro import given, scenario, then, when
 
 from gitlab_queue.clients.gitlab import GitLabClient
@@ -24,7 +25,6 @@ from gitlab_queue.core.notifier import MRNotifier
 from gitlab_queue.core.processor import MergeProcessor
 from gitlab_queue.core.queue import QueueManager
 from gitlab_queue.models.mr import Author, MergeRequest
-from scenarios.library import Labels, MRState, QueueState
 
 
 @scenario()

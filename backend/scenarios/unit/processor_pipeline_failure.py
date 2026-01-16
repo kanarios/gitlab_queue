@@ -105,9 +105,7 @@ async def process_mr_with_pipeline_failure_and_retry():
         pipelines_response_2 = jj.Response(status=200, json=[success_pipeline])
 
         # Jobs for failed pipeline
-        jobs_matcher = jj.match(
-            "GET", f"/api/v4/projects/123/pipelines/{failed_pipeline['id']}/jobs"
-        )
+        jobs_matcher = jj.match("GET", f"/api/v4/projects/123/pipelines/{failed_pipeline['id']}/jobs")
         jobs_response = jj.Response(status=200, json=failed_jobs)
 
         # Merge after success
@@ -368,9 +366,7 @@ async def process_mr_with_canceled_pipeline():
         pipelines_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/52/pipelines")
         pipelines_response = jj.Response(status=200, json=[canceled_pipeline])
 
-        jobs_matcher = jj.match(
-            "GET", f"/api/v4/projects/123/pipelines/{canceled_pipeline['id']}/jobs"
-        )
+        jobs_matcher = jj.match("GET", f"/api/v4/projects/123/pipelines/{canceled_pipeline['id']}/jobs")
         jobs_response = jj.Response(status=200, json=canceled_jobs)
 
         comment_matcher = jj.match("POST", "/api/v4/projects/123/merge_requests/52/notes")
