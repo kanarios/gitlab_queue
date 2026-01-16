@@ -53,6 +53,10 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    # BACKEND_URL is optional in Docker Compose (defaults to backend:8080)
+    # For Kubernetes, set BACKEND_URL=backend.<namespace>.svc.cluster.local:8080
+    environment:
+      BACKEND_URL: ${BACKEND_URL:-backend:8080}
     restart: unless-stopped
 
   caddy:
