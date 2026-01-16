@@ -102,18 +102,8 @@ class MRWebhookHandler:
         existing_item = await self.queue_manager.get_queue_item(mr_iid)
 
         if existing_item is not None:
-            # MR already in queue - always refresh labels and is_hotfix to keep metadata current
-            await self.queue_manager.update_hotfix_status(
-                mr_iid=mr_iid,
-                is_hotfix=is_hotfix,
-                labels=list(event.labels),
-            )
-            log.info(
-                "Updated MR metadata for existing queue item",
-                mr_iid=mr_iid,
-                is_hotfix=is_hotfix,
-                labels_count=len(event.labels),
-            )
+            # MR already in queue - refresh metadata to keep it current
+            await self._refresh_queue_item_metadata(mr_iid, event)
             return
 
         # Fetch full MR data from API for new queue entry
@@ -153,20 +143,8 @@ class MRWebhookHandler:
         should_remove = queue_trigger_lost or hotfix_trigger_lost
 
         if not should_remove:
-            # MR stays in queue - always refresh labels and is_hotfix to keep metadata current
-            mr_iid = event.object_attributes.iid
-            is_hotfix = self.settings.hotfix_label in event.labels
-            await self.queue_manager.update_hotfix_status(
-                mr_iid=mr_iid,
-                is_hotfix=is_hotfix,
-                labels=list(event.labels),
-            )
-            log.info(
-                "Updated MR metadata after label change",
-                mr_iid=mr_iid,
-                is_hotfix=is_hotfix,
-                labels_count=len(event.labels),
-            )
+            # MR stays in queue - refresh metadata to keep it current
+            await self._refresh_queue_item_metadata(event.object_attributes.iid, event)
             return
 
         mr_iid = event.object_attributes.iid
@@ -303,6 +281,33 @@ class MRWebhookHandler:
             )
         except Exception as e:
             log.warning("Failed to broadcast queue update", error=str(e))
+
+    async def _refresh_queue_item_metadata(
+        self,
+        mr_iid: int,
+        event: MergeRequestEvent,
+    ) -> None:
+        """Refresh labels and is_hotfix for a queued MR.
+
+        Called when labels change but MR stays in queue, to keep
+        the queue/UI metadata current.
+
+        Args:
+            mr_iid: The MR's internal ID.
+            event: The merge request webhook event with current labels.
+        """
+        is_hotfix = self.settings.hotfix_label in event.labels
+        await self.queue_manager.update_hotfix_status(
+            mr_iid=mr_iid,
+            is_hotfix=is_hotfix,
+            labels=list(event.labels),
+        )
+        log.info(
+            "Refreshed MR queue metadata",
+            mr_iid=mr_iid,
+            is_hotfix=is_hotfix,
+            labels_count=len(event.labels),
+        )
 
     def _was_label_changed(
         self,
