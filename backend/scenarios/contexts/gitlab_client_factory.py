@@ -4,10 +4,10 @@ Provides helper functions to create GitLabClient instances configured
 for testing with JJ mock server.
 
 Example:
-    >>> from scenarios.contexts.gitlab_client_factory import create_test_client
+    >>> from scenarios.contexts.gitlab_client_factory import created_test_client
     >>>
-    >>> async with mock_gitlab_get_mr(123, 42, mr_data):
-    ...     client = create_test_client()
+    >>> async with mocked_gitlab_get_mr(123, 42, mr_data):
+    ...     client = created_test_client()
     ...     mr = await client.get_mr(42)
     ...     await client.close()
 """
@@ -17,18 +17,19 @@ from __future__ import annotations
 from gitlab_queue.clients.gitlab import GitLabClient
 from gitlab_queue.config import Settings
 from scenarios.contexts.jj_gitlab_mock import JJ_MOCK_URL
+from scenarios.library import Labels
 
 # Default project ID used in tests
 TEST_PROJECT_ID = 123
 
 
-def create_test_settings(
+def created_test_settings(
     mock_url: str = JJ_MOCK_URL,
     project_id: int = TEST_PROJECT_ID,
     *,
     target_branch: str = "main",
-    queue_label: str = "merge_queue",
-    hotfix_label: str = "hotfix",
+    queue_label: str = Labels.MERGE_QUEUE,
+    hotfix_label: str = Labels.HOTFIX,
     poll_interval_seconds: int = 1,
     pipeline_timeout_seconds: int = 10,
     pipeline_retry_count: int = 1,
@@ -53,9 +54,9 @@ def create_test_settings(
         api_max_retries: Max API retries (default: 1).
 
     Returns:
-        Settings instance configured for testing.
+        Settings instance configured for testing with all required fields.
     """
-    return Settings(
+    settings = Settings(
         gitlab_url=mock_url,
         gitlab_token="test-token",  # Let converter wrap in Secret
         gitlab_project_id=project_id,
@@ -70,9 +71,15 @@ def create_test_settings(
         stale_mr_warning_hours=stale_mr_warning_hours,
         api_max_retries=api_max_retries,
     )
+    assert settings.gitlab_url == mock_url, "Settings should have correct gitlab_url"
+    return settings
 
 
-def create_test_client(
+# Alias for backward compatibility
+create_test_settings = created_test_settings
+
+
+def created_test_client(
     mock_url: str = JJ_MOCK_URL,
     project_id: int = TEST_PROJECT_ID,
 ) -> GitLabClient:
@@ -88,18 +95,28 @@ def create_test_client(
         GitLabClient instance configured for testing.
 
     Example:
-        >>> client = create_test_client()
+        >>> client = created_test_client()
         >>> try:
         ...     mr = await client.get_mr(42)
         ... finally:
         ...     await client.close()
     """
-    settings = create_test_settings(mock_url, project_id)
-    return GitLabClient(settings)
+    settings = created_test_settings(mock_url, project_id)
+    client = GitLabClient(settings)
+    assert client is not None, "GitLab client should be created"
+    return client
+
+
+# Alias for backward compatibility
+create_test_client = created_test_client
 
 
 __all__ = [
     "TEST_PROJECT_ID",
+    # Aliases for backward compatibility
     "create_test_client",
     "create_test_settings",
+    # New names (preferred)
+    "created_test_client",
+    "created_test_settings",
 ]

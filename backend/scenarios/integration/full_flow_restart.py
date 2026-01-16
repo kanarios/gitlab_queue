@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import jj
 from jj.mock import mocked
-from scenarios.contexts.gitlab_client_factory import create_test_settings
+from scenarios.contexts.gitlab_client_factory import created_test_settings
 from scenarios.contexts.jj_gitlab_mock import get_mock_url
-from scenarios.contexts.sqlite_client import test_database
+from scenarios.contexts.sqlite_client import initialized_test_database
 from vedro import given, scenario, then, when
 
 from gitlab_queue.clients.gitlab import GitLabClient
@@ -26,7 +26,7 @@ from gitlab_queue.models.mr import Author, MergeRequest
 async def restart_recovery_continues_processing():
     """Test that system recovers gracefully after restart."""
 
-    async with test_database() as db:
+    async with initialized_test_database() as db:
         with given("MRs stuck in various intermediate states after crash"):
             queue = QueueManager(db)
             await queue.ensure_schema()
@@ -57,7 +57,7 @@ async def restart_recovery_continues_processing():
                     await queue.update_mr_state(mr_iid, state)
 
             mock_url = get_mock_url()
-            settings = create_test_settings(mock_url)
+            settings = created_test_settings(mock_url)
 
             # Mock list MRs response - all still open and labeled
             list_mrs_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests")
@@ -169,7 +169,7 @@ async def restart_recovery_continues_processing():
 async def restart_detects_merged_mr_in_gitlab():
     """Test that recovery detects MRs that were merged in GitLab during downtime."""
 
-    async with test_database() as db:
+    async with initialized_test_database() as db:
         with given("MR in 'merging' state but already merged in GitLab"):
             queue = QueueManager(db)
             await queue.ensure_schema()
@@ -191,7 +191,7 @@ async def restart_detects_merged_mr_in_gitlab():
             await queue.update_mr_state(600, "merging")
 
             mock_url = get_mock_url()
-            settings = create_test_settings(mock_url)
+            settings = created_test_settings(mock_url)
 
             # Mock: GitLab says MR is now merged
             get_mr_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/600")
@@ -258,7 +258,7 @@ async def restart_detects_merged_mr_in_gitlab():
 async def restart_detects_closed_mr_in_gitlab():
     """Test that recovery detects MRs that were closed in GitLab during downtime."""
 
-    async with test_database() as db:
+    async with initialized_test_database() as db:
         with given("MR in 'testing' state but closed in GitLab"):
             queue = QueueManager(db)
             await queue.ensure_schema()
@@ -279,7 +279,7 @@ async def restart_detects_closed_mr_in_gitlab():
             await queue.update_mr_state(700, "testing")
 
             mock_url = get_mock_url()
-            settings = create_test_settings(mock_url)
+            settings = created_test_settings(mock_url)
 
             # Mock: GitLab says MR is now closed
             get_mr_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/700")

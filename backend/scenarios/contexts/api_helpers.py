@@ -4,12 +4,21 @@ Provides test utilities for creating test apps, JWT tokens, and seeding test dat
 for API endpoint testing.
 
 Example:
-    >>> from scenarios.contexts.api_helpers import create_test_app, create_test_jwt
+    >>> from scenarios.contexts.api_helpers import created_test_app, created_test_jwt
     >>>
-    >>> async with create_test_app() as (app, state):
-    ...     client = TestClient(app)
-    ...     token = create_test_jwt(state.settings)
-    ...     response = client.get("/api/history", headers={"Authorization": f"Bearer {token}"})
+    >>> class Scenario(vedro.Scenario):
+    ...     subject = "get api history"
+    ...
+    ...     def given_test_app(self):
+    ...         self.app, self.state = created_test_app()
+    ...         self.client = TestClient(self.app)
+    ...         self.token = created_test_jwt(self.state.settings)
+    ...
+    ...     def when_request_sent(self):
+    ...         self.response = self.client.get(
+    ...             "/api/history",
+    ...             headers={"Authorization": f"Bearer {self.token}"}
+    ...         )
 """
 
 from __future__ import annotations
@@ -20,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
 import jwt
+import vedro
 
 from gitlab_queue.api.websocket import WebSocketManager
 from gitlab_queue.config import Secret
@@ -28,7 +38,8 @@ from gitlab_queue.health import ApplicationHealth, ComponentStatus, GitLabHealth
 from gitlab_queue.models.queue_item import QueueItem
 from gitlab_queue.utils.circuit_breaker import CircuitBreaker, CircuitState
 from gitlab_queue.webhooks.router import WebhookAppState, create_webhook_app
-from scenarios.contexts.sqlite_client import test_database
+from scenarios.contexts.sqlite_client import initialized_test_database
+from scenarios.library import Labels, QueueState
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -43,14 +54,14 @@ if TYPE_CHECKING:
 # =============================================================================
 
 
-def create_mock_settings(
+def created_mock_settings(
     *,
     jwt_secret: str = "test-secret-key-for-jwt-tokens-12345",
     jwt_expiration_hours: int = 24,
     gitlab_url: str = "https://gitlab.example.com",
     gitlab_project_id: int = 123,
-    queue_label: str = "merge_queue",
-    hotfix_label: str = "hotfix",
+    queue_label: str = Labels.MERGE_QUEUE,
+    hotfix_label: str = Labels.HOTFIX,
     oauth_client_id: str | None = "test-client-id",
     oauth_client_secret: str | None = "test-client-secret",
     oauth_redirect_uri: str | None = "http://localhost:8080/auth/callback",
@@ -71,7 +82,7 @@ def create_mock_settings(
         webhook_secret: Webhook validation secret.
 
     Returns:
-        MagicMock: Mock settings object.
+        MagicMock: Mock settings object with all required attributes configured.
     """
     settings = MagicMock()
     settings.jwt_secret = Secret(jwt_secret)
@@ -89,10 +100,15 @@ def create_mock_settings(
     settings.oauth_client_secret = oauth_client_secret
     settings.oauth_redirect_uri = oauth_redirect_uri
     settings.webhook_secret = Secret(webhook_secret) if webhook_secret else None
+    assert settings.jwt_secret is not None, "Settings should have jwt_secret"
     return settings
 
 
-def create_mock_database(*, connected: bool = True, wal_mode: bool = True) -> MagicMock:
+# Alias for backward compatibility
+create_mock_settings = created_mock_settings
+
+
+def created_mock_database(*, connected: bool = True, wal_mode: bool = True) -> MagicMock:
     """Create mock database with configurable health status.
 
     Args:
@@ -100,7 +116,7 @@ def create_mock_database(*, connected: bool = True, wal_mode: bool = True) -> Ma
         wal_mode: Whether WAL mode is enabled.
 
     Returns:
-        MagicMock: Mock database object.
+        MagicMock: Mock database object with health_check configured.
     """
     db = MagicMock()
     db.health_check = AsyncMock(
@@ -112,10 +128,15 @@ def create_mock_database(*, connected: bool = True, wal_mode: bool = True) -> Ma
             error=None if connected else "Connection failed",
         )
     )
+    assert db.health_check is not None, "Mock database should have health_check"
     return db
 
 
-def create_mock_circuit_breaker(state: CircuitState = CircuitState.CLOSED) -> MagicMock:
+# Alias for backward compatibility
+create_mock_database = created_mock_database
+
+
+def created_mock_circuit_breaker(state: CircuitState = CircuitState.CLOSED) -> MagicMock:
     """Create mock circuit breaker with configurable state.
 
     Args:
@@ -133,35 +154,49 @@ def create_mock_circuit_breaker(state: CircuitState = CircuitState.CLOSED) -> Ma
     return cb
 
 
-def create_mock_gitlab_client(*, circuit_state: CircuitState = CircuitState.CLOSED) -> MagicMock:
+# Alias for backward compatibility
+create_mock_circuit_breaker = created_mock_circuit_breaker
+
+
+def created_mock_gitlab_client(*, circuit_state: CircuitState = CircuitState.CLOSED) -> MagicMock:
     """Create mock GitLab client with circuit breaker.
 
     Args:
         circuit_state: Circuit breaker state.
 
     Returns:
-        MagicMock: Mock GitLab client.
+        MagicMock: Mock GitLab client with circuit_breaker and rate_limit_state configured.
     """
     client = MagicMock()
-    client.circuit_breaker = create_mock_circuit_breaker(circuit_state)
+    client.circuit_breaker = created_mock_circuit_breaker(circuit_state)
     client.rate_limit_state = MagicMock()
     client.rate_limit_state.limit = 2000
     client.rate_limit_state.remaining = 1900
     client.rate_limit_state.usage_ratio = 0.05
     client.rate_limit_state.seconds_until_reset = 3600
+    assert client.circuit_breaker is not None, "Client should have circuit_breaker"
     return client
 
 
-def create_mock_queue_manager() -> MagicMock:
+# Alias for backward compatibility
+create_mock_gitlab_client = created_mock_gitlab_client
+
+
+def created_mock_queue_manager() -> MagicMock:
     """Create mock queue manager.
 
     Returns:
-        MagicMock: Mock queue manager.
+        MagicMock: Mock queue manager with async methods configured.
     """
     qm = MagicMock()
     qm.get_active_queue = AsyncMock(return_value=[])
     qm.get_queue_stats = AsyncMock(
-        return_value={"queued": 0, "rebasing": 0, "testing": 0, "merging": 0}
+        return_value={
+            QueueState.QUEUED: 0,
+            QueueState.REBASING: 0,
+            QueueState.TESTING: 0,
+            QueueState.MERGING: 0,
+        }
     )
     qm.get_recent_history = AsyncMock(return_value=[])
     qm.get_dashboard_stats = AsyncMock(
@@ -175,10 +210,15 @@ def create_mock_queue_manager() -> MagicMock:
             avg_processing_seconds=0,
         )
     )
+    assert qm.get_active_queue is not None, "Queue manager should have get_active_queue"
     return qm
 
 
-def create_mock_notifier() -> MagicMock:
+# Alias for backward compatibility
+create_mock_queue_manager = created_mock_queue_manager
+
+
+def created_mock_notifier() -> MagicMock:
     """Create mock MR notifier.
 
     Returns:
@@ -187,11 +227,15 @@ def create_mock_notifier() -> MagicMock:
     return MagicMock()
 
 
-def create_mock_retry_manager() -> MagicMock:
+# Alias for backward compatibility
+create_mock_notifier = created_mock_notifier
+
+
+def created_mock_retry_manager() -> MagicMock:
     """Create mock webhook retry manager.
 
     Returns:
-        MagicMock: Mock retry manager.
+        MagicMock: Mock retry manager with DLQ methods configured.
     """
     manager = MagicMock()
     manager.get_dlq_entries = AsyncMock(return_value=[])
@@ -205,7 +249,11 @@ def create_mock_retry_manager() -> MagicMock:
     return manager
 
 
-def create_mock_health(
+# Alias for backward compatibility
+create_mock_retry_manager = created_mock_retry_manager
+
+
+def created_mock_health(
     *,
     db_healthy: bool = True,
     gitlab_circuit_state: CircuitState = CircuitState.CLOSED,
@@ -217,7 +265,7 @@ def create_mock_health(
         gitlab_circuit_state: GitLab circuit breaker state.
 
     Returns:
-        ApplicationHealth: Health state object.
+        ApplicationHealth: Health state object with all components configured.
     """
     health = ApplicationHealth()
     health.database = ComponentStatus.HEALTHY if db_healthy else ComponentStatus.UNHEALTHY
@@ -244,7 +292,12 @@ def create_mock_health(
             failure_count=5,
         )
 
+    assert health.gitlab is not None, "Health should have gitlab status"
     return health
+
+
+# Alias for backward compatibility
+create_mock_health = created_mock_health
 
 
 # =============================================================================
@@ -252,7 +305,7 @@ def create_mock_health(
 # =============================================================================
 
 
-def create_test_jwt(
+def created_test_jwt(
     settings: MagicMock,
     *,
     user_id: int = 12345,
@@ -296,27 +349,37 @@ def create_test_jwt(
         "iat": now,
     }
 
-    return jwt.encode(
+    token = jwt.encode(
         payload,
         settings.jwt_secret.get_secret_value(),
         algorithm="HS256",
     )
+    assert token, "JWT token should be created"
+    return token
 
 
-def create_expired_jwt(settings: MagicMock, **kwargs: Any) -> str:
+# Alias for backward compatibility
+create_test_jwt = created_test_jwt
+
+
+def created_expired_jwt(settings: MagicMock, **kwargs: Any) -> str:
     """Create an expired JWT token for testing.
 
     Args:
         settings: Mock settings with jwt_secret.
-        **kwargs: Additional arguments passed to create_test_jwt.
+        **kwargs: Additional arguments passed to created_test_jwt.
 
     Returns:
         str: Expired JWT token.
     """
-    return create_test_jwt(settings, expires_delta=timedelta(hours=-1), **kwargs)
+    return created_test_jwt(settings, expires_delta=timedelta(hours=-1), **kwargs)
 
 
-def create_invalid_jwt() -> str:
+# Alias for backward compatibility
+create_expired_jwt = created_expired_jwt
+
+
+def created_invalid_jwt() -> str:
     """Create an invalid JWT token for testing.
 
     Returns:
@@ -325,12 +388,16 @@ def create_invalid_jwt() -> str:
     return "invalid.jwt.token"
 
 
+# Alias for backward compatibility
+create_invalid_jwt = created_invalid_jwt
+
+
 # =============================================================================
 # Test App Factory
 # =============================================================================
 
 
-def create_webhook_state(
+def created_webhook_state(
     *,
     settings: MagicMock | None = None,
     database: MagicMock | None = None,
@@ -346,24 +413,30 @@ def create_webhook_state(
         gitlab_circuit_state: GitLab circuit breaker state.
 
     Returns:
-        WebhookAppState: Configured app state.
+        WebhookAppState: Configured app state with all dependencies.
     """
-    return WebhookAppState(
-        settings=settings or create_mock_settings(),
-        database=database or create_mock_database(connected=db_healthy),
-        gitlab_client=create_mock_gitlab_client(circuit_state=gitlab_circuit_state),
-        queue_manager=create_mock_queue_manager(),
-        notifier=create_mock_notifier(),
-        retry_manager=create_mock_retry_manager(),
-        health=create_mock_health(
+    state = WebhookAppState(
+        settings=settings or created_mock_settings(),
+        database=database or created_mock_database(connected=db_healthy),
+        gitlab_client=created_mock_gitlab_client(circuit_state=gitlab_circuit_state),
+        queue_manager=created_mock_queue_manager(),
+        notifier=created_mock_notifier(),
+        retry_manager=created_mock_retry_manager(),
+        health=created_mock_health(
             db_healthy=db_healthy,
             gitlab_circuit_state=gitlab_circuit_state,
         ),
         websocket_manager=WebSocketManager(),
     )
+    assert state.settings is not None, "State should have settings"
+    return state
 
 
-def create_test_app(
+# Alias for backward compatibility
+create_webhook_state = created_webhook_state
+
+
+def created_test_app(
     *,
     settings: MagicMock | None = None,
     database: MagicMock | None = None,
@@ -381,39 +454,52 @@ def create_test_app(
     Returns:
         Tuple of (FastAPI app, WebhookAppState).
     """
-    state = create_webhook_state(
+    state = created_webhook_state(
         settings=settings,
         database=database,
         db_healthy=db_healthy,
         gitlab_circuit_state=gitlab_circuit_state,
     )
     app = create_webhook_app(state)
+    assert app is not None, "App should be created"
     return app, state
 
 
+# Alias for backward compatibility
+create_test_app = created_test_app
+
+
+@vedro.context
 @asynccontextmanager
-async def create_test_app_with_db() -> AsyncIterator[tuple[FastAPI, WebhookAppState, Database]]:
+async def created_test_app_with_db() -> AsyncIterator[tuple[FastAPI, WebhookAppState, Database]]:
     """Create a test FastAPI app with real in-memory database.
 
     This provides a fully functional app with real database for integration testing.
+    Includes guaranteeing assertion that app and database are properly initialized.
 
     Yields:
         Tuple of (FastAPI app, WebhookAppState, Database).
     """
-    async with test_database() as db:
-        settings = create_mock_settings()
+    async with initialized_test_database() as db:
+        settings = created_mock_settings()
         state = WebhookAppState(
             settings=settings,
             database=db,
-            gitlab_client=create_mock_gitlab_client(),
-            queue_manager=create_mock_queue_manager(),
-            notifier=create_mock_notifier(),
-            retry_manager=create_mock_retry_manager(),
-            health=create_mock_health(),
+            gitlab_client=created_mock_gitlab_client(),
+            queue_manager=created_mock_queue_manager(),
+            notifier=created_mock_notifier(),
+            retry_manager=created_mock_retry_manager(),
+            health=created_mock_health(),
             websocket_manager=WebSocketManager(),
         )
         app = create_webhook_app(state)
+        assert app is not None, "Test app should be created"
+        assert state.database is not None, "State should have database"
         yield app, state, db
+
+
+# Alias for backward compatibility
+create_test_app_with_db = created_test_app_with_db
 
 
 # =============================================================================
@@ -421,14 +507,14 @@ async def create_test_app_with_db() -> AsyncIterator[tuple[FastAPI, WebhookAppSt
 # =============================================================================
 
 
-def create_test_queue_item(
+def created_test_queue_item(
     *,
     mr_iid: int = 42,
     title: str = "Test MR",
     author_name: str = "Test Author",
     author_username: str = "testauthor",
     author_avatar: str | None = "https://example.com/avatar.png",
-    state: str = "queued",
+    state: str = QueueState.QUEUED,
     is_hotfix: bool = False,
     labels: list[str] | None = None,
     target_branch: str = "main",
@@ -461,9 +547,9 @@ def create_test_queue_item(
         retry_count: Retry count.
 
     Returns:
-        QueueItem: Test queue item.
+        QueueItem: Test queue item with all fields configured.
     """
-    return QueueItem(
+    item = QueueItem(
         mr_iid=mr_iid,
         title=title,
         author_name=author_name,
@@ -471,7 +557,7 @@ def create_test_queue_item(
         author_avatar=author_avatar,
         state=state,
         is_hotfix=is_hotfix,
-        labels=labels or ["merge_queue"],
+        labels=labels or [Labels.MERGE_QUEUE],
         target_branch=target_branch,
         queued_at=queued_at or datetime.now(UTC),
         started_at=started_at,
@@ -481,9 +567,15 @@ def create_test_queue_item(
         last_error=last_error,
         retry_count=retry_count,
     )
+    assert item.mr_iid == mr_iid, "Queue item should have correct mr_iid"
+    return item
 
 
-def create_test_history_items(count: int = 5) -> list[QueueItem]:
+# Alias for backward compatibility
+create_test_queue_item = created_test_queue_item
+
+
+def created_test_history_items(count: int = 5) -> list[QueueItem]:
     """Create a list of test history items.
 
     Args:
@@ -493,7 +585,7 @@ def create_test_history_items(count: int = 5) -> list[QueueItem]:
         List of QueueItem objects representing completed MRs.
     """
     items = []
-    statuses = ["merged", "failed", "conflict", "timeout"]
+    statuses = [QueueState.MERGED, QueueState.FAILED, QueueState.CONFLICT, "timeout"]
 
     for i in range(count):
         status = statuses[i % len(statuses)]
@@ -502,21 +594,27 @@ def create_test_history_items(count: int = 5) -> list[QueueItem]:
         started_at = queued_at + timedelta(minutes=5)
 
         items.append(
-            create_test_queue_item(
+            created_test_queue_item(
                 mr_iid=100 + i,
                 title=f"Test MR #{100 + i}",
                 state=status,
                 queued_at=queued_at,
                 started_at=started_at,
                 finished_at=finished_at,
-                last_error=f"Test error for {status}" if status != "merged" else None,
+                last_error=f"Test error for {status}" if status != QueueState.MERGED else None,
             )
         )
 
+    assert len(items) == count, f"Should create {count} history items"
     return items
 
 
+# Alias for backward compatibility
+create_test_history_items = created_test_history_items
+
+
 __all__ = [
+    # Aliases for backward compatibility
     "create_expired_jwt",
     "create_invalid_jwt",
     "create_mock_circuit_breaker",
@@ -533,4 +631,21 @@ __all__ = [
     "create_test_jwt",
     "create_test_queue_item",
     "create_webhook_state",
+    # New names (preferred)
+    "created_expired_jwt",
+    "created_invalid_jwt",
+    "created_mock_circuit_breaker",
+    "created_mock_database",
+    "created_mock_gitlab_client",
+    "created_mock_health",
+    "created_mock_notifier",
+    "created_mock_queue_manager",
+    "created_mock_retry_manager",
+    "created_mock_settings",
+    "created_test_app",
+    "created_test_app_with_db",
+    "created_test_history_items",
+    "created_test_jwt",
+    "created_test_queue_item",
+    "created_webhook_state",
 ]

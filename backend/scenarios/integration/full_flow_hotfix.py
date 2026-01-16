@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import jj
 from jj.mock import mocked
-from scenarios.contexts.gitlab_client_factory import create_test_settings
+from scenarios.contexts.gitlab_client_factory import created_test_settings
 from scenarios.contexts.jj_gitlab_mock import get_mock_url
-from scenarios.contexts.sqlite_client import test_database
+from scenarios.contexts.sqlite_client import initialized_test_database
 from vedro import given, scenario, then, when
 
 from gitlab_queue.clients.gitlab import GitLabClient
@@ -48,13 +48,13 @@ def create_mr_data(mr_iid: int, is_hotfix: bool = False, project_id: int = 123) 
 async def hotfix_jumps_to_front_of_queue():
     """Test that hotfix MR is processed before regular MRs."""
 
-    async with test_database() as db:
+    async with initialized_test_database() as db:
         with given("2 regular MRs in queue, then hotfix arrives"):
             queue = QueueManager(db)
             await queue.ensure_schema()
 
             mock_url = get_mock_url()
-            settings = create_test_settings(mock_url)
+            settings = created_test_settings(mock_url)
 
             # Add 2 regular MRs first
             for mr_iid in [10, 20]:
@@ -206,13 +206,13 @@ async def hotfix_jumps_to_front_of_queue():
 async def hotfix_priority_with_processing_continues():
     """Test that after hotfix, regular MRs continue in FIFO order."""
 
-    async with test_database() as db:
+    async with initialized_test_database() as db:
         with given("2 regular MRs and 1 hotfix in queue"):
             queue = QueueManager(db)
             await queue.ensure_schema()
 
             mock_url = get_mock_url()
-            settings = create_test_settings(mock_url)
+            settings = created_test_settings(mock_url)
 
             # Add regular MR 10
             mr_10 = MergeRequest(
