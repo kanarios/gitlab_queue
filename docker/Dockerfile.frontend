@@ -48,8 +48,9 @@ FROM nginx:1.27-alpine
 # Remove default nginx config
 RUN rm /etc/nginx/conf.d/default.conf
 
-# Copy custom nginx configuration from docker directory
+# Copy custom nginx configuration and entrypoint from docker directory
 COPY docker/nginx.conf /etc/nginx/nginx.conf
+COPY docker/docker-entrypoint.sh /docker-entrypoint.sh
 
 # Copy built assets from builder stage
 COPY --from=builder /app/dist /usr/share/nginx/html
@@ -62,7 +63,9 @@ RUN addgroup -g 1001 -S appgroup && \
     chown -R appuser:appgroup /etc/nginx && \
     # Create nginx temp directories for non-root user (matching nginx.conf paths)
     mkdir -p /tmp/client_temp /tmp/proxy_temp /tmp/fastcgi_temp /tmp/uwsgi_temp /tmp/scgi_temp && \
-    chown -R appuser:appgroup /tmp/client_temp /tmp/proxy_temp /tmp/fastcgi_temp /tmp/uwsgi_temp /tmp/scgi_temp
+    chown -R appuser:appgroup /tmp/client_temp /tmp/proxy_temp /tmp/fastcgi_temp /tmp/uwsgi_temp /tmp/scgi_temp && \
+    # Make entrypoint executable
+    chmod +x /docker-entrypoint.sh
 
 # Expose port 80
 EXPOSE 80
@@ -74,5 +77,6 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 # Run as non-root user
 USER appuser
 
-# Start nginx
+# Use custom entrypoint to configure DNS resolver at runtime
+ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["nginx", "-g", "daemon off;"]
