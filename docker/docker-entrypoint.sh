@@ -19,12 +19,17 @@ fi
 # Kubernetes: backend.<namespace>.svc.cluster.local:8080 (set via BACKEND_URL env var)
 BACKEND_URL="${BACKEND_URL:-backend:8080}"
 
+# Escape special sed characters in BACKEND_URL to prevent injection
+# - & is replaced with \& (& has special meaning in sed replacement)
+# - # is replaced with \# (we use # as delimiter)
+ESCAPED_BACKEND_URL=$(printf '%s' "$BACKEND_URL" | sed 's/[&#]/\\&/g')
+
 echo "Using DNS resolvers: $RESOLVERS"
 echo "Using backend URL: $BACKEND_URL"
 
 # Replace placeholders in nginx config (using # as delimiter to avoid issues with /)
 sed -i "s#__RESOLVER__#$RESOLVERS#g" /etc/nginx/nginx.conf
-sed -i "s#__BACKEND_URL__#$BACKEND_URL#g" /etc/nginx/nginx.conf
+sed -i "s#__BACKEND_URL__#$ESCAPED_BACKEND_URL#g" /etc/nginx/nginx.conf
 
 # Execute the original command (nginx)
 exec "$@"
