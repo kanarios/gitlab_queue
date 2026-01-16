@@ -215,6 +215,12 @@ _DELETE_MR_SQL = """
 DELETE FROM merge_requests WHERE iid = :iid
 """
 
+_UPDATE_HOTFIX_STATUS_SQL = """
+UPDATE merge_requests
+SET is_hotfix = :is_hotfix, labels = :labels
+WHERE iid = :iid
+"""
+
 
 # =============================================================================
 # Custom Exceptions
@@ -643,6 +649,56 @@ class QueueManager:
         else:
             log.warning("MR not found for state update", mr_iid=mr_iid)
             raise QueueItemNotFoundError(mr_iid)
+
+        return changed
+
+    async def update_hotfix_status(
+        self,
+        mr_iid: int,
+        is_hotfix: bool,
+        labels: list[str],
+    ) -> bool:
+        """Update the hotfix status and labels of an MR in the queue.
+
+        This is used when the hotfix label is added or removed from an MR
+        that is already in the queue.
+
+        Args:
+            mr_iid: The MR's internal ID.
+            is_hotfix: New hotfix status.
+            labels: Current labels on the MR.
+
+        Returns:
+            True if updated, False if MR not found.
+        """
+        log.debug(
+            "Updating MR hotfix status",
+            mr_iid=mr_iid,
+            is_hotfix=is_hotfix,
+            labels=labels,
+        )
+
+        labels_json = json.dumps(labels)
+
+        async with self.db.transaction() as session:
+            params = {
+                "iid": mr_iid,
+                "is_hotfix": 1 if is_hotfix else 0,
+                "labels": labels_json,
+            }
+            cursor_result = await session.execute(text(_UPDATE_HOTFIX_STATUS_SQL), params)
+            changed: bool = cursor_result.rowcount > 0  # type: ignore[attr-defined]
+
+        if changed:
+            self._cache.invalidate()
+            OPERATIONS_TOTAL.labels(type="update", status="success").inc()
+            log.info(
+                "MR hotfix status updated",
+                mr_iid=mr_iid,
+                is_hotfix=is_hotfix,
+            )
+        else:
+            log.debug("MR not found for hotfix status update", mr_iid=mr_iid)
 
         return changed
 

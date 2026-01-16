@@ -125,6 +125,7 @@ def create_mock_queue_manager():
     qm.remove_from_queue = AsyncMock(return_value=True)
     qm.get_queue_item = AsyncMock(return_value=None)
     qm.update_mr_state = AsyncMock(return_value=True)
+    qm.update_hotfix_status = AsyncMock(return_value=True)
     return qm
 
 

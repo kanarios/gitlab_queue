@@ -43,5 +43,12 @@ class Scenario(vedro.Scenario):
     def then_mr_should_not_be_removed_from_queue(self):
         self.queue_manager.remove_from_queue.assert_not_called()
 
+    def and_hotfix_status_should_be_updated(self):
+        self.queue_manager.update_hotfix_status.assert_called_once_with(
+            mr_iid=123,
+            is_hotfix=False,
+            labels=["merge_queue"],
+        )
+
     async def cleanup(self):
         await self.gitlab_client.close()
