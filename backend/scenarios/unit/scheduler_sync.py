@@ -390,9 +390,7 @@ async def sync_handles_404_mr_not_found():
         gitlab_client.list_mrs_with_label = AsyncMock(return_value=[])
 
         # MR no longer exists (404)
-        gitlab_client.get_mr = AsyncMock(
-            side_effect=GitLabNotFoundError("MR not found", status_code=404)
-        )
+        gitlab_client.get_mr = AsyncMock(side_effect=GitLabNotFoundError("MR not found", status_code=404))
 
         # Queue contains the missing MR
         queue_item = Mock(

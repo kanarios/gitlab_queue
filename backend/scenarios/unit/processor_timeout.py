@@ -131,9 +131,7 @@ async def process_mr_with_rebase_timeout():
 
             # Verify state
             mr_state = await queue.get_mr_state(60)
-            assert (
-                mr_state["status"] == "timeout"
-            ), f"MR should be timeout after rebase timeout, got {mr_state}"
+            assert mr_state["status"] == "timeout", f"MR should be timeout after rebase timeout, got {mr_state}"
 
 
 @scenario()

@@ -1,11 +1,12 @@
 """Test: handle merge action cleans up queue."""
 
 import vedro
+from scenarios.library import Labels
 
 from gitlab_queue.webhooks.handlers import MRWebhookHandler
 
 from ._helpers import (
-    create_mock_gitlab_client,
+    create_gitlab_client_with_transport,
     create_mock_queue_manager,
     create_mr_event,
     created_mock_settings,
@@ -17,17 +18,24 @@ class Scenario(vedro.Scenario):
 
     def given_handler(self):
         self.settings = created_mock_settings()
-        self.gitlab_client = create_mock_gitlab_client()
+        self.gitlab_client, self.transport = create_gitlab_client_with_transport(
+            mr_iid=123,
+            state="merged",
+            labels=[Labels.MERGE_QUEUE],
+        )
         self.queue_manager = create_mock_queue_manager()
         self.handler = MRWebhookHandler(
             settings=self.settings,
             gitlab_client=self.gitlab_client,
             queue_manager=self.queue_manager,
         )
-        self.event = create_mr_event(action="merge", state="merged")
+        self.event = create_mr_event(iid=123, action="merge", state="merged")
 
     async def when_event_is_handled(self):
         await self.handler.handle(self.event)
 
     def then_mr_should_be_removed_from_queue(self):
         self.queue_manager.remove_from_queue.assert_called_once_with(123)
+
+    async def cleanup(self):
+        await self.gitlab_client.close()

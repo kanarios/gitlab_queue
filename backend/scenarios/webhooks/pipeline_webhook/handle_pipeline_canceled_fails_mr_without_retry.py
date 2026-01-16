@@ -7,7 +7,7 @@ import vedro
 from gitlab_queue.webhooks.handlers import PipelineWebhookHandler
 
 from ._helpers import (
-    create_mock_gitlab_client,
+    create_gitlab_client_with_transport,
     create_mock_notifier,
     create_mock_queue_manager,
     create_pipeline_event,
@@ -21,16 +21,19 @@ class Scenario(vedro.Scenario):
 
     def given_handler_and_event(self):
         self.settings = created_mock_settings()
+        self.gitlab_client, self.transport = create_gitlab_client_with_transport()
         self.queue_manager = create_mock_queue_manager()
-        self.queue_manager.get_queue_item = AsyncMock(return_value=create_queue_item_in_state("testing", retry_count=0))
+        self.queue_manager.get_queue_item = AsyncMock(
+            return_value=create_queue_item_in_state("testing", retry_count=0, mr_iid=123)
+        )
         self.notifier = create_mock_notifier()
         self.handler = PipelineWebhookHandler(
             settings=self.settings,
-            gitlab_client=create_mock_gitlab_client(),
+            gitlab_client=self.gitlab_client,
             queue_manager=self.queue_manager,
             notifier=self.notifier,
         )
-        self.event = create_pipeline_event(status="canceled")
+        self.event = create_pipeline_event(mr_iid=123, status="canceled")
 
     async def when_event_is_handled(self):
         with patch("gitlab_queue.webhooks.handlers.create_state_machine_for_mr") as mock_sm:
@@ -42,3 +45,6 @@ class Scenario(vedro.Scenario):
 
     def then_pipeline_failed_should_be_triggered(self):
         self.mock_state_machine.trigger_pipeline_failed.assert_called_once()
+
+    async def cleanup(self):
+        await self.gitlab_client.close()

@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import vedro
-from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, create_test_client
-from scenarios.contexts.jj_gitlab_mock import mocked_gitlab_update_comment
+from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, created_test_client
+from scenarios.transports import GitLabMockTransport
+from scenarios.transports.responses import note_response
 
 
 class Scenario(vedro.Scenario):
     subject = "update_comment modifies existing note"
 
-    async def given_mock_gitlab_for_updating_comment(self):
-        self._mock_ctx = mocked_gitlab_update_comment(TEST_PROJECT_ID, 42, note_id=456)
-        await self._mock_ctx.__aenter__()
-        self.client = create_test_client()
+    def given_mock_gitlab_for_updating_comment(self):
+        self.transport = GitLabMockTransport()
+        self.transport.register_put(
+            f"/api/v4/projects/{TEST_PROJECT_ID}/merge_requests/42/notes/456",
+            json_data=note_response(note_id=456, body="Updated comment body"),
+        )
+        self.client = created_test_client(transport=self.transport)
 
     async def when_update_comment_is_called(self):
         self.result = await self.client.update_comment(42, 456, "Updated comment body")
@@ -26,4 +30,3 @@ class Scenario(vedro.Scenario):
 
     async def do_cleanup(self):
         await self.client.close()
-        await self._mock_ctx.__aexit__(None, None, None)
