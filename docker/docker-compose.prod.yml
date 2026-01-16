@@ -1,0 +1,78 @@
+# =============================================================================
+# Production Docker Compose for GitLab Merge Queue Bot
+# =============================================================================
+#
+# This compose file uses pre-built images from GitHub Container Registry.
+# No need to clone the repository - just download this file and run!
+#
+# Quick Start:
+#   1. Download this file and Caddyfile to a directory
+#   2. Create .env file with your configuration (see .env.example)
+#   3. Run: docker compose -f docker-compose.prod.yml up -d
+#
+# =============================================================================
+
+services:
+  backend:
+    image: ghcr.io/kanarios/gitlab_queue-backend:latest
+    container_name: gitlab-queue-backend
+    environment:
+      # Required
+      GITLAB_QUEUE_GITLAB_TOKEN: ${GITLAB_QUEUE_GITLAB_TOKEN}
+      GITLAB_QUEUE_GITLAB_PROJECT_ID: ${GITLAB_QUEUE_GITLAB_PROJECT_ID}
+      GITLAB_QUEUE_JWT_SECRET: ${GITLAB_QUEUE_JWT_SECRET}
+      GITLAB_QUEUE_WEBHOOK_SECRET: ${GITLAB_QUEUE_WEBHOOK_SECRET}
+      # Server settings
+      GITLAB_QUEUE_WEBHOOK_HOST: "0.0.0.0"
+      GITLAB_QUEUE_DATABASE_URL: "sqlite+aiosqlite:////app/data/queue.db"
+      # Optional - GitLab connection
+      GITLAB_QUEUE_GITLAB_URL: ${GITLAB_QUEUE_GITLAB_URL:-https://gitlab.com}
+      GITLAB_QUEUE_TARGET_BRANCH: ${GITLAB_QUEUE_TARGET_BRANCH:-master}
+      GITLAB_QUEUE_QUEUE_LABEL: ${GITLAB_QUEUE_QUEUE_LABEL:-merge_queue}
+      GITLAB_QUEUE_HOTFIX_LABEL: ${GITLAB_QUEUE_HOTFIX_LABEL:-hotfix}
+      # Optional - OAuth (for dashboard authentication)
+      GITLAB_QUEUE_OAUTH_CLIENT_ID: ${GITLAB_QUEUE_OAUTH_CLIENT_ID:-}
+      GITLAB_QUEUE_OAUTH_CLIENT_SECRET: ${GITLAB_QUEUE_OAUTH_CLIENT_SECRET:-}
+      GITLAB_QUEUE_OAUTH_REDIRECT_URI: ${GITLAB_QUEUE_OAUTH_REDIRECT_URI:-}
+      # Optional - Logging
+      GITLAB_QUEUE_LOG_LEVEL: ${GITLAB_QUEUE_LOG_LEVEL:-INFO}
+      GITLAB_QUEUE_LOG_FORMAT: ${GITLAB_QUEUE_LOG_FORMAT:-json}
+    volumes:
+      - queue-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  frontend:
+    image: ghcr.io/kanarios/gitlab_queue-frontend:latest
+    container_name: gitlab-queue-frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: gitlab-queue-caddy
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    ports:
+      - "${PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+
+volumes:
+  queue-data:
+  caddy-data:
+  caddy-config:

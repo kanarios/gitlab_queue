@@ -105,32 +105,18 @@ async def hotfix_jumps_to_front_of_queue():
             get_mr_99_response = jj.Response(status=200, json=hotfix_data)
 
             # Rebase matchers
-            rebase_any_matcher = jj.match(
-                "PUT", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/rebase")
-            )
+            rebase_any_matcher = jj.match("PUT", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/rebase"))
             rebase_response = jj.Response(status=202, json={"rebase_in_progress": False})
 
             # Pipeline matchers
-            pipelines_10_matcher = jj.match(
-                "GET", "/api/v4/projects/123/merge_requests/10/pipelines"
-            )
-            pipelines_10_response = jj.Response(
-                status=200, json=[{"id": 100, "status": "success", "sha": "sha_10"}]
-            )
+            pipelines_10_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/10/pipelines")
+            pipelines_10_response = jj.Response(status=200, json=[{"id": 100, "status": "success", "sha": "sha_10"}])
 
-            pipelines_20_matcher = jj.match(
-                "GET", "/api/v4/projects/123/merge_requests/20/pipelines"
-            )
-            pipelines_20_response = jj.Response(
-                status=200, json=[{"id": 200, "status": "success", "sha": "sha_20"}]
-            )
+            pipelines_20_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/20/pipelines")
+            pipelines_20_response = jj.Response(status=200, json=[{"id": 200, "status": "success", "sha": "sha_20"}])
 
-            pipelines_99_matcher = jj.match(
-                "GET", "/api/v4/projects/123/merge_requests/99/pipelines"
-            )
-            pipelines_99_response = jj.Response(
-                status=200, json=[{"id": 990, "status": "success", "sha": "sha_99"}]
-            )
+            pipelines_99_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/99/pipelines")
+            pipelines_99_response = jj.Response(status=200, json=[{"id": 990, "status": "success", "sha": "sha_99"}])
 
             # Merge matchers
             merge_10_matcher = jj.match("PUT", "/api/v4/projects/123/merge_requests/10/merge")
@@ -143,15 +129,11 @@ async def hotfix_jumps_to_front_of_queue():
             merge_99_response = jj.Response(status=200, json={**hotfix_data, "state": "merged"})
 
             # GET notes (for finding existing bot comments)
-            get_notes_matcher = jj.match(
-                "GET", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes")
-            )
+            get_notes_matcher = jj.match("GET", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes"))
             get_notes_response = jj.Response(status=200, json=[])
 
             # Comment matcher (generic)
-            comment_matcher = jj.match(
-                "POST", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes")
-            )
+            comment_matcher = jj.match("POST", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes"))
             comment_response = jj.Response(status=201, json={"id": 1})
 
         async with (
@@ -299,17 +281,11 @@ async def hotfix_priority_with_processing_continues():
             get_mr_20 = jj.match("GET", "/api/v4/projects/123/merge_requests/20")
             get_mr_99 = jj.match("GET", "/api/v4/projects/123/merge_requests/99")
 
-            rebase_matcher = jj.match(
-                "PUT", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/rebase")
-            )
+            rebase_matcher = jj.match("PUT", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/rebase"))
             rebase_response = jj.Response(status=202, json={"rebase_in_progress": False})
 
-            pipelines_matcher = jj.match(
-                "GET", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/pipelines")
-            )
-            pipelines_response = jj.Response(
-                status=200, json=[{"id": 1, "status": "success", "sha": "sha"}]
-            )
+            pipelines_matcher = jj.match("GET", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/pipelines"))
+            pipelines_response = jj.Response(status=200, json=[{"id": 1, "status": "success", "sha": "sha"}])
 
             # Merge matchers - need separate matchers with full MR data for each
             merge_10_matcher = jj.match("PUT", "/api/v4/projects/123/merge_requests/10/merge")
@@ -322,14 +298,10 @@ async def hotfix_priority_with_processing_continues():
             merge_99_response = jj.Response(status=200, json={**mr_99_data, "state": "merged"})
 
             # GET notes (for finding existing bot comments)
-            get_notes_matcher = jj.match(
-                "GET", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes")
-            )
+            get_notes_matcher = jj.match("GET", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes"))
             get_notes_response = jj.Response(status=200, json=[])
 
-            comment_matcher = jj.match(
-                "POST", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes")
-            )
+            comment_matcher = jj.match("POST", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes"))
             comment_response = jj.Response(status=201, json={"id": 1})
 
         async with (

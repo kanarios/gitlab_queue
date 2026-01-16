@@ -7,7 +7,7 @@ import vedro
 from gitlab_queue.webhooks.handlers import PipelineWebhookHandler
 
 from ._helpers import (
-    create_mock_gitlab_client,
+    create_gitlab_client_with_transport,
     create_mock_notifier,
     create_mock_queue_manager,
     create_pipeline_event,
@@ -22,15 +22,18 @@ class Scenario(vedro.Scenario):
     def given_handler_and_event(self):
         self.settings = created_mock_settings()
         self.settings.pipeline_retry_count = 3
+        self.gitlab_client, self.transport = create_gitlab_client_with_transport()
         self.queue_manager = create_mock_queue_manager()
-        self.queue_manager.get_queue_item = AsyncMock(return_value=create_queue_item_in_state("testing", retry_count=1))
+        self.queue_manager.get_queue_item = AsyncMock(
+            return_value=create_queue_item_in_state("testing", retry_count=1, mr_iid=123)
+        )
         self.handler = PipelineWebhookHandler(
             settings=self.settings,
-            gitlab_client=create_mock_gitlab_client(),
+            gitlab_client=self.gitlab_client,
             queue_manager=self.queue_manager,
             notifier=create_mock_notifier(),
         )
-        self.event = create_pipeline_event(status="failed")
+        self.event = create_pipeline_event(mr_iid=123, status="failed")
 
     async def when_event_is_handled(self):
         await self.handler.handle(self.event)
@@ -41,3 +44,6 @@ class Scenario(vedro.Scenario):
             "testing",
             pipeline_status="failed",
         )
+
+    async def cleanup(self):
+        await self.gitlab_client.close()

@@ -5,12 +5,12 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import vedro
-from scenarios.library import QueueState
 from scenarios.contexts.api_helpers import (
     create_test_queue_item,
     created_test_app,
     created_test_jwt,
 )
+from scenarios.library import QueueState
 from scenarios.schemas.status_code import OkStatusSchema
 from starlette.testclient import TestClient
 

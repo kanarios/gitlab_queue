@@ -123,9 +123,7 @@ async def webhook_pipeline_success_triggers_merge():
 
         # Pipelines for MR
         pipelines_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/200/pipelines")
-        pipelines_response = jj.Response(
-            status=200, json=[{"id": 6001, "status": "success", "sha": "ready123"}]
-        )
+        pipelines_response = jj.Response(status=200, json=[{"id": 6001, "status": "success", "sha": "ready123"}])
 
     async with (
         mocked(get_mr_matcher, get_mr_response),
@@ -255,12 +253,8 @@ async def webhook_pipeline_failure_triggers_retry():
         rebase_response = jj.Response(status=202, json={"rebase_in_progress": False})
 
         # Retry pipeline trigger
-        retry_pipeline_matcher = jj.match(
-            "POST", "/api/v4/projects/123/merge_requests/201/pipelines"
-        )
-        retry_pipeline_response = jj.Response(
-            status=201, json={"id": 6003, "status": "pending", "sha": "flaky456"}
-        )
+        retry_pipeline_matcher = jj.match("POST", "/api/v4/projects/123/merge_requests/201/pipelines")
+        retry_pipeline_response = jj.Response(status=201, json={"id": 6003, "status": "pending", "sha": "flaky456"})
 
         comment_matcher = jj.match("POST", "/api/v4/projects/123/merge_requests/201/notes")
         comment_response = jj.Response(status=201, json={"id": 61})

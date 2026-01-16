@@ -1,11 +1,12 @@
 """Test: detect queue label added."""
 
 import vedro
+from scenarios.library import Labels
 
 from gitlab_queue.webhooks.handlers import MRWebhookHandler
 
 from ._helpers import (
-    create_mock_gitlab_client,
+    create_gitlab_client_with_transport,
     create_mock_queue_manager,
     create_mr_event,
     created_mock_settings,
@@ -17,15 +18,17 @@ class Scenario(vedro.Scenario):
 
     def given_handler_and_event(self):
         self.settings = created_mock_settings()
+        self.gitlab_client, _ = create_gitlab_client_with_transport(mr_iid=123)
         self.handler = MRWebhookHandler(
             settings=self.settings,
-            gitlab_client=create_mock_gitlab_client(),
+            gitlab_client=self.gitlab_client,
             queue_manager=create_mock_queue_manager(),
         )
         self.event = create_mr_event(
+            iid=123,
             action="labeled",
             previous_labels=[],
-            current_labels=["merge_queue"],
+            current_labels=[Labels.MERGE_QUEUE],
         )
 
     def when_checking_if_queue_label_added(self):
@@ -33,3 +36,6 @@ class Scenario(vedro.Scenario):
 
     def then_it_should_return_true(self):
         assert self.result is True
+
+    async def cleanup(self):
+        await self.gitlab_client.close()

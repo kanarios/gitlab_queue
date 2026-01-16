@@ -3,8 +3,9 @@
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
-from gitlab_queue.models.mr import Author, MergeRequest
 from scenarios.library import Labels, MRState, QueueState
+
+from gitlab_queue.models.mr import Author, MergeRequest
 
 
 def create_mock_database() -> tuple[MagicMock, AsyncMock, AsyncMock]:

@@ -255,13 +255,26 @@ class GitLabClient:
     Attributes:
         base_url: GitLab API base URL (e.g., https://gitlab.com/api/v4)
         project_id: GitLab project ID for API requests
+
+    Example:
+        Production usage (default transport):
+            >>> client = GitLabClient(settings)
+
+        Testing with MockTransport:
+            >>> transport = httpx.MockTransport(handler)
+            >>> client = GitLabClient(settings, transport=transport)
     """
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
         """Initialize GitLab client with settings.
 
         Args:
             settings: Application settings with GitLab configuration.
+            transport: Optional custom transport for testing. If None, uses default.
         """
         self._settings = settings
         self._gitlab_url = settings.gitlab_url.rstrip("/")
@@ -280,6 +293,7 @@ class GitLabClient:
                 "Accept": "application/json",
             },
             timeout=httpx.Timeout(30.0, connect=10.0),
+            transport=transport,
         )
 
         # Initialize circuit breaker for API protection
