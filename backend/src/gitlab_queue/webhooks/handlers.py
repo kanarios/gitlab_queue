@@ -316,65 +316,48 @@ class MRWebhookHandler:
         except Exception as e:
             log.warning("Failed to broadcast queue update", error=str(e))
 
-    def _was_queue_label_added(self, event: MergeRequestEvent) -> bool:
-        """Check if queue label was added in this event.
+    def _was_label_changed(
+        self,
+        event: MergeRequestEvent,
+        label: str,
+        *,
+        added: bool,
+    ) -> bool:
+        """Check if a specific label was added or removed in this event.
 
         Args:
             event: The merge request webhook event.
+            label: The label to check for.
+            added: If True, check if label was added; if False, check if removed.
 
         Returns:
-            True if queue_label was added, False otherwise.
+            True if the label change occurred, False otherwise.
         """
         if not event.label_changes:
             return False
 
-        added = set(event.label_changes.current) - set(event.label_changes.previous)
-        return self.settings.queue_label in added
+        if added:
+            changed = set(event.label_changes.current) - set(event.label_changes.previous)
+        else:
+            changed = set(event.label_changes.previous) - set(event.label_changes.current)
+
+        return label in changed
+
+    def _was_queue_label_added(self, event: MergeRequestEvent) -> bool:
+        """Check if queue label was added in this event."""
+        return self._was_label_changed(event, self.settings.queue_label, added=True)
 
     def _was_queue_label_removed(self, event: MergeRequestEvent) -> bool:
-        """Check if queue label was removed in this event.
-
-        Args:
-            event: The merge request webhook event.
-
-        Returns:
-            True if queue_label was removed, False otherwise.
-        """
-        if not event.label_changes:
-            return False
-
-        removed = set(event.label_changes.previous) - set(event.label_changes.current)
-        return self.settings.queue_label in removed
+        """Check if queue label was removed in this event."""
+        return self._was_label_changed(event, self.settings.queue_label, added=False)
 
     def _was_hotfix_label_added(self, event: MergeRequestEvent) -> bool:
-        """Check if hotfix label was added in this event.
-
-        Args:
-            event: The merge request webhook event.
-
-        Returns:
-            True if hotfix_label was added, False otherwise.
-        """
-        if not event.label_changes:
-            return False
-
-        added = set(event.label_changes.current) - set(event.label_changes.previous)
-        return self.settings.hotfix_label in added
+        """Check if hotfix label was added in this event."""
+        return self._was_label_changed(event, self.settings.hotfix_label, added=True)
 
     def _was_hotfix_label_removed(self, event: MergeRequestEvent) -> bool:
-        """Check if hotfix label was removed in this event.
-
-        Args:
-            event: The merge request webhook event.
-
-        Returns:
-            True if hotfix_label was removed, False otherwise.
-        """
-        if not event.label_changes:
-            return False
-
-        removed = set(event.label_changes.previous) - set(event.label_changes.current)
-        return self.settings.hotfix_label in removed
+        """Check if hotfix label was removed in this event."""
+        return self._was_label_changed(event, self.settings.hotfix_label, added=False)
 
 
 @dataclass

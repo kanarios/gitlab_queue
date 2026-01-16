@@ -58,3 +58,10 @@ class Scenario(vedro.Scenario):
         assert "limit" in rl
         assert "remaining" in rl
         assert "usage_ratio" in rl
+
+        # Check config section
+        assert "config" in data
+        assert "gitlab_project_id" in data["config"]
+        assert "target_branch" in data["config"]
+        assert "queue_label" in data["config"]
+        assert "hotfix_label" in data["config"]

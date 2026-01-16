@@ -11,15 +11,13 @@ from gitlab_queue.webhooks.router import WebhookAppState
 
 def create_mock_settings():
     """Create mock settings."""
-    from unittest.mock import MagicMock as MM
-
     settings = MagicMock()
     settings.webhook_host = "0.0.0.0"
     settings.webhook_port = 8080
     settings.cors_origins = ["http://localhost:5173"]
     settings.dashboard_enabled = True
     # JWT settings for authentication
-    settings.jwt_secret = MM()
+    settings.jwt_secret = MagicMock()
     settings.jwt_secret.get_secret_value = lambda: "a" * 64
     settings.jwt_expiration_hours = 24
     settings.gitlab_project_id = 123
