@@ -274,6 +274,7 @@ def _settings_repr(self: Settings) -> str:
         "poll_interval_seconds",
         "pipeline_timeout_seconds",
         "rebase_timeout_seconds",
+        "post_rebase_pipeline_wait_seconds",
         "stale_mr_warning_hours",
         "pipeline_retry_count",
         "api_max_retries",
@@ -343,6 +344,10 @@ def _validate_timing_settings(settings: Settings, errors: list[str]) -> None:
         errors.append(f"pipeline_timeout_seconds must be positive, got: {settings.pipeline_timeout_seconds}")
     if settings.rebase_timeout_seconds <= 0:
         errors.append(f"rebase_timeout_seconds must be positive, got: {settings.rebase_timeout_seconds}")
+    if settings.post_rebase_pipeline_wait_seconds <= 0:
+        errors.append(
+            f"post_rebase_pipeline_wait_seconds must be positive, got: {settings.post_rebase_pipeline_wait_seconds}"
+        )
     if settings.stale_mr_warning_hours < 1:
         errors.append(f"stale_mr_warning_hours must be at least 1, got: {settings.stale_mr_warning_hours}")
 

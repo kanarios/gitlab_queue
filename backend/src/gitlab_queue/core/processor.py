@@ -41,6 +41,21 @@ log = get_logger(__name__)
 
 
 # =============================================================================
+# Constants (eliminates magic numbers)
+# =============================================================================
+
+# Polling intervals (seconds)
+REBASE_POLL_INTERVAL_SECONDS = 5
+PIPELINE_POLL_INTERVAL_SECONDS = 2
+QUICK_REBASE_POLL_INTERVAL_SECONDS = 3
+
+# Timeouts (seconds)
+QUICK_REBASE_TIMEOUT_SECONDS = 60
+MERGE_TIMEOUT_SECONDS = 30
+DEFAULT_POST_REBASE_PIPELINE_WAIT_SECONDS = 60
+
+
+# =============================================================================
 # Result Types
 # =============================================================================
 
@@ -57,13 +72,25 @@ class ProcessingResult(Enum):
     ERROR = "error"  # Unexpected error
 
 
-@dataclass(frozen=True)
+@dataclass
+class RebaseContext:
+    """Context for rebase operation tracking.
+
+    Tracks SHA before rebase to detect race conditions where
+    GitLab returns stale pipeline data after rebase completes.
+    """
+
+    old_sha: str = ""
+
+
+@dataclass
 class ProcessingContext:
     """Context for current MR processing."""
 
     mr_iid: int
     state_machine: MRStateMachine
     start_time: datetime
+    rebase_ctx: RebaseContext = field(default_factory=RebaseContext)
 
 
 # =============================================================================
@@ -304,10 +331,7 @@ class MergeProcessor:
         log.info("Starting rebase", mr_iid=mr_iid)
 
         # Capture old SHA before rebase for race condition prevention
-        mr = await self.gitlab_client.get_mr(mr_iid)
-        old_sha = mr.sha
-        sm._context["old_sha"] = old_sha
-        log.debug("Captured pre-rebase SHA", mr_iid=mr_iid, old_sha=old_sha[:8])
+        await self._capture_pre_rebase_sha(ctx)
 
         try:
             # Initiate rebase (async operation)
@@ -379,7 +403,7 @@ class MergeProcessor:
                 log.info("Rebase completed", mr_iid=mr_iid)
 
                 # Get old SHA from context for race condition prevention
-                old_sha = sm._context.get("old_sha", "")
+                old_sha = ctx.rebase_ctx.old_sha
 
                 # Wait for pipeline with matching SHA
                 pipeline, new_sha = await self._wait_for_post_rebase_pipeline(mr_iid, old_sha)
@@ -401,13 +425,13 @@ class MergeProcessor:
                 )
 
             # Poll interval (shorter than main loop)
-            await self._interruptible_sleep(5)
+            await self._interruptible_sleep(REBASE_POLL_INTERVAL_SECONDS)
 
     async def _wait_for_post_rebase_pipeline(
         self,
         mr_iid: int,
         old_sha: str,
-        timeout_seconds: int = 60,
+        timeout_seconds: int | None = None,
     ) -> tuple[Pipeline | None, str]:
         """Wait for a new pipeline after rebase with the correct SHA.
 
@@ -424,6 +448,9 @@ class MergeProcessor:
         Returns:
             Tuple of (pipeline, new_sha). Pipeline may be None if not found.
         """
+        if timeout_seconds is None:
+            timeout_seconds = DEFAULT_POST_REBASE_PIPELINE_WAIT_SECONDS
+
         start = datetime.now(UTC)
 
         while (datetime.now(UTC) - start).total_seconds() < timeout_seconds:
@@ -433,7 +460,7 @@ class MergeProcessor:
             mr = await self.gitlab_client.get_mr(mr_iid)
 
             if mr.rebase_in_progress:
-                await asyncio.sleep(2)
+                await asyncio.sleep(PIPELINE_POLL_INTERVAL_SECONDS)
                 continue
 
             new_sha = mr.sha
@@ -443,7 +470,7 @@ class MergeProcessor:
                 pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
                 if pipeline and pipeline.sha == new_sha:
                     return pipeline, new_sha
-                await asyncio.sleep(2)
+                await asyncio.sleep(PIPELINE_POLL_INTERVAL_SECONDS)
                 continue
 
             # SHA changed, need pipeline with new SHA
@@ -458,7 +485,7 @@ class MergeProcessor:
                 )
                 return pipeline, new_sha
 
-            await asyncio.sleep(2)
+            await asyncio.sleep(PIPELINE_POLL_INTERVAL_SECONDS)
 
         # Timeout - return current state
         mr = await self.gitlab_client.get_mr(mr_iid)
@@ -507,9 +534,7 @@ class MergeProcessor:
         old_pipeline_url = self.notifier.build_pipeline_url(old_pipeline_id)
 
         # Capture old SHA before retry rebase for race condition prevention
-        mr = await self.gitlab_client.get_mr(mr_iid)
-        old_sha = mr.sha
-        log.debug("Captured pre-retry SHA", mr_iid=mr_iid, old_sha=old_sha[:8])
+        old_sha = await self._capture_pre_rebase_sha(ctx)
 
         try:
             await self.gitlab_client.rebase_mr(mr_iid)
@@ -698,7 +723,7 @@ class MergeProcessor:
             GitLabAPIError: If rebase times out or fails.
         """
         mr_iid = ctx.mr_iid
-        timeout = timedelta(seconds=60)  # Short timeout for retry rebase
+        timeout = timedelta(seconds=QUICK_REBASE_TIMEOUT_SECONDS)
         start_time = datetime.now(UTC)
 
         while True:
@@ -717,7 +742,7 @@ class MergeProcessor:
             if not rebase_in_progress:
                 return
 
-            await asyncio.sleep(3)
+            await asyncio.sleep(QUICK_REBASE_POLL_INTERVAL_SECONDS)
 
     async def _get_failed_jobs(self, pipeline_id: int) -> list[str]:
         """Get list of failed job names from a pipeline.
@@ -766,10 +791,10 @@ class MergeProcessor:
         log.info("Executing merge", mr_iid=mr_iid)
 
         try:
-            # Add 30-second timeout for merge operation to prevent hanging
+            # Add timeout for merge operation to prevent hanging
             merged_mr = await asyncio.wait_for(
                 self.gitlab_client.merge_mr(mr_iid),
-                timeout=30.0,
+                timeout=float(MERGE_TIMEOUT_SECONDS),
             )
             log.info("Merge successful", mr_iid=mr_iid, state=merged_mr.state)
             await sm.trigger_merge_success()
@@ -827,6 +852,24 @@ class MergeProcessor:
                         mr_iid=item.mr_iid,
                         error=str(e),
                     )
+
+    async def _capture_pre_rebase_sha(self, ctx: ProcessingContext) -> str:
+        """Capture SHA before rebase for race condition prevention.
+
+        Stores the SHA in the processing context and returns it.
+        This is used to detect stale pipeline data after rebase.
+
+        Args:
+            ctx: Processing context to store SHA in.
+
+        Returns:
+            The captured SHA.
+        """
+        mr = await self.gitlab_client.get_mr(ctx.mr_iid)
+        old_sha = mr.sha
+        ctx.rebase_ctx.old_sha = old_sha
+        log.debug("Captured pre-rebase SHA", mr_iid=ctx.mr_iid, old_sha=old_sha[:8])
+        return old_sha
 
     async def _interruptible_sleep(self, seconds: float) -> bool:
         """Sleep that can be interrupted by shutdown event.

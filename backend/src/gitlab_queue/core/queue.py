@@ -759,6 +759,8 @@ class QueueManager:
                 mr_iid=mr_iid,
                 status=status,
             )
+            # Invalidate cache in case it contains stale data for this MR
+            self._cache.invalidate()
             return False
 
         now = datetime.now(UTC)
@@ -804,12 +806,24 @@ class QueueManager:
                 await session.execute(text(_INSERT_HISTORY_SQL), history_params)
                 # Delete from active queue
                 await session.execute(text(_DELETE_MR_SQL), {"iid": mr_iid})
-        except IntegrityError:
+        except IntegrityError as e:
+            # Only suppress the expected duplicate-key race condition on history table
+            error_msg = str(e).lower()
+            is_history_duplicate = "merge_requests_history" in error_msg and (
+                "unique constraint" in error_msg or "duplicate" in error_msg
+            )
+            if not is_history_duplicate:
+                # Unexpected integrity error - re-raise to avoid hiding real issues
+                raise
+
             log.debug(
                 "MR completion race: already in history",
                 mr_iid=mr_iid,
                 status=status,
             )
+            # MR already in history means it was deleted from active queue;
+            # invalidate cache to ensure consistency
+            self._cache.invalidate()
             return False
 
         self._cache.invalidate()

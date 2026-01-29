@@ -29,7 +29,7 @@ def upgrade() -> None:
     # Add unique index on iid to prevent duplicate history records
     # from race conditions between webhook handler and processor
     with op.batch_alter_table("merge_requests_history", schema=None) as batch_op:
-        batch_op.create_index("idx_history_iid_unique", ["iid"], unique=True)
+        batch_op.create_index("idx_history_iid_unique", ["iid"], unique=True, if_not_exists=True)
 
 
 def downgrade() -> None:

@@ -270,6 +270,15 @@ async def process_mr_with_pipeline_failure_max_retries():
         )
 
     # Set up mocks for multiple pipeline failures
+    # NOTE: Mock limitation - all pipeline_mocks use the same matcher (pipelines_matcher)
+    # but different responses. When jj receives a request, the matching behavior among
+    # multiple mocks with identical matchers is non-deterministic. This means the processor
+    # may not receive responses in the expected sequence (failed_pipeline_1, 2, 3).
+    # As a result, the test accepts multiple valid outcomes:
+    # - PIPELINE_FAILED: processor correctly detected all retries exhausted
+    # - TIMEOUT: processor timed out waiting for pipeline (mock returned unexpected response)
+    # The core behavior (handling pipeline failures) is still tested; only the specific
+    # final state varies based on mock response ordering.
     pipeline_mocks = []
     for response in pipelines_responses:
         pipeline_mocks.append(mocked(pipelines_matcher, response))
@@ -299,14 +308,14 @@ async def process_mr_with_pipeline_failure_max_retries():
             result = await processor._process_mr(queue_item)
 
         with then("MR is marked as failed after max retries"):
-            # May return PIPELINE_FAILED or timeout/stay in testing due to mock limitations
+            # See NOTE above about mock non-determinism
             assert result in (ProcessingResult.PIPELINE_FAILED, ProcessingResult.TIMEOUT)
 
             # Verify failure comment was posted
             comment_history = await comment_mock.fetch_history()
             assert len(comment_history) >= 1, "Failure comment should be posted"
 
-            # Verify final state - may be failed, testing, or timeout due to mock limitations
+            # Final state depends on mock response ordering (see NOTE above)
             mr_state = await queue.get_mr_state(51)
             assert mr_state["status"] in (
                 "failed",
