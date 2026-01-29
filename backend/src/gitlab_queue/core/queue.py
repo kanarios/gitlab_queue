@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
 from gitlab_queue.metrics import OPERATIONS_TOTAL
 from gitlab_queue.models.queue_item import DashboardStats, QueueItem
@@ -90,6 +91,7 @@ _CREATE_INDEXES_SQL = [
 _CREATE_HISTORY_INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_history_finished_at ON merge_requests_history(finished_at)",
     "CREATE INDEX IF NOT EXISTS idx_history_status ON merge_requests_history(status)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_history_iid_unique ON merge_requests_history(iid)",
 ]
 
 _INSERT_MR_SQL = """
@@ -739,7 +741,11 @@ class QueueManager:
         # First get the MR data
         mr = await self.get_queue_item(mr_iid)
         if not mr:
-            log.warning("MR not found for completion", mr_iid=mr_iid)
+            log.debug(
+                "MR not found for completion (already completed)",
+                mr_iid=mr_iid,
+                status=status,
+            )
             return False
 
         now = datetime.now(UTC)
@@ -779,11 +785,19 @@ class QueueManager:
             "pipeline_failed_jobs": json.dumps(pipeline_failed_jobs) if pipeline_failed_jobs else None,
         }
 
-        async with self.db.transaction() as session:
-            # Insert into history
-            await session.execute(text(_INSERT_HISTORY_SQL), history_params)
-            # Delete from active queue
-            await session.execute(text(_DELETE_MR_SQL), {"iid": mr_iid})
+        try:
+            async with self.db.transaction() as session:
+                # Insert into history
+                await session.execute(text(_INSERT_HISTORY_SQL), history_params)
+                # Delete from active queue
+                await session.execute(text(_DELETE_MR_SQL), {"iid": mr_iid})
+        except IntegrityError:
+            log.debug(
+                "MR completion race: already in history",
+                mr_iid=mr_iid,
+                status=status,
+            )
+            return False
 
         self._cache.invalidate()
         OPERATIONS_TOTAL.labels(type="complete", status="success").inc()
