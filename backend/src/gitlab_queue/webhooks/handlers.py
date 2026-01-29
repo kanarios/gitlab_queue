@@ -442,6 +442,27 @@ class PipelineWebhookHandler:
             )
             return
 
+        # Ignore events from old pipelines (e.g., late webhook after rebase)
+        if queue_item.pipeline_id is not None and queue_item.pipeline_id != pipeline_id:
+            log.debug(
+                "Ignoring pipeline success for old pipeline",
+                mr_iid=mr_iid,
+                event_pipeline_id=pipeline_id,
+                current_pipeline_id=queue_item.pipeline_id,
+            )
+            return
+
+        # SHA validation: ignore events from pipelines with wrong SHA (race condition prevention)
+        pipeline_sha = event.object_attributes.sha
+        if queue_item.expected_sha is not None and queue_item.expected_sha != pipeline_sha:
+            log.debug(
+                "Ignoring pipeline success for wrong SHA (old pipeline after rebase)",
+                mr_iid=mr_iid,
+                event_sha=pipeline_sha[:8],
+                expected_sha=queue_item.expected_sha[:8],
+            )
+            return
+
         log.info(
             "Pipeline success for MR in testing state",
             mr_iid=mr_iid,
@@ -484,6 +505,27 @@ class PipelineWebhookHandler:
                 "MR not in testing state, ignoring pipeline failure",
                 mr_iid=mr_iid,
                 current_state=queue_item.state,
+            )
+            return
+
+        # Ignore events from old pipelines (e.g., auto-canceled after rebase)
+        if queue_item.pipeline_id is not None and queue_item.pipeline_id != pipeline_id:
+            log.debug(
+                "Ignoring pipeline failure for old pipeline",
+                mr_iid=mr_iid,
+                event_pipeline_id=pipeline_id,
+                current_pipeline_id=queue_item.pipeline_id,
+            )
+            return
+
+        # SHA validation: ignore events from pipelines with wrong SHA (race condition prevention)
+        pipeline_sha = event.object_attributes.sha
+        if queue_item.expected_sha is not None and queue_item.expected_sha != pipeline_sha:
+            log.debug(
+                "Ignoring pipeline failure for wrong SHA (old pipeline after rebase)",
+                mr_iid=mr_iid,
+                event_sha=pipeline_sha[:8],
+                expected_sha=queue_item.expected_sha[:8],
             )
             return
 
@@ -551,6 +593,27 @@ class PipelineWebhookHandler:
                 "MR not in testing state, ignoring pipeline cancellation",
                 mr_iid=mr_iid,
                 current_state=queue_item.state,
+            )
+            return
+
+        # Ignore events from old pipelines (e.g., auto-canceled after rebase)
+        if queue_item.pipeline_id is not None and queue_item.pipeline_id != pipeline_id:
+            log.debug(
+                "Ignoring pipeline cancellation for old pipeline",
+                mr_iid=mr_iid,
+                event_pipeline_id=pipeline_id,
+                current_pipeline_id=queue_item.pipeline_id,
+            )
+            return
+
+        # SHA validation: ignore events from pipelines with wrong SHA (race condition prevention)
+        pipeline_sha = event.object_attributes.sha
+        if queue_item.expected_sha is not None and queue_item.expected_sha != pipeline_sha:
+            log.debug(
+                "Ignoring pipeline cancellation for wrong SHA (old pipeline after rebase)",
+                mr_iid=mr_iid,
+                event_sha=pipeline_sha[:8],
+                expected_sha=queue_item.expected_sha[:8],
             )
             return
 

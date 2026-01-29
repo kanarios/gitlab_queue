@@ -181,13 +181,14 @@ async def scheduler_handles_concurrent_webhook_and_polling():
         )
 
         # Initially empty, then returns MR
+        # Note: sync_queue calls list_mrs_with_label twice per sync (queue + hotfix labels)
         call_count = 0
 
         async def dynamic_list_mrs(*_args: object, **_kwargs: object) -> list[MergeRequest]:
             nonlocal call_count
             call_count += 1
-            if call_count == 1:
-                return []  # First call: empty
+            if call_count <= 2:  # First sync (2 calls: queue + hotfix)
+                return []
             return [mr1]  # Subsequent calls: MR present
 
         gitlab_client.list_mrs_with_label = AsyncMock(side_effect=dynamic_list_mrs)

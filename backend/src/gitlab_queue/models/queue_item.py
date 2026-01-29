@@ -34,6 +34,7 @@ class QueueItem:
         finished_at: When processing finished (merged, failed, or removed)
         pipeline_id: Current pipeline ID if running
         pipeline_status: Current pipeline status
+        expected_sha: SHA expected for current pipeline (for race condition prevention)
         retry_count: Number of retry attempts for pipeline failures
         last_error: Most recent error message if any
         stale_warning_sent: Whether stale warning has been sent for this MR
@@ -56,6 +57,7 @@ class QueueItem:
     finished_at: datetime | None = None
     pipeline_id: int | None = None
     pipeline_status: str | None = None
+    expected_sha: str | None = None
     retry_count: int = 0
     last_error: str | None = None
     stale_warning_sent: bool = False

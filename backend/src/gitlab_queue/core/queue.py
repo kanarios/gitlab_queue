@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS merge_requests (
     finished_at TEXT,
     pipeline_id INTEGER,
     pipeline_status TEXT,
+    expected_sha TEXT,
     retry_count INTEGER DEFAULT 0,
     last_error TEXT,
     stale_warning_sent INTEGER DEFAULT 0,
@@ -172,6 +173,10 @@ WHERE iid = :iid
 
 _ALTER_TABLE_STALE_WARNING_SQL = """
 ALTER TABLE merge_requests ADD COLUMN stale_warning_sent INTEGER DEFAULT 0
+"""
+
+_ALTER_TABLE_EXPECTED_SHA_SQL = """
+ALTER TABLE merge_requests ADD COLUMN expected_sha TEXT
 """
 
 _SELECT_RECENT_HISTORY_SQL = """
@@ -332,6 +337,14 @@ class QueueManager:
             try:
                 await session.execute(text(_ALTER_TABLE_STALE_WARNING_SQL))
                 log.info("Added stale_warning_sent column to merge_requests table")
+            except Exception:
+                # Column already exists - ignore
+                pass
+
+            # Migrate: add expected_sha column if not exists
+            try:
+                await session.execute(text(_ALTER_TABLE_EXPECTED_SHA_SQL))
+                log.info("Added expected_sha column to merge_requests table")
             except Exception:
                 # Column already exists - ignore
                 pass
@@ -632,7 +645,7 @@ class QueueManager:
             params["finished_at"] = now.isoformat()
 
         # Handle extra fields
-        allowed_fields = ("pipeline_id", "pipeline_status", "last_error", "retry_count")
+        allowed_fields = ("pipeline_id", "pipeline_status", "last_error", "retry_count", "expected_sha")
         for field_name, value in extra.items():
             if field_name in allowed_fields:
                 set_clauses.append(f"{field_name} = :{field_name}")
@@ -1044,6 +1057,7 @@ class QueueManager:
             finished_at=finished_at,
             pipeline_id=row.get("pipeline_id"),
             pipeline_status=row.get("pipeline_status"),
+            expected_sha=row.get("expected_sha"),
             retry_count=row.get("retry_count", 0),
             last_error=row.get("last_error"),
             stale_warning_sent=bool(row.get("stale_warning_sent", 0)),

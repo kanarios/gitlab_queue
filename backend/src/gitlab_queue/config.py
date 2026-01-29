@@ -189,6 +189,7 @@ class Settings:
     poll_interval_seconds: int = var(default=30, converter=int)
     pipeline_timeout_seconds: int = var(default=7200, converter=int)  # 2 hours
     rebase_timeout_seconds: int = var(default=300, converter=int)  # 5 minutes
+    post_rebase_pipeline_wait_seconds: int = var(default=90, converter=int)  # 90 seconds
     stale_mr_warning_hours: int = var(default=24, converter=int)  # 24 hours
 
     # Retry Logic

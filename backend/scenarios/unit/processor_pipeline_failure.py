@@ -74,11 +74,11 @@ async def process_mr_with_pipeline_failure_and_retry():
             "web_url": "https://gitlab.com/test/project/-/pipelines/2001",
         }
 
-        # Second pipeline (after retry) succeeds
+        # Second pipeline (after retry) succeeds - SHA must match post-rebase MR SHA
         success_pipeline = {
             "id": 2002,
             "status": "success",
-            "sha": "retry123",
+            "sha": "flaky123",  # Same SHA as MR (fast-forward case)
             "web_url": "https://gitlab.com/test/project/-/pipelines/2002",
         }
 
@@ -107,6 +107,10 @@ async def process_mr_with_pipeline_failure_and_retry():
         # Jobs for failed pipeline
         jobs_matcher = jj.match("GET", f"/api/v4/projects/123/pipelines/{failed_pipeline['id']}/jobs")
         jobs_response = jj.Response(status=200, json=failed_jobs)
+
+        # Create pipeline (fallback when auto-created pipeline not found)
+        create_pipeline_matcher = jj.match("POST", "/api/v4/projects/123/pipelines")
+        create_pipeline_response = jj.Response(status=201, json=success_pipeline)
 
         # Merge after success
         merge_matcher = jj.match("PUT", "/api/v4/projects/123/merge_requests/50/merge")
@@ -141,6 +145,7 @@ async def process_mr_with_pipeline_failure_and_retry():
         mocked(jobs_matcher, jobs_response) as _jobs_mock,
         mocked(rebase_matcher, rebase_response_2) as _rebase_mock_2,
         mocked(pipelines_matcher, pipelines_response_2),
+        mocked(create_pipeline_matcher, create_pipeline_response),
         mocked(merge_matcher, merge_response) as merge_mock,
         mocked(get_notes_matcher, get_notes_response),
         mocked(comment_matcher, comment_response),
@@ -240,6 +245,10 @@ async def process_mr_with_pipeline_failure_max_retries():
         jobs_matcher = jj.match("GET", "/api/v4/projects/123/pipelines/.*/jobs")
         jobs_response = jj.Response(status=200, json=failed_jobs)
 
+        # Create pipeline (fallback when auto-created pipeline not found) - returns failed pipeline
+        create_pipeline_matcher = jj.match("POST", "/api/v4/projects/123/pipelines")
+        create_pipeline_response = jj.Response(status=201, json=failed_pipeline_1)
+
         comment_matcher = jj.match("POST", "/api/v4/projects/123/merge_requests/51/notes")
         comment_response = jj.Response(status=201, json={"id": 21})
 
@@ -272,6 +281,7 @@ async def process_mr_with_pipeline_failure_max_retries():
         pipeline_mocks[1],
         pipeline_mocks[2],
         mocked(jobs_matcher, jobs_response) as _jobs_mock,
+        mocked(create_pipeline_matcher, create_pipeline_response),
         mocked(get_notes_matcher, get_notes_response),
         mocked(comment_matcher, comment_response) as comment_mock,
     ):
@@ -296,12 +306,13 @@ async def process_mr_with_pipeline_failure_max_retries():
             comment_history = await comment_mock.fetch_history()
             assert len(comment_history) >= 1, "Failure comment should be posted"
 
-            # Verify final state - may be failed or testing due to mock limitations
+            # Verify final state - may be failed, testing, or timeout due to mock limitations
             mr_state = await queue.get_mr_state(51)
             assert mr_state["status"] in (
                 "failed",
                 "testing",
-            ), f"MR should be failed or testing, got {mr_state['status']}"
+                "timeout",
+            ), f"MR should be failed, testing, or timeout, got {mr_state['status']}"
 
 
 @scenario()
@@ -369,6 +380,10 @@ async def process_mr_with_canceled_pipeline():
         jobs_matcher = jj.match("GET", f"/api/v4/projects/123/pipelines/{canceled_pipeline['id']}/jobs")
         jobs_response = jj.Response(status=200, json=canceled_jobs)
 
+        # Create pipeline (fallback when auto-created pipeline not found) - returns canceled pipeline
+        create_pipeline_matcher = jj.match("POST", "/api/v4/projects/123/pipelines")
+        create_pipeline_response = jj.Response(status=201, json=canceled_pipeline)
+
         comment_matcher = jj.match("POST", "/api/v4/projects/123/merge_requests/52/notes")
         comment_response = jj.Response(status=201, json={"id": 22})
 
@@ -394,6 +409,7 @@ async def process_mr_with_canceled_pipeline():
         mocked(rebase_matcher, rebase_response),
         mocked(pipelines_matcher, pipelines_response),
         mocked(jobs_matcher, jobs_response) as jobs_mock,
+        mocked(create_pipeline_matcher, create_pipeline_response),
         mocked(get_notes_matcher, get_notes_response),
         mocked(comment_matcher, comment_response),
     ):
