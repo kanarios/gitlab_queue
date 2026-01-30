@@ -284,8 +284,15 @@ async def hotfix_priority_with_processing_continues():
             rebase_matcher = jj.match("PUT", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/rebase"))
             rebase_response = jj.Response(status=202, json={"rebase_in_progress": False})
 
-            pipelines_matcher = jj.match("GET", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/pipelines"))
-            pipelines_response = jj.Response(status=200, json=[{"id": 1, "status": "success", "sha": "sha"}])
+            # Pipeline matchers for each MR with correct SHA
+            pipelines_10_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/10/pipelines")
+            pipelines_10_response = jj.Response(status=200, json=[{"id": 100, "status": "success", "sha": "sha_10"}])
+
+            pipelines_20_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/20/pipelines")
+            pipelines_20_response = jj.Response(status=200, json=[{"id": 200, "status": "success", "sha": "sha_20"}])
+
+            pipelines_99_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/99/pipelines")
+            pipelines_99_response = jj.Response(status=200, json=[{"id": 990, "status": "success", "sha": "sha_99"}])
 
             # Merge matchers - need separate matchers with full MR data for each
             merge_10_matcher = jj.match("PUT", "/api/v4/projects/123/merge_requests/10/merge")
@@ -309,7 +316,9 @@ async def hotfix_priority_with_processing_continues():
             mocked(get_mr_20, jj.Response(status=200, json=mr_20_data)),
             mocked(get_mr_99, jj.Response(status=200, json=mr_99_data)),
             mocked(rebase_matcher, rebase_response),
-            mocked(pipelines_matcher, pipelines_response),
+            mocked(pipelines_10_matcher, pipelines_10_response),
+            mocked(pipelines_20_matcher, pipelines_20_response),
+            mocked(pipelines_99_matcher, pipelines_99_response),
             mocked(merge_10_matcher, merge_10_response) as merge_10_mock,
             mocked(merge_20_matcher, merge_20_response) as merge_20_mock,
             mocked(merge_99_matcher, merge_99_response) as merge_99_mock,

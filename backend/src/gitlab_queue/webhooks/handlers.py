@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from gitlab_queue.config import Settings
     from gitlab_queue.core.notifier import MRNotifier
     from gitlab_queue.core.queue import QueueManager
+    from gitlab_queue.models.queue_item import QueueItem
 
 log = get_logger(__name__)
 
@@ -413,34 +414,77 @@ class PipelineWebhookHandler:
                 mr_iid=mr_iid,
             )
 
-    async def _handle_success(self, event: PipelineEvent) -> None:
-        """Handle successful pipeline completion.
+    async def _validate_pipeline_event(
+        self,
+        event: PipelineEvent,
+        event_type: str,
+    ) -> QueueItem | None:
+        """Validate pipeline event and return queue item if valid.
 
-        Triggers transition to merging state if MR is in testing state.
+        Performs common validation for all pipeline event handlers:
+        1. Check MR IID is present
+        2. Check MR is in queue
+        3. Check MR is in testing state
+        4. Check pipeline ID matches (not an old pipeline)
+        5. Check SHA matches (race condition prevention)
 
         Args:
             event: The pipeline webhook event.
+            event_type: Event type for logging ("success", "failure", "cancellation").
+
+        Returns:
+            QueueItem if event should be processed, None otherwise.
         """
         mr_iid = event.merge_request_iid
         if mr_iid is None:
-            return
+            return None
 
         pipeline_id = event.object_attributes.id
 
-        # Check if MR is in queue
         queue_item = await self.queue_manager.get_queue_item(mr_iid)
         if queue_item is None:
-            log.debug("MR not in queue, ignoring pipeline success", mr_iid=mr_iid)
-            return
+            log.debug(f"MR not in queue, ignoring pipeline {event_type}", mr_iid=mr_iid)
+            return None
 
-        # Only process if MR is in testing state
         if queue_item.state != "testing":
             log.debug(
-                "MR not in testing state, ignoring pipeline success",
+                f"MR not in testing state, ignoring pipeline {event_type}",
                 mr_iid=mr_iid,
                 current_state=queue_item.state,
             )
+            return None
+
+        if queue_item.pipeline_id is not None and queue_item.pipeline_id != pipeline_id:
+            log.debug(
+                f"Ignoring pipeline {event_type} for old pipeline",
+                mr_iid=mr_iid,
+                event_pipeline_id=pipeline_id,
+                current_pipeline_id=queue_item.pipeline_id,
+            )
+            return None
+
+        pipeline_sha = event.object_attributes.sha
+        if queue_item.expected_sha is not None and queue_item.expected_sha != pipeline_sha:
+            log.debug(
+                f"Ignoring pipeline {event_type} for wrong SHA (old pipeline after rebase)",
+                mr_iid=mr_iid,
+                event_sha=pipeline_sha[:8],
+                expected_sha=queue_item.expected_sha[:8],
+            )
+            return None
+
+        return queue_item
+
+    async def _handle_success(self, event: PipelineEvent) -> None:
+        """Handle successful pipeline completion."""
+        queue_item = await self._validate_pipeline_event(event, "success")
+        if queue_item is None:
             return
+
+        # mr_iid is guaranteed non-None by _validate_pipeline_event
+        mr_iid = event.merge_request_iid
+        assert mr_iid is not None
+        pipeline_id = event.object_attributes.id
 
         log.info(
             "Pipeline success for MR in testing state",
@@ -448,7 +492,6 @@ class PipelineWebhookHandler:
             pipeline_id=pipeline_id,
         )
 
-        # Create state machine and trigger pipeline success
         state_machine = await create_state_machine_for_mr(
             mr_iid=mr_iid,
             notifier=self.notifier,
@@ -459,39 +502,19 @@ class PipelineWebhookHandler:
         await state_machine.trigger_pipeline_success()
 
     async def _handle_failed(self, event: PipelineEvent) -> None:
-        """Handle failed pipeline.
-
-        Either marks pipeline as failed for retry or fails the MR if retries exhausted.
-
-        Args:
-            event: The pipeline webhook event.
-        """
-        mr_iid = event.merge_request_iid
-        if mr_iid is None:
-            return
-
-        pipeline_id = event.object_attributes.id
-
-        # Check if MR is in queue
-        queue_item = await self.queue_manager.get_queue_item(mr_iid)
+        """Handle failed pipeline."""
+        queue_item = await self._validate_pipeline_event(event, "failure")
         if queue_item is None:
-            log.debug("MR not in queue, ignoring pipeline failure", mr_iid=mr_iid)
             return
 
-        # Only process if MR is in testing state
-        if queue_item.state != "testing":
-            log.debug(
-                "MR not in testing state, ignoring pipeline failure",
-                mr_iid=mr_iid,
-                current_state=queue_item.state,
-            )
-            return
-
+        # mr_iid is guaranteed non-None by _validate_pipeline_event
+        mr_iid = event.merge_request_iid
+        assert mr_iid is not None
+        pipeline_id = event.object_attributes.id
         current_retry_count = queue_item.retry_count or 0
         max_retries = self.settings.pipeline_retry_count
 
         if current_retry_count < max_retries:
-            # Retries available - update state for processor to handle retry
             log.info(
                 "Pipeline failed, marking for retry",
                 mr_iid=mr_iid,
@@ -505,7 +528,6 @@ class PipelineWebhookHandler:
                 pipeline_status="failed",
             )
         else:
-            # No retries left - fail the MR
             log.info(
                 "Pipeline failed, no retries remaining",
                 mr_iid=mr_iid,
@@ -526,33 +548,15 @@ class PipelineWebhookHandler:
             )
 
     async def _handle_canceled(self, event: PipelineEvent) -> None:
-        """Handle canceled pipeline.
-
-        Treats cancellation as a failure without retry possibility.
-
-        Args:
-            event: The pipeline webhook event.
-        """
-        mr_iid = event.merge_request_iid
-        if mr_iid is None:
-            return
-
-        pipeline_id = event.object_attributes.id
-
-        # Check if MR is in queue
-        queue_item = await self.queue_manager.get_queue_item(mr_iid)
+        """Handle canceled pipeline."""
+        queue_item = await self._validate_pipeline_event(event, "cancellation")
         if queue_item is None:
-            log.debug("MR not in queue, ignoring pipeline cancellation", mr_iid=mr_iid)
             return
 
-        # Only process if MR is in testing state
-        if queue_item.state != "testing":
-            log.debug(
-                "MR not in testing state, ignoring pipeline cancellation",
-                mr_iid=mr_iid,
-                current_state=queue_item.state,
-            )
-            return
+        # mr_iid is guaranteed non-None by _validate_pipeline_event
+        mr_iid = event.merge_request_iid
+        assert mr_iid is not None
+        pipeline_id = event.object_attributes.id
 
         log.info(
             "Pipeline canceled for MR in testing state",
@@ -560,7 +564,6 @@ class PipelineWebhookHandler:
             pipeline_id=pipeline_id,
         )
 
-        # Fail the MR without retry on cancellation
         state_machine = await create_state_machine_for_mr(
             mr_iid=mr_iid,
             notifier=self.notifier,

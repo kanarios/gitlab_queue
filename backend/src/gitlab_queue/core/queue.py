@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
 from gitlab_queue.metrics import OPERATIONS_TOTAL
 from gitlab_queue.models.queue_item import DashboardStats, QueueItem
@@ -47,6 +48,7 @@ CREATE TABLE IF NOT EXISTS merge_requests (
     finished_at TEXT,
     pipeline_id INTEGER,
     pipeline_status TEXT,
+    expected_sha TEXT,
     retry_count INTEGER DEFAULT 0,
     last_error TEXT,
     stale_warning_sent INTEGER DEFAULT 0,
@@ -90,6 +92,7 @@ _CREATE_INDEXES_SQL = [
 _CREATE_HISTORY_INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_history_finished_at ON merge_requests_history(finished_at)",
     "CREATE INDEX IF NOT EXISTS idx_history_status ON merge_requests_history(status)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_history_iid_unique ON merge_requests_history(iid)",
 ]
 
 _INSERT_MR_SQL = """
@@ -170,6 +173,10 @@ WHERE iid = :iid
 
 _ALTER_TABLE_STALE_WARNING_SQL = """
 ALTER TABLE merge_requests ADD COLUMN stale_warning_sent INTEGER DEFAULT 0
+"""
+
+_ALTER_TABLE_EXPECTED_SHA_SQL = """
+ALTER TABLE merge_requests ADD COLUMN expected_sha TEXT
 """
 
 _SELECT_RECENT_HISTORY_SQL = """
@@ -330,6 +337,14 @@ class QueueManager:
             try:
                 await session.execute(text(_ALTER_TABLE_STALE_WARNING_SQL))
                 log.info("Added stale_warning_sent column to merge_requests table")
+            except Exception:
+                # Column already exists - ignore
+                pass
+
+            # Migrate: add expected_sha column if not exists
+            try:
+                await session.execute(text(_ALTER_TABLE_EXPECTED_SHA_SQL))
+                log.info("Added expected_sha column to merge_requests table")
             except Exception:
                 # Column already exists - ignore
                 pass
@@ -630,7 +645,7 @@ class QueueManager:
             params["finished_at"] = now.isoformat()
 
         # Handle extra fields
-        allowed_fields = ("pipeline_id", "pipeline_status", "last_error", "retry_count")
+        allowed_fields = ("pipeline_id", "pipeline_status", "last_error", "retry_count", "expected_sha")
         for field_name, value in extra.items():
             if field_name in allowed_fields:
                 set_clauses.append(f"{field_name} = :{field_name}")
@@ -739,7 +754,13 @@ class QueueManager:
         # First get the MR data
         mr = await self.get_queue_item(mr_iid)
         if not mr:
-            log.warning("MR not found for completion", mr_iid=mr_iid)
+            log.debug(
+                "MR not found for completion (already completed)",
+                mr_iid=mr_iid,
+                status=status,
+            )
+            # Invalidate cache in case it contains stale data for this MR
+            self._cache.invalidate()
             return False
 
         now = datetime.now(UTC)
@@ -779,11 +800,31 @@ class QueueManager:
             "pipeline_failed_jobs": json.dumps(pipeline_failed_jobs) if pipeline_failed_jobs else None,
         }
 
-        async with self.db.transaction() as session:
-            # Insert into history
-            await session.execute(text(_INSERT_HISTORY_SQL), history_params)
-            # Delete from active queue
-            await session.execute(text(_DELETE_MR_SQL), {"iid": mr_iid})
+        try:
+            async with self.db.transaction() as session:
+                # Insert into history
+                await session.execute(text(_INSERT_HISTORY_SQL), history_params)
+                # Delete from active queue
+                await session.execute(text(_DELETE_MR_SQL), {"iid": mr_iid})
+        except IntegrityError as e:
+            # Only suppress the expected duplicate-key race condition on history table
+            error_msg = str(e).lower()
+            is_history_duplicate = "merge_requests_history" in error_msg and (
+                "unique constraint" in error_msg or "duplicate" in error_msg
+            )
+            if not is_history_duplicate:
+                # Unexpected integrity error - re-raise to avoid hiding real issues
+                raise
+
+            log.debug(
+                "MR completion race: already in history",
+                mr_iid=mr_iid,
+                status=status,
+            )
+            # MR already in history means it was deleted from active queue;
+            # invalidate cache to ensure consistency
+            self._cache.invalidate()
+            return False
 
         self._cache.invalidate()
         OPERATIONS_TOTAL.labels(type="complete", status="success").inc()
@@ -1030,6 +1071,7 @@ class QueueManager:
             finished_at=finished_at,
             pipeline_id=row.get("pipeline_id"),
             pipeline_status=row.get("pipeline_status"),
+            expected_sha=row.get("expected_sha"),
             retry_count=row.get("retry_count", 0),
             last_error=row.get("last_error"),
             stale_warning_sent=bool(row.get("stale_warning_sent", 0)),

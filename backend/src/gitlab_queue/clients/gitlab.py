@@ -1018,6 +1018,27 @@ class GitLabClient:
         )
         return job
 
+    async def create_pipeline(self, ref: str) -> Pipeline:
+        """Create a new pipeline for the specified ref (branch).
+
+        Fallback when GitLab doesn't auto-create pipeline after rebase.
+
+        Args:
+            ref: Branch name or commit SHA to create pipeline for.
+
+        Returns:
+            Pipeline model with the created pipeline details.
+
+        Raises:
+            GitLabAPIError: On API errors (e.g., no CI config, invalid ref).
+            GitLabNotFoundError: If branch/ref doesn't exist.
+        """
+        log.info("Creating pipeline", ref=ref)
+        data = await self.post("/pipelines", json={"ref": ref})
+        pipeline = parse_pipeline(data)
+        log.info("Pipeline created", pipeline_id=pipeline.id, ref=ref)
+        return pipeline
+
     async def get_pipeline_jobs(self, pipeline_id: int) -> list[Job]:
         """Get all jobs for a pipeline.
 

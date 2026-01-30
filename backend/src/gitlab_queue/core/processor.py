@@ -41,6 +41,21 @@ log = get_logger(__name__)
 
 
 # =============================================================================
+# Constants (eliminates magic numbers)
+# =============================================================================
+
+# Polling intervals (seconds)
+REBASE_POLL_INTERVAL_SECONDS = 5
+PIPELINE_POLL_INTERVAL_SECONDS = 2
+QUICK_REBASE_POLL_INTERVAL_SECONDS = 3
+
+# Timeouts (seconds)
+QUICK_REBASE_TIMEOUT_SECONDS = 60
+MERGE_TIMEOUT_SECONDS = 30
+DEFAULT_POST_REBASE_PIPELINE_WAIT_SECONDS = 60
+
+
+# =============================================================================
 # Result Types
 # =============================================================================
 
@@ -57,13 +72,25 @@ class ProcessingResult(Enum):
     ERROR = "error"  # Unexpected error
 
 
-@dataclass(frozen=True)
+@dataclass
+class RebaseContext:
+    """Context for rebase operation tracking.
+
+    Tracks SHA before rebase to detect race conditions where
+    GitLab returns stale pipeline data after rebase completes.
+    """
+
+    old_sha: str = ""
+
+
+@dataclass
 class ProcessingContext:
     """Context for current MR processing."""
 
     mr_iid: int
     state_machine: MRStateMachine
     start_time: datetime
+    rebase_ctx: RebaseContext = field(default_factory=RebaseContext)
 
 
 # =============================================================================
@@ -303,6 +330,9 @@ class MergeProcessor:
 
         log.info("Starting rebase", mr_iid=mr_iid)
 
+        # Capture old SHA before rebase for race condition prevention
+        await self._capture_pre_rebase_sha(ctx)
+
         try:
             # Initiate rebase (async operation)
             await self.gitlab_client.rebase_mr(mr_iid)
@@ -372,21 +402,104 @@ class MergeProcessor:
             if not rebase_in_progress:
                 log.info("Rebase completed", mr_iid=mr_iid)
 
-                # Get the new pipeline that should have started
-                pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
-                if pipeline:
+                # Get old SHA from context for race condition prevention
+                old_sha = ctx.rebase_ctx.old_sha
+
+                # Wait for pipeline with matching SHA
+                pipeline, new_sha = await self._wait_for_post_rebase_pipeline(
+                    mr_iid, old_sha, timeout_seconds=self.settings.post_rebase_pipeline_wait_seconds
+                )
+
+                if pipeline and pipeline.sha == new_sha:
                     pipeline_url = self.notifier.build_pipeline_url(pipeline.id)
                     await sm.trigger_rebase_complete(
                         pipeline_id=pipeline.id,
                         pipeline_url=pipeline_url,
+                        expected_sha=new_sha,
                     )
                     return ProcessingResult.SUCCESS
 
-                # Pipeline not started yet, wait a bit and retry
-                log.debug("Waiting for pipeline to start after rebase", mr_iid=mr_iid)
+                # Pipeline not found with correct SHA, continue polling
+                log.debug(
+                    "Waiting for pipeline with correct SHA after rebase",
+                    mr_iid=mr_iid,
+                    expected_sha=new_sha[:8] if new_sha else "unknown",
+                )
 
             # Poll interval (shorter than main loop)
-            await self._interruptible_sleep(5)
+            await self._interruptible_sleep(REBASE_POLL_INTERVAL_SECONDS)
+
+    async def _wait_for_post_rebase_pipeline(
+        self,
+        mr_iid: int,
+        old_sha: str,
+        timeout_seconds: int | None = None,
+    ) -> tuple[Pipeline | None, str]:
+        """Wait for a new pipeline after rebase with the correct SHA.
+
+        After rebase completes, GitLab may still return an old pipeline
+        due to API caching or the new pipeline not yet being created.
+        This method waits until we find a pipeline whose SHA matches
+        the MR's current (post-rebase) SHA.
+
+        Args:
+            mr_iid: MR IID to wait for.
+            old_sha: SHA before rebase started.
+            timeout_seconds: Maximum time to wait (default 60s).
+
+        Returns:
+            Tuple of (pipeline, new_sha). Pipeline may be None if not found.
+        """
+        if timeout_seconds is None:
+            timeout_seconds = DEFAULT_POST_REBASE_PIPELINE_WAIT_SECONDS
+
+        start = datetime.now(UTC)
+
+        while (datetime.now(UTC) - start).total_seconds() < timeout_seconds:
+            if self._shutdown_event.is_set():
+                return None, old_sha
+
+            mr = await self.gitlab_client.get_mr(mr_iid)
+
+            if mr.rebase_in_progress:
+                await asyncio.sleep(PIPELINE_POLL_INTERVAL_SECONDS)
+                continue
+
+            new_sha = mr.sha
+
+            # Fast-forward case: SHA unchanged (no commits ahead of target)
+            if new_sha == old_sha:
+                pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
+                if pipeline and pipeline.sha == new_sha:
+                    return pipeline, new_sha
+                await asyncio.sleep(PIPELINE_POLL_INTERVAL_SECONDS)
+                continue
+
+            # SHA changed, need pipeline with new SHA
+            pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
+            if pipeline and pipeline.sha == new_sha:
+                log.info(
+                    "Found pipeline with new SHA after rebase",
+                    mr_iid=mr_iid,
+                    pipeline_id=pipeline.id,
+                    old_sha=old_sha[:8],
+                    new_sha=new_sha[:8],
+                )
+                return pipeline, new_sha
+
+            await asyncio.sleep(PIPELINE_POLL_INTERVAL_SECONDS)
+
+        # Timeout - return current state
+        mr = await self.gitlab_client.get_mr(mr_iid)
+        pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
+        log.warning(
+            "Timeout waiting for post-rebase pipeline",
+            mr_iid=mr_iid,
+            old_sha=old_sha[:8],
+            current_sha=mr.sha[:8] if mr.sha else "unknown",
+            pipeline_id=pipeline.id if pipeline else None,
+        )
+        return pipeline, mr.sha
 
     # =========================================================================
     # Pipeline Step
@@ -422,6 +535,9 @@ class MergeProcessor:
         old_pipeline_id = pipeline.id
         old_pipeline_url = self.notifier.build_pipeline_url(old_pipeline_id)
 
+        # Capture old SHA before retry rebase for race condition prevention
+        old_sha = await self._capture_pre_rebase_sha(ctx)
+
         try:
             await self.gitlab_client.rebase_mr(mr_iid)
             await self._wait_for_rebase_quick(ctx)
@@ -434,27 +550,13 @@ class MergeProcessor:
             )
             return False, None
 
-        # Wait for new pipeline to be created (GitLab creates it asynchronously)
-        max_wait_seconds = 30
-        poll_interval = 3
-        waited = 0
-        new_pipeline = None
+        # Wait for new pipeline with correct SHA using the robust method
+        timeout_seconds = self.settings.post_rebase_pipeline_wait_seconds
+        new_pipeline, new_sha = await self._wait_for_post_rebase_pipeline(
+            mr_iid, old_sha, timeout_seconds=timeout_seconds
+        )
 
-        while waited < max_wait_seconds:
-            new_pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
-            if new_pipeline and new_pipeline.id != old_pipeline_id:
-                log.info(
-                    "New pipeline detected after retry rebase",
-                    mr_iid=mr_iid,
-                    old_pipeline_id=old_pipeline_id,
-                    new_pipeline_id=new_pipeline.id,
-                    waited_seconds=waited,
-                )
-                break
-            await asyncio.sleep(poll_interval)
-            waited += poll_interval
-
-        if new_pipeline and new_pipeline.id != old_pipeline_id:
+        if new_pipeline and new_pipeline.id != old_pipeline_id and new_pipeline.sha == new_sha:
             new_pipeline_url = self.notifier.build_pipeline_url(new_pipeline.id)
             await sm.notify_pipeline_retry(
                 old_pipeline_id=old_pipeline_id,
@@ -464,22 +566,75 @@ class MergeProcessor:
                 retry_count=retry_count + 1,
                 max_retries=max_retries,
                 failed_jobs=failed_jobs,
+                expected_sha=new_sha,
             )
             return True, datetime.now(UTC)
 
-        # Rebase succeeded but no new pipeline was created after waiting - mark as failed
+        # No auto-created pipeline - try to force-create one via API
         log.warning(
-            "No new pipeline after retry rebase",
+            "No auto-created pipeline after retry rebase, attempting force-create",
             mr_iid=mr_iid,
             old_pipeline_id=old_pipeline_id,
-            waited_seconds=waited,
+            old_sha=old_sha[:8],
+            new_sha=new_sha[:8] if new_sha else "unknown",
         )
-        await sm.trigger_pipeline_failed(
-            failed_jobs=failed_jobs,
-            retry_count=retry_count + 1,
-            error_message="No new pipeline created after retry rebase",
-        )
-        return False, None
+
+        # Get MR to fetch source_branch and current SHA
+        mr = await self.gitlab_client.get_mr(mr_iid)
+        source_branch = mr.source_branch
+        current_sha = mr.sha
+
+        try:
+            created_pipeline = await self.gitlab_client.create_pipeline(source_branch)
+
+            # Validate created pipeline has correct SHA (race condition protection)
+            if created_pipeline.sha != current_sha:
+                log.error(
+                    "Force-created pipeline has wrong SHA (race condition)",
+                    mr_iid=mr_iid,
+                    pipeline_id=created_pipeline.id,
+                    expected_sha=current_sha[:8],
+                    actual_sha=created_pipeline.sha[:8],
+                )
+                await sm.trigger_pipeline_failed(
+                    failed_jobs=failed_jobs,
+                    retry_count=retry_count + 1,
+                    error_message="Force-created pipeline has wrong SHA (race condition)",
+                )
+                return False, None
+
+            new_pipeline_url = self.notifier.build_pipeline_url(created_pipeline.id)
+            await sm.notify_pipeline_retry(
+                old_pipeline_id=old_pipeline_id,
+                old_pipeline_url=old_pipeline_url,
+                new_pipeline_id=created_pipeline.id,
+                new_pipeline_url=new_pipeline_url,
+                retry_count=retry_count + 1,
+                max_retries=max_retries,
+                failed_jobs=failed_jobs,
+                expected_sha=current_sha,
+            )
+            log.info(
+                "Force-created pipeline after retry rebase",
+                mr_iid=mr_iid,
+                pipeline_id=created_pipeline.id,
+                sha=current_sha[:8],
+            )
+            return True, datetime.now(UTC)
+
+        except (GitLabAPIError, GitLabNotFoundError) as e:
+            log.exception(
+                "Failed to force-create pipeline",
+                mr_iid=mr_iid,
+                source_branch=source_branch,
+                error=str(e),
+            )
+            await sm.trigger_pipeline_failed(
+                failed_jobs=failed_jobs,
+                retry_count=retry_count + 1,
+                error_message=f"Failed to create pipeline: {e}",
+            )
+            return False, None
 
     async def _wait_for_pipeline(self, ctx: ProcessingContext) -> ProcessingResult:
         """Poll pipeline status until success/failure or timeout."""
@@ -570,7 +725,7 @@ class MergeProcessor:
             GitLabAPIError: If rebase times out or fails.
         """
         mr_iid = ctx.mr_iid
-        timeout = timedelta(seconds=60)  # Short timeout for retry rebase
+        timeout = timedelta(seconds=QUICK_REBASE_TIMEOUT_SECONDS)
         start_time = datetime.now(UTC)
 
         while True:
@@ -589,7 +744,7 @@ class MergeProcessor:
             if not rebase_in_progress:
                 return
 
-            await asyncio.sleep(3)
+            await asyncio.sleep(QUICK_REBASE_POLL_INTERVAL_SECONDS)
 
     async def _get_failed_jobs(self, pipeline_id: int) -> list[str]:
         """Get list of failed job names from a pipeline.
@@ -638,10 +793,10 @@ class MergeProcessor:
         log.info("Executing merge", mr_iid=mr_iid)
 
         try:
-            # Add 30-second timeout for merge operation to prevent hanging
+            # Add timeout for merge operation to prevent hanging
             merged_mr = await asyncio.wait_for(
                 self.gitlab_client.merge_mr(mr_iid),
-                timeout=30.0,
+                timeout=float(MERGE_TIMEOUT_SECONDS),
             )
             log.info("Merge successful", mr_iid=mr_iid, state=merged_mr.state)
             await sm.trigger_merge_success()
@@ -699,6 +854,24 @@ class MergeProcessor:
                         mr_iid=item.mr_iid,
                         error=str(e),
                     )
+
+    async def _capture_pre_rebase_sha(self, ctx: ProcessingContext) -> str:
+        """Capture SHA before rebase for race condition prevention.
+
+        Stores the SHA in the processing context and returns it.
+        This is used to detect stale pipeline data after rebase.
+
+        Args:
+            ctx: Processing context to store SHA in.
+
+        Returns:
+            The captured SHA.
+        """
+        mr = await self.gitlab_client.get_mr(ctx.mr_iid)
+        old_sha = mr.sha
+        ctx.rebase_ctx.old_sha = old_sha
+        log.debug("Captured pre-rebase SHA", mr_iid=ctx.mr_iid, old_sha=old_sha[:8])
+        return old_sha
 
     async def _interruptible_sleep(self, seconds: float) -> bool:
         """Sleep that can be interrupted by shutdown event.

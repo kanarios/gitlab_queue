@@ -109,7 +109,9 @@ async def full_flow_with_failures_and_recovery():
             pipelines_400_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/400/pipelines")
             pipelines_400_responses = [
                 jj.Response(status=200, json=[{"id": 8000, "status": "failed", "sha": "flaky123"}]),
-                jj.Response(status=200, json=[{"id": 8001, "status": "success", "sha": "flaky456"}]),
+                jj.Response(
+                    status=200, json=[{"id": 8001, "status": "success", "sha": "flaky123"}]
+                ),  # SHA must match MR
             ]
 
             merge_400_matcher = jj.match("PUT", "/api/v4/projects/123/merge_requests/400/merge")
@@ -185,6 +187,12 @@ async def full_flow_with_failures_and_recovery():
             failed_jobs_matcher = jj.match("GET", jj.matchers.regex(r"/api/v4/projects/123/pipelines/\d+/jobs"))
             failed_jobs_response = jj.Response(status=200, json=[{"id": 9000, "name": "test", "status": "failed"}])
 
+            # Create pipeline fallback (when auto-created pipeline not found)
+            create_pipeline_matcher = jj.match("POST", "/api/v4/projects/123/pipelines")
+            create_pipeline_response = jj.Response(
+                status=201, json={"id": 8001, "status": "success", "sha": "flaky123"}
+            )
+
         # Setup response sequences
         rebase_400_mock_1 = mocked(rebase_400_matcher, rebase_400_responses[0])
         rebase_400_mock_2 = mocked(rebase_400_matcher, rebase_400_responses[1])
@@ -208,6 +216,7 @@ async def full_flow_with_failures_and_recovery():
             mocked(conflicts_402_matcher, conflicts_402_response),
             mocked(get_notes_matcher, get_notes_response),
             mocked(comment_matcher, comment_response),
+            mocked(create_pipeline_matcher, create_pipeline_response),
         ):
             with when("system handles various failure scenarios"):
                 gitlab_client = GitLabClient(settings)

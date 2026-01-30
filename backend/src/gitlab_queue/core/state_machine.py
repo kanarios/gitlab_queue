@@ -174,12 +174,14 @@ class MRStateMachine(StateMachine):
 
         pipeline_id = self._context.get("pipeline_id")
         pipeline_url = self._context.get("pipeline_url")
+        expected_sha = self._context.get("expected_sha")
 
         await self.queue_manager.update_mr_state(
             self.mr_iid,
             "testing",
             pipeline_id=pipeline_id,
             pipeline_status="running",
+            expected_sha=expected_sha,
         )
         await self.notifier.notify(
             self.mr_iid,
@@ -374,20 +376,24 @@ class MRStateMachine(StateMachine):
         *,
         pipeline_id: int,
         pipeline_url: str,
+        expected_sha: str | None = None,
     ) -> None:
         """Rebase completed, pipeline started.
 
         Args:
             pipeline_id: ID of the new pipeline.
             pipeline_url: URL to the pipeline page.
+            expected_sha: SHA that the pipeline should be for (race condition prevention).
         """
         log.info(
             "Triggering rebase_complete",
             mr_iid=self.mr_iid,
             pipeline_id=pipeline_id,
+            expected_sha=expected_sha[:8] if expected_sha else None,
         )
         self._context["pipeline_id"] = pipeline_id
         self._context["pipeline_url"] = pipeline_url
+        self._context["expected_sha"] = expected_sha
         await self.rebase_complete()
 
     async def trigger_rebase_failed(
@@ -503,6 +509,7 @@ class MRStateMachine(StateMachine):
         retry_count: int,
         max_retries: int,
         failed_jobs: list[str],
+        expected_sha: str | None = None,
     ) -> None:
         """Notify about pipeline retry (stays in testing state).
 
@@ -514,17 +521,20 @@ class MRStateMachine(StateMachine):
             retry_count: Current retry attempt number.
             max_retries: Maximum retry attempts configured.
             failed_jobs: List of jobs that failed.
+            expected_sha: SHA that the new pipeline should be for (race condition prevention).
         """
         log.info(
             "Notifying pipeline retry",
             mr_iid=self.mr_iid,
             retry_count=retry_count,
             max_retries=max_retries,
+            expected_sha=expected_sha[:8] if expected_sha else None,
         )
 
         # Update context for future reference
         self._context["pipeline_id"] = new_pipeline_id
         self._context["pipeline_url"] = new_pipeline_url
+        self._context["expected_sha"] = expected_sha
 
         await self.queue_manager.update_mr_state(
             self.mr_iid,
@@ -532,6 +542,7 @@ class MRStateMachine(StateMachine):
             pipeline_id=new_pipeline_id,
             pipeline_status="running",
             retry_count=retry_count,
+            expected_sha=expected_sha,
         )
         await self.notifier.notify(
             self.mr_iid,
