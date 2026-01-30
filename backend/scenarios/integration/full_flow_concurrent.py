@@ -17,6 +17,8 @@ from scenarios.contexts.jj_gitlab_mock import get_mock_url
 from scenarios.contexts.sqlite_client import initialized_test_database
 from vedro import given, scenario, then, when
 
+from sqlalchemy.exc import IntegrityError, NoResultFound
+
 from gitlab_queue.clients.gitlab import GitLabClient
 from gitlab_queue.core.queue import QueueManager
 from gitlab_queue.core.scheduler import QueueScheduler
@@ -115,6 +117,11 @@ async def concurrent_webhook_and_polling_no_duplicates():
                 # when both try to add the same MR simultaneously.
                 # This is expected behavior - the important thing is that
                 # at least one succeeds and no duplicates are created.
+                # Only IntegrityError/NoResultFound are acceptable - other exceptions are bugs.
+                expected_race_errors = (IntegrityError, NoResultFound)
+                unexpected = [r for r in results if isinstance(r, Exception) and not isinstance(r, expected_race_errors)]
+                if unexpected:
+                    raise unexpected[0]
                 successes = [r for r in results if not isinstance(r, Exception)]
                 assert len(successes) >= 1, "At least one operation should succeed"
 
@@ -223,6 +230,11 @@ async def concurrent_multiple_webhooks_same_mr():
                 # Note: Some operations may fail with IntegrityError/race conditions
                 # when multiple webhooks process the same MR simultaneously.
                 # This is expected - the key assertion is: no duplicates created.
+                # Only IntegrityError/NoResultFound are acceptable - other exceptions are bugs.
+                expected_race_errors = (IntegrityError, NoResultFound)
+                unexpected = [r for r in results if isinstance(r, Exception) and not isinstance(r, expected_race_errors)]
+                if unexpected:
+                    raise unexpected[0]
                 successes = [r for r in results if not isinstance(r, Exception)]
                 assert len(successes) >= 1, "At least one webhook should succeed"
 

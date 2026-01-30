@@ -35,4 +35,4 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Revert migration changes."""
     with op.batch_alter_table("merge_requests_history", schema=None) as batch_op:
-        batch_op.drop_index("idx_history_iid_unique")
+        batch_op.drop_index("idx_history_iid_unique", if_exists=True)
