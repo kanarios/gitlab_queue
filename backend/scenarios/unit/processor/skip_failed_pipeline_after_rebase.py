@@ -3,8 +3,8 @@
 When SHA changes after rebase, the processor should skip pipelines with
 failed/canceled status that match the new SHA and wait for a new pipeline.
 
-This test verifies that the processor correctly handles SHA changes
-and uses a valid pipeline for the merge.
+This test verifies that the processor correctly skips a failed pipeline
+and uses the next valid (success) pipeline for the merge.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 
 import jj
 import vedro
+from jj.expiration_policy import ExpireAfterRequests
 from jj.mock import mocked
 from scenarios.contexts.jj_gitlab_mock import get_mock_url
 
@@ -28,7 +29,7 @@ from gitlab_queue.models.mr import Author, MergeRequest
 class Scenario(vedro.Scenario):
     subject = "skip failed pipeline after rebase when SHA changes"
 
-    async def given_mr_in_queue_with_new_sha_after_rebase(self):
+    async def given_mr_in_queue_with_failed_then_success_pipeline(self):
         # Setup test database and queue
         self.db = Database(database_url="sqlite+aiosqlite:///:memory:")
         await self.db.initialize()
@@ -38,7 +39,7 @@ class Scenario(vedro.Scenario):
         # Create test MR with old SHA
         test_mr = MergeRequest(
             iid=42,
-            title="Test MR with new SHA after rebase",
+            title="Test MR with failed pipeline after rebase",
             state="opened",
             target_branch="main",
             source_branch="feature/test",
@@ -59,7 +60,7 @@ class Scenario(vedro.Scenario):
         self.mr_data = {
             "iid": 42,
             "project_id": 123,
-            "title": "Test MR with new SHA after rebase",
+            "title": "Test MR with failed pipeline after rebase",
             "description": "Test description",
             "state": "opened",
             "target_branch": "main",
@@ -73,7 +74,16 @@ class Scenario(vedro.Scenario):
             "rebase_in_progress": False,
         }
 
-        # Success pipeline with new SHA
+        # Failed pipeline with new SHA - should be skipped
+        self.failed_pipeline = {
+            "id": 1001,
+            "status": "failed",
+            "sha": "new_sha_456",
+            "ref": "feature/test",
+            "web_url": "https://gitlab.com/test/project/-/pipelines/1001",
+        }
+
+        # Success pipeline with new SHA - should be used after failed is skipped
         self.success_pipeline = {
             "id": 1002,
             "status": "success",
@@ -95,9 +105,11 @@ class Scenario(vedro.Scenario):
         self.rebase_matcher = jj.match("PUT", "/api/v4/projects/123/merge_requests/42/rebase")
         self.rebase_response = jj.Response(status=202, json={"rebase_in_progress": False})
 
-        # Return success pipeline with correct SHA
         self.pipelines_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/42/pipelines")
-        self.pipelines_response = jj.Response(status=200, json=[self.success_pipeline])
+        # First response: failed pipeline (expires after 1 request)
+        self.pipelines_response_failed = jj.Response(status=200, json=[self.failed_pipeline])
+        # Second response: success pipeline (used after failed expires)
+        self.pipelines_response_success = jj.Response(status=200, json=[self.success_pipeline])
 
         self.merge_matcher = jj.match("PUT", "/api/v4/projects/123/merge_requests/42/merge")
         self.merge_response = jj.Response(status=200, json=self.merged_mr_data)
@@ -126,11 +138,20 @@ class Scenario(vedro.Scenario):
             post_rebase_pipeline_wait_seconds=5,
         )
 
-    async def when_processor_runs_after_rebase_with_new_sha(self):
+    async def when_processor_skips_failed_and_uses_success_pipeline(self):
+        # Use ExpireAfterRequests to create a sequence:
+        # First call returns failed (then expires), subsequent calls return success
         async with (
             mocked(self.get_mr_matcher, self.get_mr_response),
             mocked(self.rebase_matcher, self.rebase_response),
-            mocked(self.pipelines_matcher, self.pipelines_response) as self.pipelines_mock,
+            # Success pipeline mock (registered first, used after failed expires)
+            mocked(self.pipelines_matcher, self.pipelines_response_success) as self.pipelines_mock,
+            # Failed pipeline mock (registered last, expires after 1 request)
+            mocked(
+                self.pipelines_matcher,
+                self.pipelines_response_failed,
+                ExpireAfterRequests(1),
+            ),
             mocked(self.merge_matcher, self.merge_response) as self.merge_mock,
             mocked(self.get_notes_matcher, self.get_notes_response),
             mocked(self.comment_matcher, self.comment_response),
@@ -161,6 +182,10 @@ class Scenario(vedro.Scenario):
     async def and_merge_should_be_called_once(self):
         assert len(self.merge_history) == 1, "Merge should have been called once"
 
-    async def and_pipeline_was_fetched(self):
-        # Pipeline endpoint was called at least once
-        assert len(self.pipeline_history) >= 1, f"Pipeline should be fetched (got {len(self.pipeline_history)} calls)"
+    async def and_failed_pipeline_was_skipped(self):
+        # Pipeline endpoint was called multiple times:
+        # first with failed (skipped), then with success (used)
+        # The success mock captures calls after the failed mock expires
+        assert len(self.pipeline_history) >= 1, (
+            f"Pipeline should be fetched multiple times (got {len(self.pipeline_history)} calls to success mock)"
+        )
