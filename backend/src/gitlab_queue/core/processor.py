@@ -54,6 +54,10 @@ QUICK_REBASE_TIMEOUT_SECONDS = 60
 MERGE_TIMEOUT_SECONDS = 30
 DEFAULT_POST_REBASE_PIPELINE_WAIT_SECONDS = 60
 
+# Terminal pipeline statuses to skip when waiting for post-rebase pipeline
+# These are pipelines that failed/were canceled before rebase and should not be used
+TERMINAL_FAILED_PIPELINE_STATUSES = frozenset(("canceled", "failed"))
+
 
 # =============================================================================
 # Result Types
@@ -471,6 +475,15 @@ class MergeProcessor:
             if new_sha == old_sha:
                 pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
                 if pipeline and pipeline.sha == new_sha:
+                    if pipeline.status in TERMINAL_FAILED_PIPELINE_STATUSES:
+                        log.info(
+                            "Skipping pre-existing terminal pipeline in fast-forward case",
+                            mr_iid=mr_iid,
+                            pipeline_id=pipeline.id,
+                            pipeline_status=pipeline.status,
+                        )
+                        await asyncio.sleep(PIPELINE_POLL_INTERVAL_SECONDS)
+                        continue
                     return pipeline, new_sha
                 await asyncio.sleep(PIPELINE_POLL_INTERVAL_SECONDS)
                 continue
@@ -478,6 +491,15 @@ class MergeProcessor:
             # SHA changed, need pipeline with new SHA
             pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
             if pipeline and pipeline.sha == new_sha:
+                if pipeline.status in TERMINAL_FAILED_PIPELINE_STATUSES:
+                    log.info(
+                        "Skipping pre-existing terminal pipeline after rebase",
+                        mr_iid=mr_iid,
+                        pipeline_id=pipeline.id,
+                        pipeline_status=pipeline.status,
+                    )
+                    await asyncio.sleep(PIPELINE_POLL_INTERVAL_SECONDS)
+                    continue
                 log.info(
                     "Found pipeline with new SHA after rebase",
                     mr_iid=mr_iid,
