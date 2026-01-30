@@ -145,13 +145,13 @@ class Scenario(vedro.Scenario):
             mocked(self.get_mr_matcher, self.get_mr_response),
             mocked(self.rebase_matcher, self.rebase_response),
             # Success pipeline mock (registered first, used after failed expires)
-            mocked(self.pipelines_matcher, self.pipelines_response_success) as self.pipelines_mock,
+            mocked(self.pipelines_matcher, self.pipelines_response_success) as self.pipelines_success_mock,
             # Failed pipeline mock (registered last, expires after 1 request)
             mocked(
                 self.pipelines_matcher,
                 self.pipelines_response_failed,
                 ExpireAfterRequests(1),
-            ),
+            ) as self.pipelines_failed_mock,
             mocked(self.merge_matcher, self.merge_response) as self.merge_mock,
             mocked(self.get_notes_matcher, self.get_notes_response),
             mocked(self.comment_matcher, self.comment_response),
@@ -174,7 +174,8 @@ class Scenario(vedro.Scenario):
 
             # Fetch history
             self.merge_history = await self.merge_mock.fetch_history()
-            self.pipeline_history = await self.pipelines_mock.fetch_history()
+            self.pipeline_failed_history = await self.pipelines_failed_mock.fetch_history()
+            self.pipeline_success_history = await self.pipelines_success_mock.fetch_history()
 
     async def then_mr_should_be_successfully_merged(self):
         assert self.result == ProcessingResult.SUCCESS
@@ -182,10 +183,14 @@ class Scenario(vedro.Scenario):
     async def and_merge_should_be_called_once(self):
         assert len(self.merge_history) == 1, "Merge should have been called once"
 
-    async def and_failed_pipeline_was_skipped(self):
-        # Pipeline endpoint was called multiple times:
-        # first with failed (skipped), then with success (used)
-        # The success mock captures calls after the failed mock expires
-        assert len(self.pipeline_history) >= 1, (
-            f"Pipeline should be fetched multiple times (got {len(self.pipeline_history)} calls to success mock)"
+    async def and_failed_pipeline_was_fetched_first(self):
+        # Verify failed pipeline mock was called (the skip happened)
+        assert len(self.pipeline_failed_history) == 1, (
+            f"Failed pipeline mock should be called exactly once (got {len(self.pipeline_failed_history)})"
+        )
+
+    async def and_success_pipeline_was_used_after_skip(self):
+        # Verify success pipeline mock was called after failed was skipped
+        assert len(self.pipeline_success_history) >= 1, (
+            f"Success pipeline mock should be called after failed was skipped (got {len(self.pipeline_success_history)})"
         )
