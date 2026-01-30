@@ -406,7 +406,9 @@ class MergeProcessor:
                 old_sha = ctx.rebase_ctx.old_sha
 
                 # Wait for pipeline with matching SHA
-                pipeline, new_sha = await self._wait_for_post_rebase_pipeline(mr_iid, old_sha)
+                pipeline, new_sha = await self._wait_for_post_rebase_pipeline(
+                    mr_iid, old_sha, timeout_seconds=self.settings.post_rebase_pipeline_wait_seconds
+                )
 
                 if pipeline and pipeline.sha == new_sha:
                     pipeline_url = self.notifier.build_pipeline_url(pipeline.id)
