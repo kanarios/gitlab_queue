@@ -246,8 +246,10 @@ async def process_mr_with_pipeline_failure_max_retries():
         jobs_response = jj.Response(status=200, json=failed_jobs)
 
         # Create pipeline (fallback when auto-created pipeline not found) - returns failed pipeline
+        # Use distinct ID (3004) to verify id-change detection logic
+        created_pipeline = {"id": 3004, "status": "failed", "sha": "broken123"}
         create_pipeline_matcher = jj.match("POST", "/api/v4/projects/123/pipelines")
-        create_pipeline_response = jj.Response(status=201, json=failed_pipeline_1)
+        create_pipeline_response = jj.Response(status=201, json=created_pipeline)
 
         comment_matcher = jj.match("POST", "/api/v4/projects/123/merge_requests/51/notes")
         comment_response = jj.Response(status=201, json={"id": 21})
