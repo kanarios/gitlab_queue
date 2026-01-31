@@ -187,6 +187,7 @@ class Settings:
 
     # Timing
     poll_interval_seconds: int = var(default=30, converter=int)
+    pipeline_poll_interval_seconds: int = var(default=5, converter=int)  # 5 seconds for responsive pipeline checks
     pipeline_timeout_seconds: int = var(default=7200, converter=int)  # 2 hours
     rebase_timeout_seconds: int = var(default=300, converter=int)  # 5 minutes
     post_rebase_pipeline_wait_seconds: int = var(default=90, converter=int)  # 90 seconds
@@ -276,6 +277,7 @@ def _settings_repr(self: Settings) -> str:
         "queue_label",
         "hotfix_label",
         "poll_interval_seconds",
+        "pipeline_poll_interval_seconds",
         "pipeline_timeout_seconds",
         "rebase_timeout_seconds",
         "post_rebase_pipeline_wait_seconds",
@@ -346,6 +348,8 @@ def _validate_timing_settings(settings: Settings, errors: list[str]) -> None:
     """Validate timing and interval settings."""
     if settings.poll_interval_seconds <= 0:
         errors.append(f"poll_interval_seconds must be positive, got: {settings.poll_interval_seconds}")
+    if settings.pipeline_poll_interval_seconds <= 0:
+        errors.append(f"pipeline_poll_interval_seconds must be positive, got: {settings.pipeline_poll_interval_seconds}")
     if settings.pipeline_timeout_seconds <= 0:
         errors.append(f"pipeline_timeout_seconds must be positive, got: {settings.pipeline_timeout_seconds}")
     if settings.rebase_timeout_seconds <= 0:
