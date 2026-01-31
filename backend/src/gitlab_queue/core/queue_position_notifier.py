@@ -42,8 +42,14 @@ class QueuePositionNotifier:
         Args:
             mr_iid: Internal ID of the MR that was just added.
         """
-        position = await self.queue_manager.get_queue_position(mr_iid)
-        total = await self.queue_manager.get_queue_length()
+        queue_items = await self.queue_manager.get_active_queue()
+        total = len(queue_items)
+
+        position: int | None = None
+        for i, item in enumerate(queue_items, start=1):
+            if item.mr_iid == mr_iid:
+                position = i
+                break
 
         if position is None:
             log.warning(
@@ -69,7 +75,9 @@ class QueuePositionNotifier:
         )
 
     async def capture_queue_positions(self) -> dict[int, int]:
-        """Capture current positions of all queued MRs for comparison.
+        """Capture current positions of queued MRs for comparison.
+
+        Only captures MRs in 'queued' state (not actively processing).
 
         Returns:
             Dict mapping mr_iid to 1-indexed position.
@@ -77,7 +85,8 @@ class QueuePositionNotifier:
         queue_items = await self.queue_manager.get_active_queue()
         positions: dict[int, int] = {}
         for i, item in enumerate(queue_items, start=1):
-            positions[item.mr_iid] = i
+            if item.state == "queued":
+                positions[item.mr_iid] = i
         return positions
 
     async def _notify_position_changes(
