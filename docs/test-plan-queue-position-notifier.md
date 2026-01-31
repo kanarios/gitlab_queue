@@ -6,7 +6,7 @@ Unit tests for `QueuePositionNotifier` class (`backend/src/gitlab_queue/core/que
 
 ## Test Location
 
-```
+```text
 backend/scenarios/unit/queue_position_notifier/
 ├── __init__.py
 ├── _helpers.py
@@ -14,18 +14,18 @@ backend/scenarios/unit/queue_position_notifier/
 │   ├── __init__.py
 │   ├── sends_notification_with_correct_position.py
 │   ├── uses_queued_at_from_queue_item.py
-│   └── logs_warning_when_mr_not_in_queue.py
+│   └── does_not_notify_when_mr_not_in_queue.py
 ├── capture_queue_positions/
 │   ├── __init__.py
 │   ├── captures_only_queued_state_mrs.py
 │   └── returns_correct_positions.py
-├── notify_after_completion/
+├── notify_affected_mrs_after_completion/
 │   ├── __init__.py
 │   ├── notifies_mrs_with_changed_position.py
 │   ├── skips_excluded_mr.py
 │   ├── skips_unchanged_positions.py
 │   └── skips_non_queued_states.py
-└── notify_after_hotfix/
+└── notify_affected_mrs_after_hotfix_added/
     ├── __init__.py
     └── notifies_with_hotfix_context.py
 ```
@@ -35,6 +35,7 @@ backend/scenarios/unit/queue_position_notifier/
 ### 1. `notify_initial_position`
 
 #### 1.1 Sends notification with correct position
+
 - **Given**: Queue with 3 MRs, target MR at position 2
 - **When**: `notify_initial_position(mr_iid)` called
 - **Then**: `notifier.notify()` called with:
@@ -44,20 +45,23 @@ backend/scenarios/unit/queue_position_notifier/
   - `estimated_minutes=30` (2 * 15)
 
 #### 1.2 Uses queued_at from QueueItem
+
 - **Given**: Queue with MR that has specific `queued_at` timestamp
 - **When**: `notify_initial_position(mr_iid)` called
 - **Then**: `notifier.notify()` called with `queued_at` matching the QueueItem's value (not `datetime.now()`)
 
-#### 1.3 Logs warning when MR not in queue
+#### 1.3 Does not notify when MR not in queue
+
 - **Given**: Empty queue
 - **When**: `notify_initial_position(123)` called
-- **Then**: 
+- **Then**:
   - `notifier.notify()` NOT called
   - Warning logged with `mr_iid=123`
 
 ### 2. `capture_queue_positions`
 
 #### 2.1 Captures only queued state MRs
+
 - **Given**: Queue with:
   - MR1 (state="queued", position 1)
   - MR2 (state="rebasing", position 2)
@@ -66,6 +70,7 @@ backend/scenarios/unit/queue_position_notifier/
 - **Then**: Returns `{MR1: 1, MR3: 3}` (MR2 excluded)
 
 #### 2.2 Returns correct 1-indexed positions
+
 - **Given**: Queue with 3 MRs all in "queued" state
 - **When**: `capture_queue_positions()` called
 - **Then**: Returns `{MR1: 1, MR2: 2, MR3: 3}`
@@ -73,7 +78,8 @@ backend/scenarios/unit/queue_position_notifier/
 ### 3. `notify_affected_mrs_after_completion`
 
 #### 3.1 Notifies MRs with changed position
-- **Given**: 
+
+- **Given**:
   - `positions_before = {MR1: 2, MR2: 3}`
   - Current queue: MR1 at position 1, MR2 at position 2
 - **When**: `notify_affected_mrs_after_completion(completed_mr_iid, positions_before)` called
@@ -82,21 +88,24 @@ backend/scenarios/unit/queue_position_notifier/
   - Correct `old_position` and `position` values
 
 #### 3.2 Skips excluded MR
-- **Given**: 
+
+- **Given**:
   - `positions_before = {MR1: 1, MR2: 2}`
   - `excluded_mr_iid = MR1`
 - **When**: `notify_affected_mrs_after_completion(MR1, positions_before)` called
 - **Then**: `notifier.notify()` NOT called for MR1
 
 #### 3.3 Skips unchanged positions
-- **Given**: 
+
+- **Given**:
   - `positions_before = {MR1: 1}`
   - Current queue: MR1 still at position 1
 - **When**: `notify_affected_mrs_after_completion(other_mr, positions_before)` called
 - **Then**: `notifier.notify()` NOT called for MR1
 
 #### 3.4 Skips non-queued states
-- **Given**: 
+
+- **Given**:
   - `positions_before = {MR1: 2}`
   - Current queue: MR1 at position 1 but state="rebasing"
 - **When**: `notify_affected_mrs_after_completion(other_mr, positions_before)` called
@@ -105,6 +114,7 @@ backend/scenarios/unit/queue_position_notifier/
 ### 4. `notify_affected_mrs_after_hotfix_added`
 
 #### 4.1 Notifies with hotfix context
+
 - **Given**: Same as 3.1 but for hotfix scenario
 - **When**: `notify_affected_mrs_after_hotfix_added(hotfix_mr_iid, positions_before)` called
 - **Then**: Log message includes "due to hotfix" context
@@ -116,18 +126,21 @@ backend/scenarios/unit/queue_position_notifier/
 Location: `backend/scenarios/unit/handlers/`
 
 #### 5.1 Catches exceptions and logs warning
+
 - **Given**: `position_notifier.notify_initial_position()` raises Exception
 - **When**: `_notify_position_after_add(mr_iid, is_hotfix, positions_before)` called
-- **Then**: 
+- **Then**:
   - Exception NOT propagated
   - Warning logged with `mr_iid` and error message
 
 #### 5.2 Calls hotfix notification when is_hotfix=True
+
 - **Given**: `is_hotfix=True`, `positions_before` has data
 - **When**: `_notify_position_after_add(mr_iid, True, positions_before)` called
 - **Then**: Both `notify_initial_position()` and `notify_affected_mrs_after_hotfix_added()` called
 
 #### 5.3 Skips hotfix notification when is_hotfix=False
+
 - **Given**: `is_hotfix=False`
 - **When**: `_notify_position_after_add(mr_iid, False, {})` called
 - **Then**: Only `notify_initial_position()` called
@@ -162,7 +175,7 @@ class MockQueueItem:
     mr_iid: int
     state: str = "queued"
     queued_at: datetime = None
-    
+
     def __post_init__(self):
         if self.queued_at is None:
             self.queued_at = datetime.now(UTC)
@@ -192,4 +205,4 @@ def create_position_notifier(
 - Medium priority tests: 1.5 hours
 - Low priority tests: 1 hour
 
-**Total: ~5 hours**
+### Total: ~5 hours
