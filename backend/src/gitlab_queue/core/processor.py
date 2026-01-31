@@ -404,9 +404,6 @@ class MergeProcessor:
             timeout_seconds=self.settings.rebase_timeout_seconds,
         )
 
-        # Result holder for capturing values from poll function
-        poll_result: dict[str, object] = {}
-
         async def check_rebase() -> tuple[PollStatus, ProcessingResult | None]:
             rebase_in_progress, has_conflicts = await self.gitlab_client.check_rebase_status(mr_iid)
 
@@ -435,8 +432,6 @@ class MergeProcessor:
                     )
                     return PollStatus.DONE, ProcessingResult.SUCCESS
 
-                # Store for potential retry logging
-                poll_result["new_sha"] = new_sha
                 log.debug(
                     "Waiting for pipeline with correct SHA after rebase",
                     mr_iid=mr_iid,
@@ -495,9 +490,6 @@ class MergeProcessor:
         if timeout_seconds is None:
             timeout_seconds = DEFAULT_POST_REBASE_PIPELINE_WAIT_SECONDS
 
-        # Result holder for capturing values across poll iterations
-        poll_result: dict[str, object] = {"new_sha": old_sha}
-
         async def check_pipeline() -> tuple[PollStatus, tuple[Pipeline | None, str] | None]:
             mr = await self.gitlab_client.get_mr(mr_iid)
 
@@ -505,7 +497,6 @@ class MergeProcessor:
                 return PollStatus.CONTINUE, None
 
             new_sha = mr.sha
-            poll_result["new_sha"] = new_sha
 
             # Fast-forward case: SHA unchanged (no commits ahead of target)
             if new_sha == old_sha:
