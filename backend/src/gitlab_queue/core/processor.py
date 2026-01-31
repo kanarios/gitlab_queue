@@ -24,6 +24,11 @@ from gitlab_queue.clients.gitlab import (
     GitLabConflictError,
     GitLabNotFoundError,
 )
+from gitlab_queue.core.rebase_during_testing import (
+    RebaseDuringTestingContext,
+    RebaseDuringTestingHandler,
+    RebaseRetryLimitExceeded,
+)
 from gitlab_queue.core.state_machine import MRStateMachine, create_state_machine_for_mr
 from gitlab_queue.metrics import MR_DURATION
 from gitlab_queue.utils.logging import LogContext, get_logger
@@ -670,22 +675,24 @@ class MergeProcessor:
         retry_count = 0
         max_retries = self.settings.pipeline_retry_count
 
+        rebase_handler = RebaseDuringTestingHandler(
+            gitlab_client=self.gitlab_client,
+            settings=self.settings,
+        )
+        rebase_handler.set_shutdown_event(self._shutdown_event)
+
+        rebase_ctx = RebaseDuringTestingContext(
+            max_attempts=self.settings.max_rebase_during_testing,
+        )
+        last_rebase_check = datetime.now(UTC)
+
         log.info("Waiting for pipeline", mr_iid=mr_iid, timeout_seconds=timeout.total_seconds())
 
         while True:
-            if self._shutdown_event.is_set():
-                log.info("Shutdown requested during pipeline wait", mr_iid=mr_iid)
-                return ProcessingResult.ERROR
-
-            elapsed = datetime.now(UTC) - start_time
-            if elapsed > timeout:
-                log.warning("Pipeline timeout", mr_iid=mr_iid, elapsed_seconds=elapsed.total_seconds())
-                await sm.trigger_timeout(max_wait_hours=int(timeout.total_seconds() / 3600))
-                return ProcessingResult.TIMEOUT
-
-            if not await self._verify_mr_in_queue(mr_iid):
-                await sm.trigger_mark_removed(reason="label_removed")
-                return ProcessingResult.REMOVED
+            # Check termination conditions
+            result = await self._check_pipeline_termination_conditions(ctx, sm, timeout, start_time)
+            if result is not None:
+                return result
 
             pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
             if pipeline is None:
@@ -693,52 +700,225 @@ class MergeProcessor:
                 await self._interruptible_sleep(self.settings.poll_interval_seconds)
                 continue
 
+            rebase_ctx = RebaseDuringTestingContext(
+                rebase_count=rebase_ctx.rebase_count,
+                max_attempts=rebase_ctx.max_attempts,
+                current_pipeline_id=pipeline.id,
+            )
+
             log.debug("Pipeline status", mr_iid=mr_iid, pipeline_id=pipeline.id, status=pipeline.status)
 
-            if pipeline.status == "success":
-                log.info("Pipeline succeeded", mr_iid=mr_iid, pipeline_id=pipeline.id)
-                await sm.trigger_pipeline_success()
-                return ProcessingResult.SUCCESS
+            # Check if rebase needed
+            rebase_ctx, last_rebase_check, should_reset = await self._maybe_rebase_during_testing(
+                ctx, sm, rebase_handler, rebase_ctx, pipeline, retry_count, last_rebase_check
+            )
+            if should_reset:
+                start_time = datetime.now(UTC)
+                continue
+            if isinstance(rebase_ctx, ProcessingResult):
+                return rebase_ctx
 
-            if pipeline.status in ("failed", "canceled"):
-                failed_jobs = await self._get_failed_jobs(pipeline.id)
-                log.warning(
-                    "Pipeline failed",
-                    mr_iid=mr_iid,
-                    pipeline_id=pipeline.id,
-                    pipeline_status=pipeline.status,
-                    failed_jobs=failed_jobs,
-                    retry_count=retry_count,
-                    max_retries=max_retries,
-                )
+            # Handle pipeline status
+            status_result = await self._handle_pipeline_status(
+                ctx, sm, pipeline, retry_count, max_retries
+            )
+            if status_result is None:
+                await self._interruptible_sleep(self.settings.poll_interval_seconds)
+                continue
 
-                should_continue, new_start = await self._handle_pipeline_failure_retry(
-                    ctx, pipeline, failed_jobs, retry_count, max_retries
-                )
-                if should_continue and new_start:
-                    retry_count += 1
-                    start_time = new_start
-                    continue
-                return ProcessingResult.PIPELINE_FAILED
+            if isinstance(status_result, tuple):
+                retry_count, start_time = status_result
+                continue
 
-            # Handle non-actionable terminal statuses that require manual intervention
-            # These statuses will never automatically transition to success/failed
-            non_actionable_statuses = ("skipped", "manual", "waiting_for_resource", "blocked")
-            if pipeline.status in non_actionable_statuses:
-                log.warning(
-                    "Pipeline in non-actionable state requiring manual intervention",
-                    mr_iid=mr_iid,
-                    pipeline_id=pipeline.id,
-                    status=pipeline.status,
-                )
-                await sm.trigger_pipeline_failed(
-                    failed_jobs=[],
-                    retry_count=retry_count,
-                    error_message=f"Pipeline status is '{pipeline.status}' - requires manual intervention",
-                )
-                return ProcessingResult.PIPELINE_FAILED
+            return status_result
 
-            await self._interruptible_sleep(self.settings.poll_interval_seconds)
+    async def _check_pipeline_termination_conditions(
+        self,
+        ctx: ProcessingContext,
+        sm: MRStateMachine,
+        timeout: timedelta,
+        start_time: datetime,
+    ) -> ProcessingResult | None:
+        """Check if pipeline wait should terminate early."""
+        mr_iid = ctx.mr_iid
+
+        if self._shutdown_event.is_set():
+            log.info("Shutdown requested during pipeline wait", mr_iid=mr_iid)
+            return ProcessingResult.ERROR
+
+        elapsed = datetime.now(UTC) - start_time
+        if elapsed > timeout:
+            log.warning("Pipeline timeout", mr_iid=mr_iid, elapsed_seconds=elapsed.total_seconds())
+            await sm.trigger_timeout(max_wait_hours=int(timeout.total_seconds() / 3600))
+            return ProcessingResult.TIMEOUT
+
+        if not await self._verify_mr_in_queue(mr_iid):
+            await sm.trigger_mark_removed(reason="label_removed")
+            return ProcessingResult.REMOVED
+
+        return None
+
+    async def _maybe_rebase_during_testing(
+        self,
+        ctx: ProcessingContext,
+        sm: MRStateMachine,
+        rebase_handler: RebaseDuringTestingHandler,
+        rebase_ctx: RebaseDuringTestingContext,
+        pipeline: Pipeline,
+        retry_count: int,
+        last_rebase_check: datetime,
+    ) -> tuple[RebaseDuringTestingContext | ProcessingResult, datetime, bool]:
+        """Check and handle rebase during testing if interval elapsed.
+
+        Returns:
+            Tuple of (updated_context_or_error, last_check_time, should_reset_timeout).
+        """
+        now = datetime.now(UTC)
+        check_interval = self.settings.rebase_check_interval_seconds
+
+        if (now - last_rebase_check).total_seconds() < check_interval:
+            return rebase_ctx, last_rebase_check, False
+
+        rebase_result = await self._check_and_handle_rebase_during_testing(
+            ctx, sm, rebase_handler, rebase_ctx, pipeline, retry_count
+        )
+
+        if rebase_result is None:
+            return rebase_ctx, now, False
+
+        if isinstance(rebase_result, RebaseDuringTestingContext):
+            return rebase_result, now, True
+
+        return rebase_result, now, False
+
+    async def _handle_pipeline_status(
+        self,
+        ctx: ProcessingContext,
+        sm: MRStateMachine,
+        pipeline: Pipeline,
+        retry_count: int,
+        max_retries: int,
+    ) -> ProcessingResult | tuple[int, datetime] | None:
+        """Handle pipeline status and return result or continue signal.
+
+        Returns:
+            - ProcessingResult: Final result, return from caller
+            - tuple[int, datetime]: (new_retry_count, new_start_time), continue loop
+            - None: No action needed, continue polling
+        """
+        mr_iid = ctx.mr_iid
+
+        if pipeline.status == "success":
+            log.info("Pipeline succeeded", mr_iid=mr_iid, pipeline_id=pipeline.id)
+            await sm.trigger_pipeline_success()
+            return ProcessingResult.SUCCESS
+
+        if pipeline.status in ("failed", "canceled"):
+            return await self._handle_pipeline_failure(
+                ctx, sm, pipeline, retry_count, max_retries
+            )
+
+        non_actionable_statuses = ("skipped", "manual", "waiting_for_resource", "blocked")
+        if pipeline.status in non_actionable_statuses:
+            log.warning(
+                "Pipeline in non-actionable state",
+                mr_iid=mr_iid,
+                pipeline_id=pipeline.id,
+                status=pipeline.status,
+            )
+            await sm.trigger_pipeline_failed(
+                failed_jobs=[],
+                retry_count=retry_count,
+                error_message=f"Pipeline status is '{pipeline.status}' - requires manual intervention",
+            )
+            return ProcessingResult.PIPELINE_FAILED
+
+        return None
+
+    async def _handle_pipeline_failure(
+        self,
+        ctx: ProcessingContext,
+        sm: MRStateMachine,
+        pipeline: Pipeline,
+        retry_count: int,
+        max_retries: int,
+    ) -> ProcessingResult | tuple[int, datetime]:
+        """Handle failed/canceled pipeline status."""
+        mr_iid = ctx.mr_iid
+        failed_jobs = await self._get_failed_jobs(pipeline.id)
+
+        log.warning(
+            "Pipeline failed",
+            mr_iid=mr_iid,
+            pipeline_id=pipeline.id,
+            pipeline_status=pipeline.status,
+            failed_jobs=failed_jobs,
+            retry_count=retry_count,
+            max_retries=max_retries,
+        )
+
+        should_continue, new_start = await self._handle_pipeline_failure_retry(
+            ctx, pipeline, failed_jobs, retry_count, max_retries
+        )
+
+        if should_continue and new_start:
+            return (retry_count + 1, new_start)
+
+        return ProcessingResult.PIPELINE_FAILED
+
+    async def _check_and_handle_rebase_during_testing(
+        self,
+        ctx: ProcessingContext,
+        sm: MRStateMachine,
+        rebase_handler: RebaseDuringTestingHandler,
+        rebase_ctx: RebaseDuringTestingContext,
+        pipeline: Pipeline,
+        retry_count: int,
+    ) -> ProcessingResult | RebaseDuringTestingContext | None:
+        """Check if rebase is needed during testing and handle it.
+
+        Returns:
+            - RebaseDuringTestingContext if rebase happened (continue polling)
+            - ProcessingResult if error occurred (return from _wait_for_pipeline)
+            - None if no rebase needed (continue polling)
+        """
+        mr_iid = ctx.mr_iid
+
+        try:
+            new_ctx, new_pipeline = await rebase_handler.handle_rebase_if_needed(
+                mr_iid=mr_iid,
+                ctx=rebase_ctx,
+            )
+
+            if new_pipeline:
+                # Rebase happened, notify and continue
+                await sm.notify_rebase_during_testing(
+                    old_pipeline_id=pipeline.id,
+                    new_pipeline_id=new_pipeline.id,
+                    rebase_count=new_ctx.rebase_count,
+                    max_attempts=new_ctx.max_attempts,
+                )
+                return new_ctx
+
+            return None
+
+        except RebaseRetryLimitExceeded as e:
+            log.warning("Rebase retry limit exceeded", mr_iid=mr_iid, error=str(e))
+            await sm.trigger_pipeline_failed(
+                failed_jobs=[],
+                retry_count=retry_count,
+                error_message=str(e),
+            )
+            return ProcessingResult.PIPELINE_FAILED
+
+        except GitLabConflictError as e:
+            log.warning("Rebase conflict during testing", mr_iid=mr_iid)
+            conflicted_files = await self.gitlab_client.get_mr_conflicts(mr_iid)
+            await sm.trigger_rebase_failed(
+                conflicted_files=conflicted_files,
+                error_message=str(e),
+            )
+            return ProcessingResult.CONFLICT
 
     async def _wait_for_rebase_quick(self, ctx: ProcessingContext) -> None:
         """Wait for rebase with a short timeout (for retry scenarios).

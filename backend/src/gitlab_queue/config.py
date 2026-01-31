@@ -196,6 +196,10 @@ class Settings:
     pipeline_retry_count: int = var(default=1, converter=int)
     api_max_retries: int = var(default=5, converter=int)
 
+    # Auto-Rebase During Testing
+    max_rebase_during_testing: int = var(default=3, converter=int)
+    rebase_check_interval_seconds: int = var(default=30, converter=int)
+
     # Rate Limit Handling
     rate_limit_warning_threshold: float = var(default=0.8, converter=float)  # 80%
     rate_limit_throttle_delay_seconds: float = var(default=1.0, converter=float)
@@ -278,6 +282,8 @@ def _settings_repr(self: Settings) -> str:
         "stale_mr_warning_hours",
         "pipeline_retry_count",
         "api_max_retries",
+        "max_rebase_during_testing",
+        "rebase_check_interval_seconds",
         "rate_limit_warning_threshold",
         "rate_limit_throttle_delay_seconds",
         "rate_limit_critical_threshold",
@@ -358,6 +364,12 @@ def _validate_retry_settings(settings: Settings, errors: list[str]) -> None:
         errors.append(f"pipeline_retry_count cannot be negative, got: {settings.pipeline_retry_count}")
     if settings.api_max_retries < 0:
         errors.append(f"api_max_retries cannot be negative, got: {settings.api_max_retries}")
+    if settings.max_rebase_during_testing < 0:
+        errors.append(f"max_rebase_during_testing cannot be negative, got: {settings.max_rebase_during_testing}")
+    if settings.rebase_check_interval_seconds <= 0:
+        errors.append(
+            f"rebase_check_interval_seconds must be positive, got: {settings.rebase_check_interval_seconds}"
+        )
 
 
 def _validate_rate_limit_settings(settings: Settings, errors: list[str]) -> None:

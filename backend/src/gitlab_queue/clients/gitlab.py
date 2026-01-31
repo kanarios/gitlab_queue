@@ -1039,6 +1039,27 @@ class GitLabClient:
         log.info("Pipeline created", pipeline_id=pipeline.id, ref=ref)
         return pipeline
 
+    async def cancel_pipeline(self, pipeline_id: int) -> Pipeline:
+        """Cancel a running pipeline.
+
+        GitLab API: POST /projects/:id/pipelines/:pipeline_id/cancel
+
+        Args:
+            pipeline_id: Pipeline ID to cancel.
+
+        Returns:
+            Pipeline model with updated status (typically "canceled").
+
+        Raises:
+            GitLabNotFoundError: If pipeline does not exist.
+            GitLabAPIError: On other API errors (e.g., pipeline already finished).
+        """
+        log.info("Cancelling pipeline", pipeline_id=pipeline_id)
+        data = await self.post(f"/pipelines/{pipeline_id}/cancel")
+        pipeline = parse_pipeline(data)
+        log.info("Pipeline cancelled", pipeline_id=pipeline.id, status=pipeline.status)
+        return pipeline
+
     async def get_pipeline_jobs(self, pipeline_id: int) -> list[Job]:
         """Get all jobs for a pipeline.
 

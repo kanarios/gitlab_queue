@@ -89,6 +89,18 @@ Retrying due to failed jobs: {failed_jobs}
 ---
 _This is the last retry attempt._
 """,
+    "rebase_during_testing": """## 🤖 Merge Queue Bot
+
+**Status:** 🔄 Rebase during testing ({rebase_count}/{max_attempts})
+
+Target branch changed while pipeline was running.
+Previous pipeline cancelled, rebased and started new pipeline.
+
+**New pipeline:** [{pipeline_id}]({pipeline_url})
+
+---
+_Monitoring new pipeline..._
+""",
     # === SUCCESS EVENTS ===
     "merging": """## 🤖 Merge Queue Bot
 
