@@ -244,6 +244,7 @@ class RebaseDuringTestingHandler:
         Returns:
             New Pipeline if found, None if timeout.
         """
+
         async def check_pipeline() -> tuple[PollStatus, Pipeline | None]:
             mr = await self.gitlab_client.get_mr(mr_iid)
             new_sha = mr.sha
@@ -252,11 +253,7 @@ class RebaseDuringTestingHandler:
             if new_sha != old_sha or mr.rebase_in_progress is False:
                 pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
                 # Skip cancelled/failed pipelines from before
-                if (
-                    pipeline
-                    and pipeline.sha == new_sha
-                    and pipeline.status not in ("canceled", "failed")
-                ):
+                if pipeline and pipeline.sha == new_sha and pipeline.status not in ("canceled", "failed"):
                     return PollStatus.DONE, pipeline
 
             return PollStatus.CONTINUE, None

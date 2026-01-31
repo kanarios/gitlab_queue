@@ -763,9 +763,7 @@ class MergeProcessor:
                 rebase_ctx = outcome.context
 
             # Handle pipeline status
-            status_result = await self._handle_pipeline_status(
-                ctx, sm, pipeline, retry_count, max_retries
-            )
+            status_result = await self._handle_pipeline_status(ctx, sm, pipeline, retry_count, max_retries)
             if status_result is None:
                 await self._interruptible_sleep(self.settings.poll_interval_seconds)
                 continue
@@ -822,27 +820,19 @@ class MergeProcessor:
         check_interval = self.settings.rebase_check_interval_seconds
 
         if (now - last_rebase_check).total_seconds() < check_interval:
-            return RebaseCheckOutcome(
-                context=rebase_ctx, result=None, last_check=last_rebase_check, should_reset=False
-            )
+            return RebaseCheckOutcome(context=rebase_ctx, result=None, last_check=last_rebase_check, should_reset=False)
 
         rebase_result = await self._check_and_handle_rebase_during_testing(
             ctx, sm, rebase_handler, rebase_ctx, pipeline, retry_count
         )
 
         if rebase_result is None:
-            return RebaseCheckOutcome(
-                context=rebase_ctx, result=None, last_check=now, should_reset=False
-            )
+            return RebaseCheckOutcome(context=rebase_ctx, result=None, last_check=now, should_reset=False)
 
         if isinstance(rebase_result, RebaseDuringTestingContext):
-            return RebaseCheckOutcome(
-                context=rebase_result, result=None, last_check=now, should_reset=True
-            )
+            return RebaseCheckOutcome(context=rebase_result, result=None, last_check=now, should_reset=True)
 
-        return RebaseCheckOutcome(
-            context=None, result=rebase_result, last_check=now, should_reset=False
-        )
+        return RebaseCheckOutcome(context=None, result=rebase_result, last_check=now, should_reset=False)
 
     async def _handle_pipeline_status(
         self,
@@ -867,9 +857,7 @@ class MergeProcessor:
             return ProcessingResult.SUCCESS
 
         if pipeline.status in ("failed", "canceled"):
-            return await self._handle_pipeline_failure(
-                ctx, sm, pipeline, retry_count, max_retries
-            )
+            return await self._handle_pipeline_failure(ctx, sm, pipeline, retry_count, max_retries)
 
         non_actionable_statuses = ("skipped", "manual", "waiting_for_resource", "blocked")
         if pipeline.status in non_actionable_statuses:
