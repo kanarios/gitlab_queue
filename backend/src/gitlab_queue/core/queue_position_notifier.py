@@ -7,7 +7,6 @@ Handles notifications when MRs are added, removed, or positions shift.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from gitlab_queue.utils.logging import get_logger
@@ -46,12 +45,14 @@ class QueuePositionNotifier:
         total = len(queue_items)
 
         position: int | None = None
+        matched_item = None
         for i, item in enumerate(queue_items, start=1):
             if item.mr_iid == mr_iid:
                 position = i
+                matched_item = item
                 break
 
-        if position is None:
+        if position is None or matched_item is None:
             log.warning(
                 "Cannot notify initial position: MR not in queue",
                 mr_iid=mr_iid,
@@ -71,7 +72,7 @@ class QueuePositionNotifier:
             position=position,
             total=total,
             estimated_minutes=position * 15,
-            queued_at=datetime.now(UTC),
+            queued_at=matched_item.queued_at,
         )
 
     async def capture_queue_positions(self) -> dict[int, int]:
