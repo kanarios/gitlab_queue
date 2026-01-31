@@ -8,6 +8,7 @@ and provides both offline (SQL script generation) and online
 from __future__ import annotations
 
 import asyncio
+import os
 from logging.config import fileConfig
 from typing import TYPE_CHECKING
 
@@ -40,8 +41,6 @@ def get_database_url() -> str:
     2. Application settings via load_settings()
     3. Fallback to alembic.ini value
     """
-    import os
-
     # Check env var directly first (for CI where full settings may not be available)
     env_url = os.environ.get("GITLAB_QUEUE_DATABASE_URL")
     if env_url:

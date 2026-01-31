@@ -156,6 +156,13 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen --extra dev
 
+      - name: Set CI auth env
+        run: |
+          echo "GITLAB_QUEUE_DATABASE_URL=postgresql+asyncpg://test:test@localhost:5432/test_db" >> "$GITHUB_ENV"
+          echo "GITLAB_QUEUE_GITLAB_PROJECT_ID=1" >> "$GITHUB_ENV"
+          echo "GITLAB_QUEUE_GITLAB_TOKEN=ci-placeholder-token" >> "$GITHUB_ENV"
+          echo "GITLAB_QUEUE_JWT_SECRET=$(openssl rand -hex 64)" >> "$GITHUB_ENV"
+
       - name: Check Alembic - single head
         run: |
           HEADS=$(uv run alembic heads | wc -l)
@@ -167,21 +174,11 @@ jobs:
           echo "OK: Single Alembic head"
 
       - name: Check Alembic - migrations apply
-        env:
-          GITLAB_QUEUE_DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test_db
-          GITLAB_QUEUE_GITLAB_TOKEN: fake-token-for-ci
-          GITLAB_QUEUE_GITLAB_PROJECT_ID: "1"
-          GITLAB_QUEUE_JWT_SECRET: fake-jwt-secret-for-ci-must-be-at-least-64-characters-long-for-validation
         run: |
           uv run alembic upgrade head
           echo "OK: All migrations applied successfully"
 
       - name: Check Alembic - downgrade works
-        env:
-          GITLAB_QUEUE_DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test_db
-          GITLAB_QUEUE_GITLAB_TOKEN: fake-token-for-ci
-          GITLAB_QUEUE_GITLAB_PROJECT_ID: "1"
-          GITLAB_QUEUE_JWT_SECRET: fake-jwt-secret-for-ci-must-be-at-least-64-characters-long-for-validation
         run: |
           uv run alembic downgrade -1
           uv run alembic upgrade head

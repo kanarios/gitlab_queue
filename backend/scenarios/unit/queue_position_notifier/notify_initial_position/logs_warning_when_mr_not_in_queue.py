@@ -1,4 +1,4 @@
-"""Test notify_initial_position logs warning when MR not in queue."""
+"""Test notify_initial_position does not notify when MR not in queue."""
 
 import vedro
 
