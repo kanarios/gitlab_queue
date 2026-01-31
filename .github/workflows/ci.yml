@@ -65,29 +65,29 @@ jobs:
         run: uv run mypy src/
 
   backend-tests:
-    name: Backend Tests (${{ matrix.test-suite }}${{ matrix.slicer-total != '' && format(' {0}/{1}', matrix.slicer-index, matrix.slicer-total) || '' }})
+    name: Backend Tests (${{ matrix.test_suite }}${{ matrix.slicer_total != '' && format(' {0}/{1}', matrix.slicer_index, matrix.slicer_total) || '' }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
           # Unit tests split into 3 parallel slices
-          - test-suite: unit
-            slicer-total: "3"
-            slicer-index: "0"
-          - test-suite: unit
-            slicer-total: "3"
-            slicer-index: "1"
-          - test-suite: unit
-            slicer-total: "3"
-            slicer-index: "2"
+          - test_suite: unit
+            slicer_total: "3"
+            slicer_index: "0"
+          - test_suite: unit
+            slicer_total: "3"
+            slicer_index: "1"
+          - test_suite: unit
+            slicer_total: "3"
+            slicer_index: "2"
           # Models and core tests run as single jobs
-          - test-suite: models
-            slicer-total: ""
-            slicer-index: ""
-          - test-suite: core
-            slicer-total: ""
-            slicer-index: ""
+          - test_suite: models
+            slicer_total: ""
+            slicer_index: ""
+          - test_suite: core
+            slicer_total: ""
+            slicer_index: ""
     defaults:
       run:
         working-directory: backend
@@ -117,10 +117,10 @@ jobs:
       - name: Run tests
         run: |
           SLICER_ARGS=""
-          if [ -n "${{ matrix.slicer-total }}" ]; then
-            SLICER_ARGS="--slicer-total=${{ matrix.slicer-total }} --slicer-index=${{ matrix.slicer-index }}"
+          if [ -n "${{ matrix.slicer_total }}" ]; then
+            SLICER_ARGS="--slicer-total=${{ matrix.slicer_total }} --slicer-index=${{ matrix.slicer_index }}"
           fi
-          uv run vedro run scenarios/${{ matrix.test-suite }}/ --verbose $SLICER_ARGS
+          uv run vedro run scenarios/${{ matrix.test_suite }}/ --verbose $SLICER_ARGS
 
   backend-migrations:
     name: Backend Migrations Check

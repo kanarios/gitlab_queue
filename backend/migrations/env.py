@@ -8,6 +8,7 @@ and provides both offline (SQL script generation) and online
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from logging.config import fileConfig
 from typing import TYPE_CHECKING
@@ -32,6 +33,8 @@ if config.config_file_name is not None:
 # SQLAlchemy metadata for autogenerate support
 target_metadata = Base.metadata
 
+logger = logging.getLogger(__name__)
+
 
 def get_database_url() -> str:
     """Get database URL from environment or application config.
@@ -49,8 +52,9 @@ def get_database_url() -> str:
     try:
         settings = load_settings()
         return settings.database_url
-    except Exception:
+    except Exception as e:
         # Fallback to alembic.ini value
+        logger.debug("Could not load settings (%s), falling back to alembic.ini", e)
         return config.get_main_option("sqlalchemy.url", "")
 
 
