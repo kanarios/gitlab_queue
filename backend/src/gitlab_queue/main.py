@@ -31,6 +31,7 @@ from gitlab_queue.config import ConfigurationError, load_settings
 from gitlab_queue.core.notifier import MRNotifier
 from gitlab_queue.core.processor import MergeProcessor, create_processor
 from gitlab_queue.core.queue import QueueManager
+from gitlab_queue.core.queue_position_notifier import QueuePositionNotifier
 from gitlab_queue.core.scheduler import QueueScheduler, create_scheduler
 from gitlab_queue.db.database import Database, DatabaseConnectionError
 from gitlab_queue.db.migrations import run_migrations
@@ -68,6 +69,7 @@ class Application:
     gitlab_client: GitLabClient
     queue_manager: QueueManager
     notifier: MRNotifier
+    position_notifier: QueuePositionNotifier
     processor: MergeProcessor
     scheduler: QueueScheduler
     retry_manager: WebhookRetryManager
@@ -234,12 +236,16 @@ async def create_application(settings: Settings) -> Application:
     # 8. Initialize notifier
     notifier = MRNotifier(gitlab_client=gitlab_client, settings=settings)
 
+    # 8b. Initialize position notifier
+    position_notifier = QueuePositionNotifier(notifier=notifier, queue_manager=queue_manager)
+
     # 9. Create processor
     processor = create_processor(
         gitlab_client=gitlab_client,
         queue_manager=queue_manager,
         notifier=notifier,
         settings=settings,
+        position_notifier=position_notifier,
     )
 
     # 10. Create scheduler for polling fallback
@@ -281,6 +287,7 @@ async def create_application(settings: Settings) -> Application:
         gitlab_client=gitlab_client,
         queue_manager=queue_manager,
         notifier=notifier,
+        position_notifier=position_notifier,
         processor=processor,
         scheduler=scheduler,
         retry_manager=retry_manager,
@@ -340,6 +347,7 @@ def _create_webhook_server(app: Application) -> tuple[uvicorn.Server, asyncio.Ta
         gitlab_client=app.gitlab_client,
         queue_manager=app.queue_manager,
         notifier=app.notifier,
+        position_notifier=app.position_notifier,
         retry_manager=app.retry_manager,
         health=app.health,
         websocket_manager=websocket_manager,

@@ -46,6 +46,7 @@ if TYPE_CHECKING:
     from gitlab_queue.config import Settings
     from gitlab_queue.core.notifier import MRNotifier
     from gitlab_queue.core.queue import QueueManager
+    from gitlab_queue.core.queue_position_notifier import QueuePositionNotifier
     from gitlab_queue.db.database import Database
     from gitlab_queue.models.queue_item import DashboardStats, QueueItem
     from gitlab_queue.models.retry import DLQItem, DLQStats
@@ -72,6 +73,7 @@ class WebhookAppState:
         gitlab_client: GitLab API client for making API calls.
         queue_manager: Queue manager for MR queue operations.
         notifier: MR notifier for state machine notifications.
+        position_notifier: Queue position notifier for position change notifications.
         retry_manager: Webhook retry queue manager.
         health: Application health state for status endpoints.
         websocket_manager: WebSocket manager for real-time dashboard updates.
@@ -82,6 +84,7 @@ class WebhookAppState:
     gitlab_client: GitLabClient
     queue_manager: QueueManager
     notifier: MRNotifier
+    position_notifier: QueuePositionNotifier | None
     retry_manager: WebhookRetryManager
     health: ApplicationHealth
     websocket_manager: WebSocketManager
@@ -369,6 +372,7 @@ async def _route_webhook_event(
             settings=state.settings,
             gitlab_client=state.gitlab_client,
             queue_manager=state.queue_manager,
+            position_notifier=state.position_notifier,
             websocket_manager=state.websocket_manager,
         )
         await handler.handle(event)
@@ -378,6 +382,7 @@ async def _route_webhook_event(
             gitlab_client=state.gitlab_client,
             queue_manager=state.queue_manager,
             notifier=state.notifier,
+            position_notifier=state.position_notifier,
             websocket_manager=state.websocket_manager,
         )
         await pipeline_handler.handle(event)

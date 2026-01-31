@@ -16,6 +16,7 @@ from gitlab_queue.core.processor import (
     create_processor,
 )
 from gitlab_queue.core.queue import QueueError, QueueItemNotFoundError, QueueManager
+from gitlab_queue.core.queue_position_notifier import QueuePositionNotifier
 from gitlab_queue.core.state_machine import MRStateMachine, create_state_machine_for_mr
 
 __all__: list[str] = [
@@ -28,6 +29,7 @@ __all__: list[str] = [
     "QueueError",
     "QueueItemNotFoundError",
     "QueueManager",
+    "QueuePositionNotifier",
     "create_processor",
     "create_state_machine_for_mr",
 ]

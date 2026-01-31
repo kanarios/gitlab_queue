@@ -457,6 +457,7 @@ def created_webhook_state(
         gitlab_client=created_mock_gitlab_client(circuit_state=gitlab_circuit_state),
         queue_manager=created_mock_queue_manager(),
         notifier=created_mock_notifier(),
+        position_notifier=None,
         retry_manager=created_mock_retry_manager(),
         health=created_mock_health(
             db_healthy=db_healthy,
@@ -524,6 +525,7 @@ async def created_test_app_with_db() -> AsyncIterator[tuple[FastAPI, WebhookAppS
             gitlab_client=created_mock_gitlab_client(),
             queue_manager=created_mock_queue_manager(),
             notifier=created_mock_notifier(),
+            position_notifier=None,
             retry_manager=created_mock_retry_manager(),
             health=created_mock_health(),
             websocket_manager=WebSocketManager(),
