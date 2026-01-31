@@ -102,6 +102,65 @@ jobs:
       - name: Run core tests
         run: uv run vedro run scenarios/core/ --verbose
 
+  backend-migrations:
+    name: Backend Migrations Check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Check Alembic - single head
+        run: |
+          HEADS=$(uv run alembic heads | wc -l)
+          if [ "$HEADS" -ne 1 ]; then
+            echo "ERROR: Multiple Alembic heads detected!"
+            uv run alembic heads
+            exit 1
+          fi
+          echo "OK: Single Alembic head"
+
+      - name: Check Alembic - migrations apply
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/test_db
+        run: |
+          uv run alembic upgrade head
+          echo "OK: All migrations applied successfully"
+
+      - name: Check Alembic - downgrade works
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/test_db
+        run: |
+          uv run alembic downgrade -1
+          uv run alembic upgrade head
+          echo "OK: Migration is reversible"
+
   # =============================================================================
   # Frontend Jobs
   # =============================================================================
@@ -241,6 +300,7 @@ jobs:
       - backend-lint
       - backend-typecheck
       - backend-tests
+      - backend-migrations
       - frontend-lint
       - frontend-typecheck
       - frontend-tests
@@ -254,6 +314,7 @@ jobs:
           if [[ "${{ needs.backend-lint.result }}" != "success" ]] || \
              [[ "${{ needs.backend-typecheck.result }}" != "success" ]] || \
              [[ "${{ needs.backend-tests.result }}" != "success" ]] || \
+             [[ "${{ needs.backend-migrations.result }}" != "success" ]] || \
              [[ "${{ needs.frontend-lint.result }}" != "success" ]] || \
              [[ "${{ needs.frontend-typecheck.result }}" != "success" ]] || \
              [[ "${{ needs.frontend-tests.result }}" != "success" ]] || \
