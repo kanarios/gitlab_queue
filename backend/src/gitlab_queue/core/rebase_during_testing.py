@@ -23,8 +23,9 @@ if TYPE_CHECKING:
 log = get_logger(__name__)
 
 
-# Polling interval for waiting for rebase completion
+# Polling interval for waiting for rebase completion and new pipeline
 REBASE_POLL_INTERVAL_SECONDS = 3
+PIPELINE_WAIT_POLL_SECONDS = 2
 
 
 class MergeReadiness(Enum):
@@ -194,18 +195,14 @@ class RebaseDuringTestingHandler:
             GitLabConflictError: If rebase results in conflicts.
             GitLabAPIError: If rebase times out or shutdown requested.
         """
-        # Exception holder for capturing errors from poll function.
-        # poll_until_done doesn't propagate exceptions from poll_fn,
-        # so we capture them here and raise after the poll completes.
-        captured_error: Exception | None = None
+        # Exception holder for capturing errors from poll function
+        poll_error: dict[str, Exception] = {}
 
         async def check_rebase() -> tuple[PollStatus, bool | None]:
-            """Poll rebase status until complete or conflict detected."""
-            nonlocal captured_error
             rebase_in_progress, has_conflicts = await self.gitlab_client.check_rebase_status(mr_iid)
 
             if has_conflicts:
-                captured_error = GitLabConflictError("Rebase conflict during testing")
+                poll_error["exception"] = GitLabConflictError("Rebase conflict during testing")
                 return PollStatus.DONE, False
 
             if not rebase_in_progress:
@@ -221,8 +218,8 @@ class RebaseDuringTestingHandler:
         outcome = await poll_until_done(config, check_rebase, self._shutdown_event)
 
         # Check for captured exception
-        if captured_error is not None:
-            raise captured_error
+        if "exception" in poll_error:
+            raise poll_error["exception"]
 
         if outcome.completed and outcome.result:
             return
@@ -247,28 +244,26 @@ class RebaseDuringTestingHandler:
         Returns:
             New Pipeline if found, None if timeout.
         """
-
         async def check_pipeline() -> tuple[PollStatus, Pipeline | None]:
-            """Poll for new pipeline on updated SHA after rebase."""
             mr = await self.gitlab_client.get_mr(mr_iid)
             new_sha = mr.sha
 
-            # Check if SHA changed (rebase created new commit) or rebase completed
-            # without changing SHA (no-op rebase). Using "is False" to distinguish
-            # from None/unknown state.
-            # Note: Fast-forward scenario (SHA unchanged) is handled by line 261
-            # which validates pipeline.sha == new_sha before returning.
+            # Check if SHA changed (rebase created new commit)
             if new_sha != old_sha or mr.rebase_in_progress is False:
                 pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
                 # Skip cancelled/failed pipelines from before
-                if pipeline and pipeline.sha == new_sha and pipeline.status not in ("canceled", "failed"):
+                if (
+                    pipeline
+                    and pipeline.sha == new_sha
+                    and pipeline.status not in ("canceled", "failed")
+                ):
                     return PollStatus.DONE, pipeline
 
             return PollStatus.CONTINUE, None
 
         config = PollingConfig(
             timeout_seconds=self.settings.post_rebase_pipeline_wait_seconds,
-            poll_interval_seconds=self.settings.pipeline_poll_interval_seconds,
+            poll_interval_seconds=PIPELINE_WAIT_POLL_SECONDS,
             operation_name="new_pipeline_after_rebase",
         )
         outcome = await poll_until_done(config, check_pipeline, self._shutdown_event)
