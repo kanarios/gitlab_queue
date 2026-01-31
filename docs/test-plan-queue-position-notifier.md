@@ -7,27 +7,35 @@ Unit tests for `QueuePositionNotifier` class (`backend/src/gitlab_queue/core/que
 ## Test Location
 
 ```text
-backend/scenarios/unit/queue_position_notifier/
-├── __init__.py
-├── _helpers.py
-├── notify_initial_position/
+backend/scenarios/unit/
+├── queue_position_notifier/
 │   ├── __init__.py
-│   ├── sends_notification_with_correct_position.py
-│   ├── uses_queued_at_from_queue_item.py
-│   └── does_not_notify_when_mr_not_in_queue.py
-├── capture_queue_positions/
-│   ├── __init__.py
-│   ├── captures_only_queued_state_mrs.py
-│   └── returns_correct_positions.py
-├── notify_affected_mrs_after_completion/
-│   ├── __init__.py
-│   ├── notifies_mrs_with_changed_position.py
-│   ├── skips_excluded_mr.py
-│   ├── skips_unchanged_positions.py
-│   └── skips_non_queued_states.py
-└── notify_affected_mrs_after_hotfix_added/
+│   ├── _helpers.py
+│   ├── notify_initial_position/
+│   │   ├── __init__.py
+│   │   ├── sends_notification_with_correct_position.py
+│   │   ├── uses_queued_at_from_queue_item.py
+│   │   └── does_not_notify_when_mr_not_in_queue.py
+│   ├── capture_queue_positions/
+│   │   ├── __init__.py
+│   │   ├── captures_only_queued_state_mrs.py
+│   │   └── returns_correct_positions.py
+│   ├── notify_affected_mrs_after_completion/
+│   │   ├── __init__.py
+│   │   ├── notifies_mrs_with_changed_position.py
+│   │   ├── skips_excluded_mr.py
+│   │   ├── skips_unchanged_positions.py
+│   │   └── skips_non_queued_states.py
+│   └── notify_affected_mrs_after_hotfix_added/
+│       ├── __init__.py
+│       └── notifies_with_hotfix_context.py
+└── handlers/
     ├── __init__.py
-    └── notifies_with_hotfix_context.py
+    └── notify_position_after_add/
+        ├── __init__.py
+        ├── catches_exceptions_and_logs_warning.py
+        ├── calls_hotfix_notification_when_is_hotfix.py
+        └── skips_hotfix_notification_when_not_hotfix.py
 ```
 
 ## Test Scenarios
@@ -174,7 +182,7 @@ class MockQueueItem:
     """Mock QueueItem for testing."""
     mr_iid: int
     state: str = "queued"
-    queued_at: datetime = None
+    queued_at: datetime | None = None
 
     def __post_init__(self):
         if self.queued_at is None:

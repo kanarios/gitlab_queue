@@ -39,7 +39,8 @@ class Scenario(vedro.Scenario):
 
     def and_hotfix_mr_is_not_notified(self):
         calls = self.notifier.notify.call_args_list
-        notified_iids = [call[0][0] for call in calls]
+        # Extract mr_iid from positional args (first arg to notify)
+        notified_iids = [call.args[0] for call in calls]
         assert self.hotfix_mr_iid not in notified_iids
 
     def and_positions_shifted_down_by_one(self):
