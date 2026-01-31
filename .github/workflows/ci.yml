@@ -65,8 +65,29 @@ jobs:
         run: uv run mypy src/
 
   backend-tests:
-    name: Backend Tests
+    name: Backend Tests (${{ matrix.test-suite }}${{ matrix.slicer-total != '' && format(' {0}/{1}', matrix.slicer-index, matrix.slicer-total) || '' }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Unit tests split into 3 parallel slices
+          - test-suite: unit
+            slicer-total: "3"
+            slicer-index: "0"
+          - test-suite: unit
+            slicer-total: "3"
+            slicer-index: "1"
+          - test-suite: unit
+            slicer-total: "3"
+            slicer-index: "2"
+          # Models and core tests run as single jobs
+          - test-suite: models
+            slicer-total: ""
+            slicer-index: ""
+          - test-suite: core
+            slicer-total: ""
+            slicer-index: ""
     defaults:
       run:
         working-directory: backend
@@ -81,26 +102,25 @@ jobs:
       JJ_MOCK_URL: http://localhost:8080
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install uv
         uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
-      
+
       - name: Set up Python
         run: uv python install 3.12
-      
+
       - name: Install dependencies
         run: uv sync --frozen --extra dev
-      
-      - name: Run unit tests
-        run: uv run vedro run scenarios/unit/ --verbose
-      
-      - name: Run model tests
-        run: uv run vedro run scenarios/models/ --verbose
-      
-      - name: Run core tests
-        run: uv run vedro run scenarios/core/ --verbose
+
+      - name: Run tests
+        run: |
+          SLICER_ARGS=""
+          if [ -n "${{ matrix.slicer-total }}" ]; then
+            SLICER_ARGS="--slicer-total=${{ matrix.slicer-total }} --slicer-index=${{ matrix.slicer-index }}"
+          fi
+          uv run vedro run scenarios/${{ matrix.test-suite }}/ --verbose $SLICER_ARGS
 
   backend-migrations:
     name: Backend Migrations Check
