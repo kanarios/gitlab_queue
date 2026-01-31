@@ -123,9 +123,18 @@ backend/scenarios/unit/
 
 #### 4.1 Notifies with hotfix context
 
-- **Given**: Same as 3.1 but for hotfix scenario
-- **When**: `notify_affected_mrs_after_hotfix_added(hotfix_mr_iid, positions_before)` called
-- **Then**: Log message includes "due to hotfix" context
+- **Given**:
+  - Hotfix MR (iid=100) added to front of queue
+  - `positions_before = {MR1: 1, MR2: 2}` (before hotfix)
+  - Current queue: Hotfix at position 1, MR1 at position 2, MR2 at position 3
+- **When**: `notify_affected_mrs_after_hotfix_added(hotfix_mr_iid=100, positions_before)` called
+- **Then**:
+  - `notifier.notify()` called for MR1 and MR2 (NOT for hotfix MR)
+  - Each call has `template="position_changed"`
+  - Each call includes `position`, `old_position`, `total`, `estimated_minutes`
+  - MR1: `old_position=1`, `position=2`
+  - MR2: `old_position=2`, `position=3`
+  - Log message includes "due to hotfix" context with `hotfix_mr_iid=100`
 
 ## Handler Integration Tests
 
