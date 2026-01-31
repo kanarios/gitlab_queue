@@ -80,42 +80,49 @@ class QueuePositionNotifier:
             positions[item.mr_iid] = i
         return positions
 
-    async def notify_affected_mrs_after_completion(
+    async def _notify_position_changes(
         self,
-        completed_mr_iid: int,
+        excluded_mr_iid: int,
         positions_before: dict[int, int],
-    ) -> None:
-        """Notify all MRs whose positions changed after an MR completed.
-
-        Only notifies MRs in 'queued' state (not actively processing).
+        log_context: str,
+    ) -> int:
+        """Notify MRs whose positions changed, excluding a specific MR.
 
         Args:
-            completed_mr_iid: IID of the MR that was just completed.
-            positions_before: Positions captured before completion.
+            excluded_mr_iid: IID of MR to exclude from notifications.
+            positions_before: Positions captured before the change.
+            log_context: Context string for log messages (e.g., "due to hotfix").
+
+        Returns:
+            Number of MRs notified.
         """
         queue_items = await self.queue_manager.get_active_queue()
         total = len(queue_items)
 
+        # Build position map synchronously from queue_items
+        position_map: dict[int, int] = {}
+        for i, item in enumerate(queue_items, start=1):
+            if item.state == "queued":
+                position_map[item.mr_iid] = i
+
         notified_count = 0
         for item in queue_items:
-            # Skip MRs in active processing (not waiting in queue)
             if item.state != "queued":
                 continue
 
-            # Skip the completed MR itself (shouldn't be in queue, but just in case)
-            if item.mr_iid == completed_mr_iid:
+            if item.mr_iid == excluded_mr_iid:
                 continue
 
             old_position = positions_before.get(item.mr_iid)
             if old_position is None:
-                continue  # MR was added after capture
+                continue
 
-            new_position = await self.queue_manager.get_queue_position(item.mr_iid)
+            new_position = position_map.get(item.mr_iid)
             if new_position is None or new_position == old_position:
-                continue  # Position unchanged
+                continue
 
             log.info(
-                "Notifying position change",
+                f"Notifying position change{log_context}",
                 mr_iid=item.mr_iid,
                 old_position=old_position,
                 new_position=new_position,
@@ -130,6 +137,27 @@ class QueuePositionNotifier:
                 estimated_minutes=new_position * 15,
             )
             notified_count += 1
+
+        return notified_count
+
+    async def notify_affected_mrs_after_completion(
+        self,
+        completed_mr_iid: int,
+        positions_before: dict[int, int],
+    ) -> None:
+        """Notify all MRs whose positions changed after an MR completed.
+
+        Only notifies MRs in 'queued' state (not actively processing).
+
+        Args:
+            completed_mr_iid: IID of the MR that was just completed.
+            positions_before: Positions captured before completion.
+        """
+        notified_count = await self._notify_position_changes(
+            excluded_mr_iid=completed_mr_iid,
+            positions_before=positions_before,
+            log_context="",
+        )
 
         if notified_count > 0:
             log.info(
@@ -152,44 +180,11 @@ class QueuePositionNotifier:
             hotfix_mr_iid: IID of the hotfix MR that was just added.
             positions_before: Positions captured before hotfix was added.
         """
-        queue_items = await self.queue_manager.get_active_queue()
-        total = len(queue_items)
-
-        notified_count = 0
-        for item in queue_items:
-            # Skip the hotfix MR itself
-            if item.mr_iid == hotfix_mr_iid:
-                continue
-
-            # Skip MRs in active processing
-            if item.state != "queued":
-                continue
-
-            old_position = positions_before.get(item.mr_iid)
-            if old_position is None:
-                continue
-
-            new_position = await self.queue_manager.get_queue_position(item.mr_iid)
-            if new_position is None or new_position == old_position:
-                continue
-
-            log.info(
-                "Notifying position change due to hotfix",
-                mr_iid=item.mr_iid,
-                old_position=old_position,
-                new_position=new_position,
-                hotfix_mr_iid=hotfix_mr_iid,
-            )
-
-            await self.notifier.notify(
-                item.mr_iid,
-                "position_changed",
-                position=new_position,
-                total=total,
-                old_position=old_position,
-                estimated_minutes=new_position * 15,
-            )
-            notified_count += 1
+        notified_count = await self._notify_position_changes(
+            excluded_mr_iid=hotfix_mr_iid,
+            positions_before=positions_before,
+            log_context=" due to hotfix",
+        )
 
         if notified_count > 0:
             log.info(

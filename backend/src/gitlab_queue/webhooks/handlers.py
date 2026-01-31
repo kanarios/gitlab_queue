@@ -683,6 +683,7 @@ class WebhookHandler:
                 gitlab_client=self.gitlab_client,
                 queue_manager=self.queue_manager,
                 notifier=self.notifier,
+                position_notifier=self.position_notifier,
                 websocket_manager=self.websocket_manager,
             )
             await handler.handle(event)
