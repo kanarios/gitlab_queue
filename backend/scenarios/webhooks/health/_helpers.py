@@ -118,6 +118,7 @@ def create_webhook_state(
         gitlab_client=create_mock_gitlab_client(circuit_state=gitlab_circuit_state),
         queue_manager=create_mock_queue_manager(),
         notifier=create_mock_notifier(),
+        position_notifier=None,
         retry_manager=create_mock_retry_manager(),
         health=health,
         websocket_manager=WebSocketManager(),

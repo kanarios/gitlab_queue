@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from gitlab_queue.config import Settings
     from gitlab_queue.core.notifier import MRNotifier
     from gitlab_queue.core.queue import QueueManager
+    from gitlab_queue.core.queue_position_notifier import QueuePositionNotifier
     from gitlab_queue.models.pipeline import Pipeline
     from gitlab_queue.models.queue_item import QueueItem
 
@@ -126,6 +127,7 @@ class MergeProcessor:
     queue_manager: QueueManager
     notifier: MRNotifier
     settings: Settings
+    position_notifier: QueuePositionNotifier | None = None
 
     # Internal state (not part of constructor)
     _shutdown_event: asyncio.Event = field(default_factory=asyncio.Event, init=False)
@@ -243,6 +245,7 @@ class MergeProcessor:
                     queue_manager=self.queue_manager,
                     target_branch=self.settings.target_branch,
                     websocket_manager=self._websocket_manager,
+                    position_notifier=self.position_notifier,
                 )
 
                 ctx = ProcessingContext(
@@ -862,6 +865,7 @@ class MergeProcessor:
                         queue_manager=self.queue_manager,
                         target_branch=self.settings.target_branch,
                         websocket_manager=self._websocket_manager,
+                        position_notifier=self.position_notifier,
                     )
                     await sm.notify_stale_warning(warning_hours=warning_hours)
                     await self.queue_manager.mark_stale_warning_sent(item.mr_iid)
@@ -1167,6 +1171,7 @@ def create_processor(
     queue_manager: QueueManager,
     notifier: MRNotifier,
     settings: Settings,
+    position_notifier: QueuePositionNotifier | None = None,
 ) -> MergeProcessor:
     """Create a configured MergeProcessor instance.
 
@@ -1175,6 +1180,7 @@ def create_processor(
         queue_manager: Queue manager for MR storage.
         notifier: Notifier for MR comments.
         settings: Application settings.
+        position_notifier: Queue position notifier for position change notifications.
 
     Returns:
         Configured MergeProcessor ready to run.
@@ -1184,6 +1190,7 @@ def create_processor(
         queue_manager=queue_manager,
         notifier=notifier,
         settings=settings,
+        position_notifier=position_notifier,
     )
 
 

@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from gitlab_queue.api.websocket import WebSocketManager
     from gitlab_queue.core.notifier import MRNotifier
     from gitlab_queue.core.queue import QueueManager
+    from gitlab_queue.core.queue_position_notifier import QueuePositionNotifier
     from gitlab_queue.models.queue_item import QueueItem
 
 log = get_logger(__name__)
@@ -99,6 +100,7 @@ class MRStateMachine(StateMachine):
         target_branch: str = "master",
         start_value: str | None = None,
         websocket_manager: WebSocketManager | None = None,
+        position_notifier: QueuePositionNotifier | None = None,
     ) -> None:
         """Initialize state machine for a specific MR.
 
@@ -109,12 +111,14 @@ class MRStateMachine(StateMachine):
             target_branch: Target branch for rebasing/merging.
             start_value: Initial state (for resuming from DB). If None, starts at queued.
             websocket_manager: Optional WebSocketManager for real-time updates.
+            position_notifier: Optional QueuePositionNotifier for position change notifications.
         """
         self.notifier = notifier
         self.queue_manager = queue_manager
         self.mr_iid = mr_iid
         self.target_branch = target_branch
         self.websocket_manager: WebSocketManager | None = websocket_manager
+        self.position_notifier: QueuePositionNotifier | None = position_notifier
         self._context: dict[str, Any] = {}
 
         # Initialize with correct starting state
@@ -238,6 +242,11 @@ class MRStateMachine(StateMachine):
         # Remove queue label (MR is merged, label no longer needed)
         await self.notifier.remove_queue_label(self.mr_iid)
 
+        # Capture positions before completion for notification
+        positions_before: dict[int, int] = {}
+        if self.position_notifier:
+            positions_before = await self.position_notifier.capture_queue_positions()
+
         # Move MR to history table
         pipeline_duration = self._context.get("pipeline_duration_seconds")
         await self.queue_manager.complete_mr(
@@ -245,6 +254,13 @@ class MRStateMachine(StateMachine):
             status="merged",
             pipeline_duration_seconds=pipeline_duration,
         )
+
+        # Notify affected MRs about position changes
+        if self.position_notifier and positions_before:
+            await self.position_notifier.notify_affected_mrs_after_completion(
+                self.mr_iid,
+                positions_before,
+            )
 
     async def on_enter_failed(self) -> None:
         """Called when MR fails (conflict, pipeline, timeout)."""
@@ -305,6 +321,11 @@ class MRStateMachine(StateMachine):
         # Remove queue label to prevent re-queueing
         await self.notifier.remove_queue_label(self.mr_iid)
 
+        # Capture positions before completion for notification
+        positions_before: dict[int, int] = {}
+        if self.position_notifier:
+            positions_before = await self.position_notifier.capture_queue_positions()
+
         # Move MR to history table
         # Map internal failure_reason to history status
         history_status = "failed"
@@ -320,6 +341,13 @@ class MRStateMachine(StateMachine):
             pipeline_duration_seconds=self._context.get("pipeline_duration_seconds"),
             pipeline_failed_jobs=self._context.get("failed_jobs"),
         )
+
+        # Notify affected MRs about position changes
+        if self.position_notifier and positions_before:
+            await self.position_notifier.notify_affected_mrs_after_completion(
+                self.mr_iid,
+                positions_before,
+            )
 
     async def on_enter_removed(self) -> None:
         """Called when MR is removed from queue."""
@@ -354,12 +382,24 @@ class MRStateMachine(StateMachine):
         if removal_reason == "closed":
             await self.notifier.remove_queue_label(self.mr_iid)
 
+        # Capture positions before completion for notification
+        positions_before: dict[int, int] = {}
+        if self.position_notifier:
+            positions_before = await self.position_notifier.capture_queue_positions()
+
         # Move MR to history table
         await self.queue_manager.complete_mr(
             self.mr_iid,
             status="removed",
             failure_reason=f"Removed: {removal_reason}",
         )
+
+        # Notify affected MRs about position changes
+        if self.position_notifier and positions_before:
+            await self.position_notifier.notify_affected_mrs_after_completion(
+                self.mr_iid,
+                positions_before,
+            )
 
     # =========================================================================
     # Trigger Methods (context passing)
@@ -673,6 +713,7 @@ async def create_state_machine_for_mr(
     *,
     target_branch: str = "master",
     websocket_manager: WebSocketManager | None = None,
+    position_notifier: QueuePositionNotifier | None = None,
 ) -> MRStateMachine:
     """Create state machine for an MR, resuming from DB state if exists.
 
@@ -682,6 +723,7 @@ async def create_state_machine_for_mr(
         queue_manager: QueueManager for state persistence.
         target_branch: Target branch for rebasing/merging.
         websocket_manager: Optional WebSocketManager for real-time updates.
+        position_notifier: Optional QueuePositionNotifier for position change notifications.
 
     Returns:
         MRStateMachine initialized with the correct state.
@@ -701,6 +743,7 @@ async def create_state_machine_for_mr(
             target_branch=target_branch,
             start_value=queue_item.state,
             websocket_manager=websocket_manager,
+            position_notifier=position_notifier,
         )
     else:
         log.debug("Creating new state machine", mr_iid=mr_iid)
@@ -710,6 +753,7 @@ async def create_state_machine_for_mr(
             mr_iid=mr_iid,
             target_branch=target_branch,
             websocket_manager=websocket_manager,
+            position_notifier=position_notifier,
         )
 
     await sm.activate_initial_state()  # type: ignore[no-untyped-call]

@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from gitlab_queue.config import Settings
     from gitlab_queue.core.notifier import MRNotifier
     from gitlab_queue.core.queue import QueueManager
+    from gitlab_queue.core.queue_position_notifier import QueuePositionNotifier
     from gitlab_queue.models.queue_item import QueueItem
 
 log = get_logger(__name__)
@@ -35,13 +36,46 @@ class MRWebhookHandler:
         settings: Application configuration.
         gitlab_client: GitLab API client.
         queue_manager: Queue manager for MR operations.
+        position_notifier: Queue position notifier for MR notifications.
         websocket_manager: WebSocket manager for real-time UI updates.
     """
 
     settings: Settings
     gitlab_client: GitLabClient
     queue_manager: QueueManager
+    position_notifier: QueuePositionNotifier | None = None
     websocket_manager: WebSocketManager | None = None
+
+    async def _notify_position_after_add(
+        self,
+        mr_iid: int,
+        is_hotfix: bool,
+        positions_before: dict[int, int],
+    ) -> None:
+        """Send position notifications after adding MR to queue.
+
+        Args:
+            mr_iid: The MR's internal ID.
+            is_hotfix: Whether the MR is a hotfix.
+            positions_before: Positions captured before adding.
+        """
+        if not self.position_notifier:
+            return
+
+        try:
+            await self.position_notifier.notify_initial_position(mr_iid)
+
+            if is_hotfix and positions_before:
+                await self.position_notifier.notify_affected_mrs_after_hotfix_added(
+                    mr_iid,
+                    positions_before,
+                )
+        except Exception as e:
+            log.warning(
+                "Failed to send position notification",
+                mr_iid=mr_iid,
+                error=str(e),
+            )
 
     async def handle(self, event: MergeRequestEvent) -> None:
         """Dispatch event to appropriate handler based on action.
@@ -107,6 +141,11 @@ class MRWebhookHandler:
             await self._refresh_queue_item_metadata(mr_iid, event)
             return
 
+        # Capture positions before adding (for hotfix notification)
+        positions_before: dict[int, int] = {}
+        if is_hotfix and self.position_notifier:
+            positions_before = await self.position_notifier.capture_queue_positions()
+
         # Fetch full MR data from API for new queue entry
         mr = await self.gitlab_client.get_mr(mr_iid)
 
@@ -119,6 +158,9 @@ class MRWebhookHandler:
             is_hotfix=is_hotfix,
             title=mr.title,
         )
+
+        # Send position notification
+        await self._notify_position_after_add(mr_iid, is_hotfix, positions_before)
 
     async def _handle_unlabeled(self, event: MergeRequestEvent) -> None:
         """Handle label removal from MR.
@@ -218,6 +260,11 @@ class MRWebhookHandler:
 
         if not is_in_active_queue:
             if has_trigger_label:
+                # Capture positions before adding (for hotfix notification)
+                positions_before: dict[int, int] = {}
+                if has_hotfix_label and self.position_notifier:
+                    positions_before = await self.position_notifier.capture_queue_positions()
+
                 # MR has label but not in active queue - add it
                 mr = await self.gitlab_client.get_mr(mr_iid)
                 is_hotfix = has_hotfix_label
@@ -230,6 +277,9 @@ class MRWebhookHandler:
                 )
                 # Broadcast queue update to UI
                 await self._broadcast_queue_update()
+
+                # Send position notification
+                await self._notify_position_after_add(mr_iid, is_hotfix, positions_before)
             else:
                 log.debug("Updated MR not in queue and no trigger label", mr_iid=mr_iid)
             return
@@ -366,6 +416,7 @@ class PipelineWebhookHandler:
         gitlab_client: GitLab API client.
         queue_manager: Queue manager for MR operations.
         notifier: MR notifier for state machine notifications.
+        position_notifier: Queue position notifier for position change notifications.
         websocket_manager: WebSocket manager for real-time UI updates.
     """
 
@@ -373,6 +424,7 @@ class PipelineWebhookHandler:
     gitlab_client: GitLabClient
     queue_manager: QueueManager
     notifier: MRNotifier
+    position_notifier: QueuePositionNotifier | None = None
     websocket_manager: WebSocketManager | None = None
 
     async def handle(self, event: PipelineEvent) -> None:
@@ -498,6 +550,7 @@ class PipelineWebhookHandler:
             queue_manager=self.queue_manager,
             target_branch=self.settings.target_branch,
             websocket_manager=self.websocket_manager,
+            position_notifier=self.position_notifier,
         )
         await state_machine.trigger_pipeline_success()
 
@@ -540,6 +593,7 @@ class PipelineWebhookHandler:
                 queue_manager=self.queue_manager,
                 target_branch=self.settings.target_branch,
                 websocket_manager=self.websocket_manager,
+                position_notifier=self.position_notifier,
             )
             await state_machine.trigger_pipeline_failed(
                 failed_jobs=[],
@@ -570,6 +624,7 @@ class PipelineWebhookHandler:
             queue_manager=self.queue_manager,
             target_branch=self.settings.target_branch,
             websocket_manager=self.websocket_manager,
+            position_notifier=self.position_notifier,
         )
         await state_machine.trigger_pipeline_failed(
             failed_jobs=[],
@@ -590,6 +645,7 @@ class WebhookHandler:
         gitlab_client: GitLab API client.
         settings: Application configuration.
         notifier: Optional MR notifier for state machine notifications.
+        position_notifier: Optional queue position notifier.
         websocket_manager: WebSocket manager for real-time UI updates.
     """
 
@@ -597,6 +653,7 @@ class WebhookHandler:
     gitlab_client: GitLabClient
     settings: Settings
     notifier: MRNotifier | None = None
+    position_notifier: QueuePositionNotifier | None = None
     websocket_manager: WebSocketManager | None = None
 
     async def handle_merge_request_event(self, webhook_payload: dict[str, Any]) -> None:
@@ -613,6 +670,7 @@ class WebhookHandler:
                 settings=self.settings,
                 gitlab_client=self.gitlab_client,
                 queue_manager=self.queue_manager,
+                position_notifier=self.position_notifier,
                 websocket_manager=self.websocket_manager,
             )
             await handler.handle(event)
@@ -640,6 +698,7 @@ class WebhookHandler:
                 gitlab_client=self.gitlab_client,
                 queue_manager=self.queue_manager,
                 notifier=self.notifier,
+                position_notifier=self.position_notifier,
                 websocket_manager=self.websocket_manager,
             )
             await handler.handle(event)

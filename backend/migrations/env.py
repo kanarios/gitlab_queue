@@ -8,6 +8,8 @@ and provides both offline (SQL script generation) and online
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
 from logging.config import fileConfig
 from typing import TYPE_CHECKING
 
@@ -31,18 +33,38 @@ if config.config_file_name is not None:
 # SQLAlchemy metadata for autogenerate support
 target_metadata = Base.metadata
 
+logger = logging.getLogger(__name__)
+
 
 def get_database_url() -> str:
-    """Get database URL from application config.
+    """Get database URL from environment or application config.
 
-    Falls back to alembic.ini if config loading fails.
+    Priority:
+    1. GITLAB_QUEUE_DATABASE_URL environment variable (for CI/testing)
+    2. Application settings via load_settings()
+    3. Fallback to alembic.ini value
     """
+    # Check env var directly first (for CI where full settings may not be available)
+    env_url = os.environ.get("GITLAB_QUEUE_DATABASE_URL")
+    if env_url:
+        return env_url
+
     try:
         settings = load_settings()
         return settings.database_url
-    except Exception:
+    except Exception as e:
         # Fallback to alembic.ini value
-        return config.get_main_option("sqlalchemy.url", "")
+        fallback_url = config.get_main_option("sqlalchemy.url", "")
+        if not fallback_url:
+            logger.debug(
+                "Could not load settings (%s) and no fallback URL in alembic.ini", e
+            )
+            raise RuntimeError(
+                "No database URL found. Set GITLAB_QUEUE_DATABASE_URL env var "
+                "or configure sqlalchemy.url in alembic.ini"
+            ) from e
+        logger.debug("Could not load settings (%s), falling back to alembic.ini", e)
+        return fallback_url
 
 
 def run_migrations_offline() -> None:
