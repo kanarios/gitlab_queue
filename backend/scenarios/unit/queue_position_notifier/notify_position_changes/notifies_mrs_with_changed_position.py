@@ -41,5 +41,5 @@ class Scenario(vedro.Scenario):
 
     def and_notifications_use_position_changed_template(self):
         calls = self.notifier.notify.call_args_list
-        templates = [c.kwargs.get("template") or c.args[1] for c in calls]
-        assert all(t == "position_changed" for t in templates)
+        statuses = [c.kwargs.get("status") or c.args[1] for c in calls]
+        assert all(s == "position_changed" for s in statuses)
