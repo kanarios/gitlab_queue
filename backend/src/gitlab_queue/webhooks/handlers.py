@@ -46,6 +46,37 @@ class MRWebhookHandler:
     position_notifier: QueuePositionNotifier | None = None
     websocket_manager: WebSocketManager | None = None
 
+    async def _notify_position_after_add(
+        self,
+        mr_iid: int,
+        is_hotfix: bool,
+        positions_before: dict[int, int],
+    ) -> None:
+        """Send position notifications after adding MR to queue.
+
+        Args:
+            mr_iid: The MR's internal ID.
+            is_hotfix: Whether the MR is a hotfix.
+            positions_before: Positions captured before adding.
+        """
+        if not self.position_notifier:
+            return
+
+        try:
+            await self.position_notifier.notify_initial_position(mr_iid)
+
+            if is_hotfix and positions_before:
+                await self.position_notifier.notify_affected_mrs_after_hotfix_added(
+                    mr_iid,
+                    positions_before,
+                )
+        except Exception as e:
+            log.warning(
+                "Failed to send position notification",
+                mr_iid=mr_iid,
+                error=str(e),
+            )
+
     async def handle(self, event: MergeRequestEvent) -> None:
         """Dispatch event to appropriate handler based on action.
 
@@ -129,15 +160,7 @@ class MRWebhookHandler:
         )
 
         # Send position notification
-        if self.position_notifier:
-            await self.position_notifier.notify_initial_position(mr_iid)
-
-            # If hotfix - notify other MRs that their positions changed
-            if is_hotfix and positions_before:
-                await self.position_notifier.notify_affected_mrs_after_hotfix_added(
-                    mr_iid,
-                    positions_before,
-                )
+        await self._notify_position_after_add(mr_iid, is_hotfix, positions_before)
 
     async def _handle_unlabeled(self, event: MergeRequestEvent) -> None:
         """Handle label removal from MR.
@@ -256,15 +279,7 @@ class MRWebhookHandler:
                 await self._broadcast_queue_update()
 
                 # Send position notification
-                if self.position_notifier:
-                    await self.position_notifier.notify_initial_position(mr_iid)
-
-                    # If hotfix - notify other MRs that their positions changed
-                    if is_hotfix and positions_before:
-                        await self.position_notifier.notify_affected_mrs_after_hotfix_added(
-                            mr_iid,
-                            positions_before,
-                        )
+                await self._notify_position_after_add(mr_iid, is_hotfix, positions_before)
             else:
                 log.debug("Updated MR not in queue and no trigger label", mr_iid=mr_iid)
             return

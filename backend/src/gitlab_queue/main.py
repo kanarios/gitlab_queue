@@ -233,10 +233,10 @@ async def create_application(settings: Settings) -> Application:
     # 6. Initialize queue manager
     queue_manager = QueueManager(db=database)
 
-    # 8. Initialize notifier
+    # 7. Initialize notifier
     notifier = MRNotifier(gitlab_client=gitlab_client, settings=settings)
 
-    # 8b. Initialize position notifier
+    # 8. Initialize position notifier
     position_notifier = QueuePositionNotifier(notifier=notifier, queue_manager=queue_manager)
 
     # 9. Create processor
@@ -272,7 +272,7 @@ async def create_application(settings: Settings) -> Application:
         notifier=notifier,
     )
 
-    # 11. Create analytics job processor
+    # 13. Create analytics job processor
     analytics_processor = create_analytics_processor(
         database=database,
         settings=settings,

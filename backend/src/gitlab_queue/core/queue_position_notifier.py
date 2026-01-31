@@ -17,6 +17,9 @@ if TYPE_CHECKING:
 
 log = get_logger(__name__)
 
+# Estimated processing time per queue position (minutes)
+ESTIMATED_MINUTES_PER_POSITION = 15
+
 
 @dataclass
 class QueuePositionNotifier:
@@ -71,7 +74,7 @@ class QueuePositionNotifier:
             "queued",
             position=position,
             total=total,
-            estimated_minutes=position * 15,
+            estimated_minutes=position * ESTIMATED_MINUTES_PER_POSITION,
             queued_at=matched_item.queued_at,
         )
 
@@ -144,7 +147,7 @@ class QueuePositionNotifier:
                 position=new_position,
                 total=total,
                 old_position=old_position,
-                estimated_minutes=new_position * 15,
+                estimated_minutes=new_position * ESTIMATED_MINUTES_PER_POSITION,
             )
             notified_count += 1
 
