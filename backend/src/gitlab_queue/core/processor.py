@@ -13,7 +13,7 @@ without stopping the main loop.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import TYPE_CHECKING
@@ -740,11 +740,7 @@ class MergeProcessor:
                 await self._interruptible_sleep(self.settings.poll_interval_seconds)
                 continue
 
-            rebase_ctx = RebaseDuringTestingContext(
-                rebase_count=rebase_ctx.rebase_count,
-                max_attempts=rebase_ctx.max_attempts,
-                current_pipeline_id=pipeline.id,
-            )
+            rebase_ctx = replace(rebase_ctx, current_pipeline_id=pipeline.id)
 
             log.debug("Pipeline status", mr_iid=mr_iid, pipeline_id=pipeline.id, status=pipeline.status)
 
@@ -792,7 +788,8 @@ class MergeProcessor:
         elapsed = datetime.now(UTC) - start_time
         if elapsed > timeout:
             log.warning("Pipeline timeout", mr_iid=mr_iid, elapsed_seconds=elapsed.total_seconds())
-            await sm.trigger_timeout(max_wait_hours=int(timeout.total_seconds() / 3600))
+            hours = max(1, int(timeout.total_seconds() / 3600))
+            await sm.trigger_timeout(max_wait_hours=hours)
             return ProcessingResult.TIMEOUT
 
         if not await self._verify_mr_in_queue(mr_iid):
@@ -1003,6 +1000,9 @@ class MergeProcessor:
 
         if outcome.completed and outcome.result:
             return
+
+        if outcome.shutdown_requested:
+            raise GitLabAPIError("Shutdown requested during quick rebase")
 
         if outcome.timed_out:
             raise GitLabAPIError("Rebase timeout during retry")
