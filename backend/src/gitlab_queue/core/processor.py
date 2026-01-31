@@ -938,6 +938,16 @@ class MergeProcessor:
                 )
                 return new_ctx
 
+            # Context may have been updated even without new pipeline (e.g., timeout waiting for pipeline)
+            # Preserve the updated state for max_attempts tracking
+            if new_ctx.rebase_count > rebase_ctx.rebase_count:
+                log.debug(
+                    "Rebase context updated but no new pipeline",
+                    mr_iid=mr_iid,
+                    rebase_count=new_ctx.rebase_count,
+                )
+                return new_ctx
+
             return None
 
         except RebaseRetryLimitExceeded as e:
