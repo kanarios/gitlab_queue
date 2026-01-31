@@ -827,7 +827,13 @@ class MergeProcessor:
             return RebaseCheckOutcome(context=rebase_ctx, result=None, last_check=now, should_reset=False)
 
         if isinstance(rebase_result, RebaseDuringTestingContext):
-            return RebaseCheckOutcome(context=rebase_result, result=None, last_check=now, should_reset=True)
+            # Only reset start_time if we got a new pipeline (current_pipeline_id changed to a valid value)
+            # If rebase happened but pipeline wait timed out, preserve the timing
+            got_new_pipeline = (
+                rebase_result.current_pipeline_id is not None
+                and rebase_result.current_pipeline_id != rebase_ctx.current_pipeline_id
+            )
+            return RebaseCheckOutcome(context=rebase_result, result=None, last_check=now, should_reset=got_new_pipeline)
 
         return RebaseCheckOutcome(context=None, result=rebase_result, last_check=now, should_reset=False)
 
