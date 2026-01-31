@@ -120,6 +120,7 @@ jobs:
           if [ -n "${{ matrix.slicer_total }}" ]; then
             SLICER_ARGS="--slicer-total=${{ matrix.slicer_total }} --slicer-index=${{ matrix.slicer_index }}"
           fi
+          # shellcheck disable=SC2086 # Intentional word splitting for multiple args
           uv run vedro run scenarios/${{ matrix.test_suite }}/ --verbose $SLICER_ARGS
 
   backend-migrations:
@@ -180,9 +181,10 @@ jobs:
 
       - name: Check Alembic - downgrade works
         run: |
-          uv run alembic downgrade -1
+          # Test full downgrade/upgrade cycle to ensure all migrations are reversible
+          uv run alembic downgrade base
           uv run alembic upgrade head
-          echo "OK: Migration is reversible"
+          echo "OK: All migrations are reversible"
 
   # =============================================================================
   # Frontend Jobs

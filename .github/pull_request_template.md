@@ -8,6 +8,8 @@
 
 - [ ] Code follows project style guidelines
 - [ ] Self-review completed
+- [ ] Breaking changes documented (if any)
+- [ ] Related issue/ticket referenced (if applicable)
 
 ### Database/Migrations (if applicable)
 

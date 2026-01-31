@@ -12,6 +12,7 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 from gitlab_queue.clients.gitlab import GitLabAPIError, GitLabConflictError
+from gitlab_queue.core.polling import PollingConfig, PollStatus, poll_until_done
 from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -192,27 +193,42 @@ class RebaseDuringTestingHandler:
 
         Raises:
             GitLabConflictError: If rebase results in conflicts.
-            GitLabAPIError: If rebase times out.
+            GitLabAPIError: If rebase times out or shutdown requested.
         """
-        timeout_seconds = self.settings.rebase_timeout_seconds
-        elapsed = 0.0
+        # Exception holder for capturing errors from poll function
+        poll_error: dict[str, Exception] = {}
 
-        while elapsed < timeout_seconds:
-            if self._shutdown_event.is_set():
-                raise GitLabAPIError("Shutdown requested during rebase wait")
-
+        async def check_rebase() -> tuple[PollStatus, bool | None]:
             rebase_in_progress, has_conflicts = await self.gitlab_client.check_rebase_status(mr_iid)
 
             if has_conflicts:
-                raise GitLabConflictError("Rebase conflict during testing")
+                poll_error["exception"] = GitLabConflictError("Rebase conflict during testing")
+                return PollStatus.DONE, False
 
             if not rebase_in_progress:
-                return
+                return PollStatus.DONE, True
 
-            await asyncio.sleep(REBASE_POLL_INTERVAL_SECONDS)
-            elapsed += REBASE_POLL_INTERVAL_SECONDS
+            return PollStatus.CONTINUE, None
 
-        raise GitLabAPIError(f"Rebase timeout after {timeout_seconds}s")
+        config = PollingConfig(
+            timeout_seconds=self.settings.rebase_timeout_seconds,
+            poll_interval_seconds=REBASE_POLL_INTERVAL_SECONDS,
+            operation_name="rebase_during_testing",
+        )
+        outcome = await poll_until_done(config, check_rebase, self._shutdown_event)
+
+        # Check for captured exception
+        if "exception" in poll_error:
+            raise poll_error["exception"]
+
+        if outcome.completed and outcome.result:
+            return
+
+        if outcome.shutdown_requested:
+            raise GitLabAPIError("Shutdown requested during rebase wait")
+
+        if outcome.timed_out:
+            raise GitLabAPIError(f"Rebase timeout after {self.settings.rebase_timeout_seconds}s")
 
     async def _wait_for_new_pipeline(
         self,
@@ -228,34 +244,55 @@ class RebaseDuringTestingHandler:
         Returns:
             New Pipeline if found, None if timeout.
         """
-        timeout_seconds = self.settings.post_rebase_pipeline_wait_seconds
-        elapsed = 0.0
-
-        while elapsed < timeout_seconds:
-            if self._shutdown_event.is_set():
-                return None
-
+        async def check_pipeline() -> tuple[PollStatus, Pipeline | None]:
             mr = await self.gitlab_client.get_mr(mr_iid)
             new_sha = mr.sha
 
             # Check if SHA changed (rebase created new commit)
             if new_sha != old_sha or mr.rebase_in_progress is False:
                 pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
-                if pipeline and pipeline.sha == new_sha:
-                    # Skip cancelled/failed pipelines from before
-                    if pipeline.status not in ("canceled", "failed"):
-                        return pipeline
+                # Skip cancelled/failed pipelines from before
+                if (
+                    pipeline
+                    and pipeline.sha == new_sha
+                    and pipeline.status not in ("canceled", "failed")
+                ):
+                    return PollStatus.DONE, pipeline
 
-            await asyncio.sleep(PIPELINE_WAIT_POLL_SECONDS)
-            elapsed += PIPELINE_WAIT_POLL_SECONDS
+            return PollStatus.CONTINUE, None
 
-        # Timeout - try to get whatever pipeline is available
+        config = PollingConfig(
+            timeout_seconds=self.settings.post_rebase_pipeline_wait_seconds,
+            poll_interval_seconds=PIPELINE_WAIT_POLL_SECONDS,
+            operation_name="new_pipeline_after_rebase",
+        )
+        outcome = await poll_until_done(config, check_pipeline, self._shutdown_event)
+
+        if outcome.completed and outcome.result:
+            return outcome.result
+
+        if outcome.shutdown_requested:
+            return None
+
+        # Timeout - try to get current pipeline with validation
         log.warning(
             "Timeout waiting for new pipeline after rebase",
             mr_iid=mr_iid,
             old_sha=old_sha[:8],
         )
-        return await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
+        mr = await self.gitlab_client.get_mr(mr_iid)
+        pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
+        if pipeline and pipeline.sha == mr.sha and pipeline.status not in ("canceled", "failed"):
+            return pipeline
+        log.warning(
+            "No valid pipeline found after rebase timeout",
+            mr_iid=mr_iid,
+            pipeline_id=pipeline.id if pipeline else None,
+            pipeline_sha=pipeline.sha[:8] if pipeline else None,
+            mr_sha=mr.sha[:8],
+            pipeline_status=pipeline.status if pipeline else None,
+        )
+        return None
 
 
 __all__: list[str] = [

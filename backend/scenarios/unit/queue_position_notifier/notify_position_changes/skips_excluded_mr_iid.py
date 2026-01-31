@@ -38,8 +38,9 @@ class Scenario(vedro.Scenario):
         assert self.notifier.notify.call_count == 1
 
     def and_notification_is_for_non_excluded_mr(self):
-        call_args = self.notifier.notify.call_args
-        assert call_args[0][0] == 102
+        call = self.notifier.notify.call_args
+        mr_iid = call.kwargs.get("mr_iid") or call.args[0]
+        assert mr_iid == 102
 
     def and_notified_count_is_1(self):
         assert self.notified_count == 1

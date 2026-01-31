@@ -543,20 +543,15 @@ dev = [
     { name = "watchfiles" },
 ]
 
-[package.dev-dependencies]
-dev = [
-    { name = "d42" },
-]
-
 [package.metadata]
 requires-dist = [
     { name = "adaptix", specifier = ">=3.0.0b10" },
     { name = "aiosqlite", specifier = ">=0.20" },
     { name = "alembic", specifier = ">=1.13" },
     { name = "apscheduler", specifier = ">=3.10" },
-    { name = "asyncpg", marker = "extra == 'dev'", specifier = ">=0.29" },
+    { name = "asyncpg", marker = "extra == 'dev'", specifier = ">=0.30.0" },
     { name = "coverage", extras = ["toml"], marker = "extra == 'dev'", specifier = ">=7.0" },
-    { name = "d42", marker = "extra == 'dev'", specifier = ">=1.12" },
+    { name = "d42", marker = "extra == 'dev'", specifier = ">=2.2.0" },
     { name = "environ-config", specifier = ">=24.0" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
@@ -576,9 +571,6 @@ requires-dist = [
     { name = "watchfiles", marker = "extra == 'dev'", specifier = ">=1.0" },
 ]
 provides-extras = ["dev"]
-
-[package.metadata.requires-dev]
-dev = [{ name = "d42", specifier = ">=2.2.0" }]
 
 [[package]]
 name = "greenlet"

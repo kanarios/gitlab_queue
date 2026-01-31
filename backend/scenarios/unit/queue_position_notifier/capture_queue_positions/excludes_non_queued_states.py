@@ -16,6 +16,10 @@ class Scenario(vedro.Scenario):
     @params("rebasing")
     @params("testing")
     @params("merging")
+    @params("merged")
+    @params("failed")
+    @params("conflict")
+    @params("removed")
     def __init__(self, state: str):
         self.excluded_state = state
 

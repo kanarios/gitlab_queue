@@ -47,9 +47,9 @@ class Scenario(vedro.Scenario):
 
     def and_positions_shifted_down_by_one(self):
         calls = self.notifier.notify.call_args_list
-        first_call_kwargs = calls[0].kwargs
-        second_call_kwargs = calls[1].kwargs
-        assert first_call_kwargs["position"] == 2
-        assert first_call_kwargs["old_position"] == 1
-        assert second_call_kwargs["position"] == 3
-        assert second_call_kwargs["old_position"] == 2
+        notifications = [
+            (c.kwargs.get("mr_iid") or c.args[0], c.kwargs["position"], c.kwargs["old_position"])
+            for c in calls
+        ]
+        expected = {(101, 2, 1), (102, 3, 2)}
+        assert set(notifications) == expected

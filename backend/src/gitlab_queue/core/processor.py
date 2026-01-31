@@ -24,6 +24,7 @@ from gitlab_queue.clients.gitlab import (
     GitLabConflictError,
     GitLabNotFoundError,
 )
+from gitlab_queue.core.polling import PollingConfig, PollOutcome, PollStatus, poll_until_done
 from gitlab_queue.core.rebase_during_testing import (
     RebaseDuringTestingContext,
     RebaseDuringTestingHandler,
@@ -101,6 +102,30 @@ class ProcessingContext:
     state_machine: MRStateMachine
     start_time: datetime
     rebase_ctx: RebaseContext = field(default_factory=RebaseContext)
+
+
+@dataclass
+class RebaseCheckOutcome:
+    """Result of checking if rebase is needed during testing.
+
+    Separates success context from error result for clearer API.
+    """
+
+    context: RebaseDuringTestingContext | None
+    result: ProcessingResult | None
+    last_check: datetime
+    should_reset: bool
+
+
+@dataclass
+class RetrySignal:
+    """Signal to retry pipeline with updated state.
+
+    Used instead of tuple[int, datetime] for type clarity.
+    """
+
+    retry_count: int
+    new_start_time: datetime
 
 
 # =============================================================================
@@ -372,52 +397,31 @@ class MergeProcessor:
         """
         mr_iid = ctx.mr_iid
         sm = ctx.state_machine
-        timeout = timedelta(seconds=self.settings.rebase_timeout_seconds)
-        start_time = datetime.now(UTC)
 
         log.debug(
             "Waiting for rebase to complete",
             mr_iid=mr_iid,
-            timeout_seconds=timeout.total_seconds(),
+            timeout_seconds=self.settings.rebase_timeout_seconds,
         )
 
-        while True:
-            # Check shutdown
-            if self._shutdown_event.is_set():
-                log.info("Shutdown requested during rebase", mr_iid=mr_iid)
-                return ProcessingResult.ERROR
+        # Result holder for capturing values from poll function
+        poll_result: dict[str, object] = {}
 
-            # Check timeout
-            elapsed = datetime.now(UTC) - start_time
-            if elapsed > timeout:
-                log.warning(
-                    "Rebase timeout",
-                    mr_iid=mr_iid,
-                    elapsed_seconds=elapsed.total_seconds(),
-                )
-                await sm.trigger_timeout(max_wait_hours=max(1, int(timeout.total_seconds() / 3600)))
-                return ProcessingResult.TIMEOUT
-
-            # Check rebase status
+        async def check_rebase() -> tuple[PollStatus, ProcessingResult | None]:
             rebase_in_progress, has_conflicts = await self.gitlab_client.check_rebase_status(mr_iid)
 
             if has_conflicts:
                 log.warning("Rebase has conflicts", mr_iid=mr_iid)
-                # Fetch conflicted files for detailed reporting
                 conflicted_files = await self.gitlab_client.get_mr_conflicts(mr_iid)
                 await sm.trigger_rebase_failed(
                     conflicted_files=conflicted_files,
                     error_message="Rebase failed due to merge conflicts",
                 )
-                return ProcessingResult.CONFLICT
+                return PollStatus.DONE, ProcessingResult.CONFLICT
 
             if not rebase_in_progress:
                 log.info("Rebase completed", mr_iid=mr_iid)
-
-                # Get old SHA from context for race condition prevention
                 old_sha = ctx.rebase_ctx.old_sha
-
-                # Wait for pipeline with matching SHA
                 pipeline, new_sha = await self._wait_for_post_rebase_pipeline(
                     mr_iid, old_sha, timeout_seconds=self.settings.post_rebase_pipeline_wait_seconds
                 )
@@ -429,17 +433,43 @@ class MergeProcessor:
                         pipeline_url=pipeline_url,
                         expected_sha=new_sha,
                     )
-                    return ProcessingResult.SUCCESS
+                    return PollStatus.DONE, ProcessingResult.SUCCESS
 
-                # Pipeline not found with correct SHA, continue polling
+                # Store for potential retry logging
+                poll_result["new_sha"] = new_sha
                 log.debug(
                     "Waiting for pipeline with correct SHA after rebase",
                     mr_iid=mr_iid,
                     expected_sha=new_sha[:8] if new_sha else "unknown",
                 )
 
-            # Poll interval (shorter than main loop)
-            await self._interruptible_sleep(REBASE_POLL_INTERVAL_SECONDS)
+            return PollStatus.CONTINUE, None
+
+        config = PollingConfig(
+            timeout_seconds=self.settings.rebase_timeout_seconds,
+            poll_interval_seconds=REBASE_POLL_INTERVAL_SECONDS,
+            operation_name="rebase",
+        )
+        outcome = await poll_until_done(config, check_rebase, self._shutdown_event)
+
+        if outcome.completed and outcome.result:
+            return outcome.result
+
+        if outcome.shutdown_requested:
+            log.info("Shutdown requested during rebase", mr_iid=mr_iid)
+            return ProcessingResult.ERROR
+
+        if outcome.timed_out:
+            timeout_hours = max(1, int(self.settings.rebase_timeout_seconds / 3600))
+            log.warning(
+                "Rebase timeout",
+                mr_iid=mr_iid,
+                timeout_seconds=self.settings.rebase_timeout_seconds,
+            )
+            await sm.trigger_timeout(max_wait_hours=timeout_hours)
+            return ProcessingResult.TIMEOUT
+
+        return ProcessingResult.ERROR
 
     async def _wait_for_post_rebase_pipeline(
         self,
@@ -465,19 +495,17 @@ class MergeProcessor:
         if timeout_seconds is None:
             timeout_seconds = DEFAULT_POST_REBASE_PIPELINE_WAIT_SECONDS
 
-        start = datetime.now(UTC)
+        # Result holder for capturing values across poll iterations
+        poll_result: dict[str, object] = {"new_sha": old_sha}
 
-        while (datetime.now(UTC) - start).total_seconds() < timeout_seconds:
-            if self._shutdown_event.is_set():
-                return None, old_sha
-
+        async def check_pipeline() -> tuple[PollStatus, tuple[Pipeline | None, str] | None]:
             mr = await self.gitlab_client.get_mr(mr_iid)
 
             if mr.rebase_in_progress:
-                await asyncio.sleep(PIPELINE_POLL_INTERVAL_SECONDS)
-                continue
+                return PollStatus.CONTINUE, None
 
             new_sha = mr.sha
+            poll_result["new_sha"] = new_sha
 
             # Fast-forward case: SHA unchanged (no commits ahead of target)
             if new_sha == old_sha:
@@ -490,11 +518,9 @@ class MergeProcessor:
                             pipeline_id=pipeline.id,
                             pipeline_status=pipeline.status,
                         )
-                        await asyncio.sleep(PIPELINE_POLL_INTERVAL_SECONDS)
-                        continue
-                    return pipeline, new_sha
-                await asyncio.sleep(PIPELINE_POLL_INTERVAL_SECONDS)
-                continue
+                        return PollStatus.CONTINUE, None
+                    return PollStatus.DONE, (pipeline, new_sha)
+                return PollStatus.CONTINUE, None
 
             # SHA changed, need pipeline with new SHA
             pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
@@ -506,8 +532,7 @@ class MergeProcessor:
                         pipeline_id=pipeline.id,
                         pipeline_status=pipeline.status,
                     )
-                    await asyncio.sleep(PIPELINE_POLL_INTERVAL_SECONDS)
-                    continue
+                    return PollStatus.CONTINUE, None
                 log.info(
                     "Found pipeline with new SHA after rebase",
                     mr_iid=mr_iid,
@@ -515,9 +540,24 @@ class MergeProcessor:
                     old_sha=old_sha[:8],
                     new_sha=new_sha[:8],
                 )
-                return pipeline, new_sha
+                return PollStatus.DONE, (pipeline, new_sha)
 
-            await asyncio.sleep(PIPELINE_POLL_INTERVAL_SECONDS)
+            return PollStatus.CONTINUE, None
+
+        config = PollingConfig(
+            timeout_seconds=timeout_seconds,
+            poll_interval_seconds=PIPELINE_POLL_INTERVAL_SECONDS,
+            operation_name="post_rebase_pipeline",
+        )
+        outcome: PollOutcome[tuple[Pipeline | None, str]] = await poll_until_done(
+            config, check_pipeline, self._shutdown_event
+        )
+
+        if outcome.completed and outcome.result:
+            return outcome.result
+
+        if outcome.shutdown_requested:
+            return None, old_sha
 
         # Timeout - return current state
         mr = await self.gitlab_client.get_mr(mr_iid)
@@ -709,14 +749,18 @@ class MergeProcessor:
             log.debug("Pipeline status", mr_iid=mr_iid, pipeline_id=pipeline.id, status=pipeline.status)
 
             # Check if rebase needed
-            rebase_ctx, last_rebase_check, should_reset = await self._maybe_rebase_during_testing(
+            outcome = await self._maybe_rebase_during_testing(
                 ctx, sm, rebase_handler, rebase_ctx, pipeline, retry_count, last_rebase_check
             )
-            if should_reset:
+            last_rebase_check = outcome.last_check
+            if outcome.result is not None:
+                return outcome.result
+            if outcome.should_reset and outcome.context is not None:
+                rebase_ctx = outcome.context
                 start_time = datetime.now(UTC)
                 continue
-            if isinstance(rebase_ctx, ProcessingResult):
-                return rebase_ctx
+            if outcome.context is not None:
+                rebase_ctx = outcome.context
 
             # Handle pipeline status
             status_result = await self._handle_pipeline_status(
@@ -726,8 +770,9 @@ class MergeProcessor:
                 await self._interruptible_sleep(self.settings.poll_interval_seconds)
                 continue
 
-            if isinstance(status_result, tuple):
-                retry_count, start_time = status_result
+            if isinstance(status_result, RetrySignal):
+                retry_count = status_result.retry_count
+                start_time = status_result.new_start_time
                 continue
 
             return status_result
@@ -767,29 +812,37 @@ class MergeProcessor:
         pipeline: Pipeline,
         retry_count: int,
         last_rebase_check: datetime,
-    ) -> tuple[RebaseDuringTestingContext | ProcessingResult, datetime, bool]:
+    ) -> RebaseCheckOutcome:
         """Check and handle rebase during testing if interval elapsed.
 
         Returns:
-            Tuple of (updated_context_or_error, last_check_time, should_reset_timeout).
+            RebaseCheckOutcome with either updated context or error result.
         """
         now = datetime.now(UTC)
         check_interval = self.settings.rebase_check_interval_seconds
 
         if (now - last_rebase_check).total_seconds() < check_interval:
-            return rebase_ctx, last_rebase_check, False
+            return RebaseCheckOutcome(
+                context=rebase_ctx, result=None, last_check=last_rebase_check, should_reset=False
+            )
 
         rebase_result = await self._check_and_handle_rebase_during_testing(
             ctx, sm, rebase_handler, rebase_ctx, pipeline, retry_count
         )
 
         if rebase_result is None:
-            return rebase_ctx, now, False
+            return RebaseCheckOutcome(
+                context=rebase_ctx, result=None, last_check=now, should_reset=False
+            )
 
         if isinstance(rebase_result, RebaseDuringTestingContext):
-            return rebase_result, now, True
+            return RebaseCheckOutcome(
+                context=rebase_result, result=None, last_check=now, should_reset=True
+            )
 
-        return rebase_result, now, False
+        return RebaseCheckOutcome(
+            context=None, result=rebase_result, last_check=now, should_reset=False
+        )
 
     async def _handle_pipeline_status(
         self,
@@ -798,12 +851,12 @@ class MergeProcessor:
         pipeline: Pipeline,
         retry_count: int,
         max_retries: int,
-    ) -> ProcessingResult | tuple[int, datetime] | None:
+    ) -> ProcessingResult | RetrySignal | None:
         """Handle pipeline status and return result or continue signal.
 
         Returns:
             - ProcessingResult: Final result, return from caller
-            - tuple[int, datetime]: (new_retry_count, new_start_time), continue loop
+            - RetrySignal: Retry with new count and start time, continue loop
             - None: No action needed, continue polling
         """
         mr_iid = ctx.mr_iid
@@ -838,11 +891,11 @@ class MergeProcessor:
     async def _handle_pipeline_failure(
         self,
         ctx: ProcessingContext,
-        sm: MRStateMachine,
+        _sm: MRStateMachine,
         pipeline: Pipeline,
         retry_count: int,
         max_retries: int,
-    ) -> ProcessingResult | tuple[int, datetime]:
+    ) -> ProcessingResult | RetrySignal:
         """Handle failed/canceled pipeline status."""
         mr_iid = ctx.mr_iid
         failed_jobs = await self._get_failed_jobs(pipeline.id)
@@ -862,7 +915,7 @@ class MergeProcessor:
         )
 
         if should_continue and new_start:
-            return (retry_count + 1, new_start)
+            return RetrySignal(retry_count=retry_count + 1, new_start_time=new_start)
 
         return ProcessingResult.PIPELINE_FAILED
 
@@ -928,28 +981,43 @@ class MergeProcessor:
 
         Raises:
             GitLabAPIError: If rebase times out or fails.
+            GitLabConflictError: If rebase has conflicts.
         """
         mr_iid = ctx.mr_iid
-        timeout = timedelta(seconds=QUICK_REBASE_TIMEOUT_SECONDS)
-        start_time = datetime.now(UTC)
 
-        while True:
-            elapsed = datetime.now(UTC) - start_time
-            if elapsed > timeout:
-                raise GitLabAPIError("Rebase timeout during retry")
+        # Exception holder for capturing errors from poll function
+        poll_error: dict[str, Exception] = {}
 
+        async def check_rebase() -> tuple[PollStatus, bool | None]:
             rebase_in_progress, has_conflicts = await self.gitlab_client.check_rebase_status(mr_iid)
 
             if has_conflicts:
-                # Fetch conflicted files for better error reporting
                 conflicted_files = await self.gitlab_client.get_mr_conflicts(mr_iid)
                 files_info = f": {conflicted_files}" if conflicted_files else ""
-                raise GitLabConflictError(f"Rebase conflict during retry{files_info}")
+                poll_error["exception"] = GitLabConflictError(f"Rebase conflict during retry{files_info}")
+                return PollStatus.DONE, False
 
             if not rebase_in_progress:
-                return
+                return PollStatus.DONE, True
 
-            await asyncio.sleep(QUICK_REBASE_POLL_INTERVAL_SECONDS)
+            return PollStatus.CONTINUE, None
+
+        config = PollingConfig(
+            timeout_seconds=QUICK_REBASE_TIMEOUT_SECONDS,
+            poll_interval_seconds=QUICK_REBASE_POLL_INTERVAL_SECONDS,
+            operation_name="quick_rebase",
+        )
+        outcome = await poll_until_done(config, check_rebase, self._shutdown_event)
+
+        # Check for captured exception
+        if "exception" in poll_error:
+            raise poll_error["exception"]
+
+        if outcome.completed and outcome.result:
+            return
+
+        if outcome.timed_out:
+            raise GitLabAPIError("Rebase timeout during retry")
 
     async def _get_failed_jobs(self, pipeline_id: int) -> list[str]:
         """Get list of failed job names from a pipeline.
