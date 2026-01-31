@@ -728,7 +728,7 @@ class MergeProcessor:
             pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
             if pipeline is None:
                 log.warning("No pipeline found", mr_iid=mr_iid)
-                await self._interruptible_sleep(self.settings.poll_interval_seconds)
+                await self._interruptible_sleep(self.settings.pipeline_poll_interval_seconds)
                 continue
 
             rebase_ctx = replace(rebase_ctx, current_pipeline_id=pipeline.id)
@@ -752,7 +752,7 @@ class MergeProcessor:
             # Handle pipeline status
             status_result = await self._handle_pipeline_status(ctx, sm, pipeline, retry_count, max_retries)
             if status_result is None:
-                await self._interruptible_sleep(self.settings.poll_interval_seconds)
+                await self._interruptible_sleep(self.settings.pipeline_poll_interval_seconds)
                 continue
 
             if isinstance(status_result, RetrySignal):
