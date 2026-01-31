@@ -380,9 +380,7 @@ def _validate_retry_settings(settings: Settings, errors: list[str]) -> None:
     if settings.max_rebase_during_testing < 0:
         errors.append(f"max_rebase_during_testing cannot be negative, got: {settings.max_rebase_during_testing}")
     if settings.rebase_check_interval_seconds <= 0:
-        errors.append(
-            f"rebase_check_interval_seconds must be positive, got: {settings.rebase_check_interval_seconds}"
-        )
+        errors.append(f"rebase_check_interval_seconds must be positive, got: {settings.rebase_check_interval_seconds}")
 
 
 def _validate_rate_limit_settings(settings: Settings, errors: list[str]) -> None:
