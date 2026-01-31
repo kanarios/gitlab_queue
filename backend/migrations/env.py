@@ -33,10 +33,20 @@ target_metadata = Base.metadata
 
 
 def get_database_url() -> str:
-    """Get database URL from application config.
+    """Get database URL from environment or application config.
 
-    Falls back to alembic.ini if config loading fails.
+    Priority:
+    1. GITLAB_QUEUE_DATABASE_URL environment variable (for CI/testing)
+    2. Application settings via load_settings()
+    3. Fallback to alembic.ini value
     """
+    import os
+
+    # Check env var directly first (for CI where full settings may not be available)
+    env_url = os.environ.get("GITLAB_QUEUE_DATABASE_URL")
+    if env_url:
+        return env_url
+
     try:
         settings = load_settings()
         return settings.database_url
