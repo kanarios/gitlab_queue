@@ -37,6 +37,7 @@ class MockSettings:
 
     rebase_timeout_seconds: float = 60.0
     post_rebase_pipeline_wait_seconds: float = 30.0
+    pipeline_poll_interval_seconds: float = 5.0
 
 
 def create_mock_gitlab_client(
