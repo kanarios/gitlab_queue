@@ -23,9 +23,8 @@ if TYPE_CHECKING:
 log = get_logger(__name__)
 
 
-# Polling interval for waiting for rebase completion and new pipeline
+# Polling interval for waiting for rebase completion
 REBASE_POLL_INTERVAL_SECONDS = 3
-PIPELINE_WAIT_POLL_SECONDS = 2
 
 
 class MergeReadiness(Enum):
@@ -269,7 +268,7 @@ class RebaseDuringTestingHandler:
 
         config = PollingConfig(
             timeout_seconds=self.settings.post_rebase_pipeline_wait_seconds,
-            poll_interval_seconds=PIPELINE_WAIT_POLL_SECONDS,
+            poll_interval_seconds=self.settings.pipeline_poll_interval_seconds,
             operation_name="new_pipeline_after_rebase",
         )
         outcome = await poll_until_done(config, check_pipeline, self._shutdown_event)

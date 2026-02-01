@@ -746,9 +746,23 @@ class MergeProcessor:
             if outcome.should_reset and outcome.context is not None:
                 rebase_ctx = outcome.context
                 start_time = datetime.now(UTC)
+                # Skip current (old) pipeline - wait for new one after rebase
+                await self._interruptible_sleep(self.settings.pipeline_poll_interval_seconds)
                 continue
             if outcome.context is not None:
                 rebase_ctx = outcome.context
+
+            # Skip pipelines created before current start_time (stale after rebase/retry)
+            if pipeline.created_at is not None and pipeline.created_at < start_time:
+                log.debug(
+                    "Skipping stale pipeline created before start_time",
+                    mr_iid=mr_iid,
+                    pipeline_id=pipeline.id,
+                    pipeline_created_at=pipeline.created_at.isoformat(),
+                    start_time=start_time.isoformat(),
+                )
+                await self._interruptible_sleep(self.settings.pipeline_poll_interval_seconds)
+                continue
 
             # Handle pipeline status
             status_result = await self._handle_pipeline_status(ctx, sm, pipeline, retry_count, max_retries)
