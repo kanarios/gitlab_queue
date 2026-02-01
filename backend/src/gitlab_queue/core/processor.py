@@ -559,6 +559,9 @@ class MergeProcessor:
             current_sha=mr.sha[:8] if mr.sha else "unknown",
             pipeline_id=pipeline.id if pipeline else None,
         )
+        # Don't return terminal failed pipelines on timeout - let outer rebase wait continue
+        if pipeline and pipeline.status in TERMINAL_FAILED_PIPELINE_STATUSES:
+            return None, mr.sha
         return pipeline, mr.sha
 
     # =========================================================================
@@ -850,7 +853,7 @@ class MergeProcessor:
             return ProcessingResult.SUCCESS
 
         if pipeline.status in ("failed", "canceled"):
-            return await self._handle_pipeline_failure(ctx, sm, pipeline, retry_count, max_retries)
+            return await self._handle_pipeline_failure(ctx, pipeline, retry_count, max_retries)
 
         non_actionable_statuses = ("skipped", "manual", "waiting_for_resource", "blocked")
         if pipeline.status in non_actionable_statuses:
@@ -872,7 +875,6 @@ class MergeProcessor:
     async def _handle_pipeline_failure(
         self,
         ctx: ProcessingContext,
-        _sm: MRStateMachine,
         pipeline: Pipeline,
         retry_count: int,
         max_retries: int,
