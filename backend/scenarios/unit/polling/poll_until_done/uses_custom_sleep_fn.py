@@ -32,8 +32,5 @@ class Scenario(vedro.Scenario):
             sleep_fn=self.sleep_fn,
         )
 
-    def then_sleep_was_called_with_poll_interval(self):
-        assert 5.0 in self.sleep_durations
-
-    def and_sleep_was_called_twice(self):
-        assert len(self.sleep_durations) == 2
+    def then_sleep_was_called_with_correct_interval(self):
+        assert self.sleep_durations == [5.0, 5.0]

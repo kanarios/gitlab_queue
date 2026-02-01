@@ -43,12 +43,15 @@ class Scenario(vedro.Scenario):
             log_context="",
         )
 
+    @property
+    def notified_iids(self) -> list[int]:
+        return [
+            call.kwargs.get("mr_iid", call.args[0])
+            for call in self.notifier.notify.call_args_list
+        ]
+
     def then_mr_in_non_queued_state_is_not_notified(self):
-        calls = self.notifier.notify.call_args_list
-        notified_iids = [call.kwargs.get("mr_iid", call.args[0]) for call in calls]
-        assert 101 not in notified_iids
+        assert 101 not in self.notified_iids
 
     def and_queued_mr_is_notified(self):
-        calls = self.notifier.notify.call_args_list
-        notified_iids = [call.kwargs.get("mr_iid", call.args[0]) for call in calls]
-        assert 102 in notified_iids
+        assert 102 in self.notified_iids

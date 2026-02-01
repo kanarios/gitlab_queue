@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 from gitlab_queue.core.state_machine import MRStateMachine
@@ -11,17 +11,11 @@ from gitlab_queue.core.state_machine import MRStateMachine
 
 @dataclass
 class MockQueueItem:
-    """Mock QueueItem for testing _calculate_duration."""
+    """Mock QueueItem for state machine tests."""
 
     mr_iid: int = 42
     queued_at: datetime | None = None
     state: str = "testing"
-
-
-def create_queue_item_with_age(seconds: int) -> MockQueueItem:
-    """Create MockQueueItem that was queued N seconds ago."""
-    queued_at = datetime.now(UTC) - timedelta(seconds=seconds)
-    return MockQueueItem(queued_at=queued_at)
 
 
 def create_mock_notifier() -> MagicMock:
@@ -62,6 +56,5 @@ __all__ = [
     "MockQueueItem",
     "create_mock_notifier",
     "create_mock_queue_manager",
-    "create_queue_item_with_age",
     "create_state_machine",
 ]
