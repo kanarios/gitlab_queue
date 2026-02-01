@@ -91,7 +91,7 @@ _This is the last retry attempt._
 """,
     "rebase_during_testing": """## 🤖 Merge Queue Bot
 
-**Status:** 🔄 Rebase during testing ({rebase_count}/{max_attempts})
+**Status:** 🔄 Rebase during testing ({rebase_count}/{max_attempts}){final_attempt_text}
 
 Target branch changed while pipeline was running.
 Previous pipeline cancelled, rebased and started new pipeline.
@@ -317,6 +317,15 @@ class MRNotifier:
                 full_context[key] = self._format_file_list(value)
             elif key == "failed_jobs" and isinstance(value, list):
                 full_context[key] = self._format_job_list(value)
+
+        # Add final attempt text for rebase_during_testing
+        if status == "rebase_during_testing":
+            rebase_count = full_context.get("rebase_count", 0)
+            max_attempts = full_context.get("max_attempts", 0)
+            if rebase_count == max_attempts:
+                full_context["final_attempt_text"] = " ⚠️ **Final attempt**"
+            else:
+                full_context["final_attempt_text"] = ""
 
         return template.format(**full_context)
 

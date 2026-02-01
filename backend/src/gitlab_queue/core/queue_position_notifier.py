@@ -137,10 +137,11 @@ class QueuePositionNotifier:
                 continue
 
             log.info(
-                f"Notifying position change{log_context}",
+                "Notifying position change",
                 mr_iid=item.mr_iid,
                 old_position=old_position,
                 new_position=new_position,
+                context=log_context.strip() if log_context else None,
             )
 
             await self.notifier.notify(

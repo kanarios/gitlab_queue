@@ -13,7 +13,7 @@ from .._helpers import (
 class Scenario(vedro.Scenario):
     subject = "_notify_position_changes notifies MRs with changed position"
 
-    async def given_positions_before_and_after_change(self):
+    def given_positions_before_and_after_change(self):
         self.positions_before = {101: 2, 102: 3}
         queue_items_after = [
             MockQueueItem(mr_iid=101, state="queued"),
@@ -41,5 +41,8 @@ class Scenario(vedro.Scenario):
 
     def and_notifications_use_position_changed_template(self):
         calls = self.notifier.notify.call_args_list
-        statuses = [c.kwargs.get("status") or c.args[1] for c in calls]
+        statuses = [
+            c.kwargs.get("status", c.args[1] if len(c.args) > 1 else None)
+            for c in calls
+        ]
         assert all(s == "position_changed" for s in statuses)

@@ -11,7 +11,7 @@ from .._helpers import (
 
 
 class Scenario(vedro.Scenario):
-    subject = "notify_affected_mrs_after_hotfix_added notifies with hotfix context"
+    subject = "notify_affected_mrs_after_hotfix_added notifies affected MRs"
 
     async def given_positions_before_hotfix_added(self):
         self.hotfix_mr_iid = 100
@@ -47,8 +47,14 @@ class Scenario(vedro.Scenario):
 
     def and_positions_shifted_down_by_one(self):
         calls = self.notifier.notify.call_args_list
+        # mr_iid is positional (args[0])
+        # position and old_position are keyword-only
         notifications = [
-            (c.kwargs.get("mr_iid") or c.args[0], c.kwargs["position"], c.kwargs["old_position"])
+            (
+                c.kwargs.get("mr_iid") or c.args[0],
+                c.kwargs["position"],
+                c.kwargs["old_position"],
+            )
             for c in calls
         ]
         expected = {(101, 2, 1), (102, 3, 2)}

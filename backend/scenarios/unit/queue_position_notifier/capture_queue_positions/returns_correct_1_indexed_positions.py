@@ -13,8 +13,9 @@ class Scenario(vedro.Scenario):
     subject = "capture_queue_positions returns correct 1-indexed positions"
 
     async def given_queue_with_three_queued_mrs(self):
-        queue_items = create_queue_all_queued(3)
-        self.queue_manager = create_mock_queue_manager(queue_items)
+        self.queue_items = create_queue_all_queued(3)
+        self.mr_iids = [item.mr_iid for item in self.queue_items]
+        self.queue_manager = create_mock_queue_manager(self.queue_items)
         self.position_notifier = create_position_notifier(
             queue_manager=self.queue_manager,
         )
@@ -23,10 +24,10 @@ class Scenario(vedro.Scenario):
         self.positions = await self.position_notifier.capture_queue_positions()
 
     def then_first_mr_has_position_1(self):
-        assert self.positions[101] == 1
+        assert self.positions[self.mr_iids[0]] == 1
 
     def and_second_mr_has_position_2(self):
-        assert self.positions[102] == 2
+        assert self.positions[self.mr_iids[1]] == 2
 
     def and_third_mr_has_position_3(self):
-        assert self.positions[103] == 3
+        assert self.positions[self.mr_iids[2]] == 3

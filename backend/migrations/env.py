@@ -51,20 +51,23 @@ def get_database_url() -> str:
 
     try:
         settings = load_settings()
-        return settings.database_url
+        if settings.database_url:
+            return settings.database_url
+        # settings loaded but database_url is falsy - fall through to fallback
+        logger.debug("Settings loaded but database_url is empty, trying alembic.ini fallback")
     except Exception as e:
-        # Fallback to alembic.ini value
-        fallback_url = config.get_main_option("sqlalchemy.url", "")
-        if not fallback_url:
-            logger.debug(
-                "Could not load settings (%s) and no fallback URL in alembic.ini", e
-            )
-            raise RuntimeError(
-                "No database URL found. Set GITLAB_QUEUE_DATABASE_URL env var "
-                "or configure sqlalchemy.url in alembic.ini"
-            ) from e
-        logger.debug("Could not load settings (%s), falling back to alembic.ini", e)
+        logger.debug("Could not load settings: %s", e)
+
+    # Fallback to alembic.ini value
+    fallback_url = config.get_main_option("sqlalchemy.url", "")
+    if fallback_url:
+        logger.debug("Using fallback URL from alembic.ini")
         return fallback_url
+
+    raise RuntimeError(
+        "No database URL found. Set GITLAB_QUEUE_DATABASE_URL env var "
+        "or configure sqlalchemy.url in alembic.ini"
+    )
 
 
 def run_migrations_offline() -> None:
