@@ -349,7 +349,9 @@ def _validate_timing_settings(settings: Settings, errors: list[str]) -> None:
     if settings.poll_interval_seconds <= 0:
         errors.append(f"poll_interval_seconds must be positive, got: {settings.poll_interval_seconds}")
     if settings.pipeline_poll_interval_seconds <= 0:
-        errors.append(f"pipeline_poll_interval_seconds must be positive, got: {settings.pipeline_poll_interval_seconds}")
+        errors.append(
+            f"pipeline_poll_interval_seconds must be positive, got: {settings.pipeline_poll_interval_seconds}"
+        )
     if settings.pipeline_timeout_seconds <= 0:
         errors.append(f"pipeline_timeout_seconds must be positive, got: {settings.pipeline_timeout_seconds}")
     if settings.rebase_timeout_seconds <= 0:
