@@ -72,9 +72,11 @@ class Secret:
         return value
 
     def __repr__(self) -> str:
+        """Return masked representation for debugging."""
         return "Secret('***')"
 
     def __str__(self) -> str:
+        """Return masked string to prevent accidental exposure."""
         return "***"
 
     def __eq__(self, other: object) -> bool:
@@ -93,12 +95,15 @@ class Secret:
         return object.__getattribute__(self, name)
 
     def __hash__(self) -> int:
+        """Return hash for use in sets and dicts."""
         return hash(object.__getattribute__(self, "_secret_value"))
 
     def __setattr__(self, name: str, value: Any) -> None:
+        """Prevent attribute modification to ensure immutability."""
         raise AttributeError("Secret is immutable")
 
     def __delattr__(self, name: str) -> None:
+        """Prevent attribute deletion to ensure immutability."""
         raise AttributeError("Secret is immutable")
 
     def __len__(self) -> int:
@@ -187,6 +192,7 @@ class Settings:
 
     # Timing
     poll_interval_seconds: int = var(default=30, converter=int)
+    pipeline_poll_interval_seconds: int = var(default=5, converter=int)  # 5 seconds for responsive pipeline checks
     pipeline_timeout_seconds: int = var(default=7200, converter=int)  # 2 hours
     rebase_timeout_seconds: int = var(default=300, converter=int)  # 5 minutes
     post_rebase_pipeline_wait_seconds: int = var(default=90, converter=int)  # 90 seconds
@@ -195,6 +201,10 @@ class Settings:
     # Retry Logic
     pipeline_retry_count: int = var(default=1, converter=int)
     api_max_retries: int = var(default=5, converter=int)
+
+    # Auto-Rebase During Testing
+    max_rebase_during_testing: int = var(default=3, converter=int)
+    rebase_check_interval_seconds: int = var(default=30, converter=int)
 
     # Rate Limit Handling
     rate_limit_warning_threshold: float = var(default=0.8, converter=float)  # 80%
@@ -272,12 +282,15 @@ def _settings_repr(self: Settings) -> str:
         "queue_label",
         "hotfix_label",
         "poll_interval_seconds",
+        "pipeline_poll_interval_seconds",
         "pipeline_timeout_seconds",
         "rebase_timeout_seconds",
         "post_rebase_pipeline_wait_seconds",
         "stale_mr_warning_hours",
         "pipeline_retry_count",
         "api_max_retries",
+        "max_rebase_during_testing",
+        "rebase_check_interval_seconds",
         "rate_limit_warning_threshold",
         "rate_limit_throttle_delay_seconds",
         "rate_limit_critical_threshold",
@@ -340,6 +353,10 @@ def _validate_timing_settings(settings: Settings, errors: list[str]) -> None:
     """Validate timing and interval settings."""
     if settings.poll_interval_seconds <= 0:
         errors.append(f"poll_interval_seconds must be positive, got: {settings.poll_interval_seconds}")
+    if settings.pipeline_poll_interval_seconds <= 0:
+        errors.append(
+            f"pipeline_poll_interval_seconds must be positive, got: {settings.pipeline_poll_interval_seconds}"
+        )
     if settings.pipeline_timeout_seconds <= 0:
         errors.append(f"pipeline_timeout_seconds must be positive, got: {settings.pipeline_timeout_seconds}")
     if settings.rebase_timeout_seconds <= 0:
@@ -350,6 +367,8 @@ def _validate_timing_settings(settings: Settings, errors: list[str]) -> None:
         )
     if settings.stale_mr_warning_hours < 1:
         errors.append(f"stale_mr_warning_hours must be at least 1, got: {settings.stale_mr_warning_hours}")
+    if settings.rebase_check_interval_seconds <= 0:
+        errors.append(f"rebase_check_interval_seconds must be positive, got: {settings.rebase_check_interval_seconds}")
 
 
 def _validate_retry_settings(settings: Settings, errors: list[str]) -> None:
@@ -358,6 +377,8 @@ def _validate_retry_settings(settings: Settings, errors: list[str]) -> None:
         errors.append(f"pipeline_retry_count cannot be negative, got: {settings.pipeline_retry_count}")
     if settings.api_max_retries < 0:
         errors.append(f"api_max_retries cannot be negative, got: {settings.api_max_retries}")
+    if settings.max_rebase_during_testing < 0:
+        errors.append(f"max_rebase_during_testing cannot be negative, got: {settings.max_rebase_during_testing}")
 
 
 def _validate_rate_limit_settings(settings: Settings, errors: list[str]) -> None:

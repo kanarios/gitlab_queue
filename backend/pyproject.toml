@@ -115,9 +115,3 @@ ignore_missing_imports = true
 
 [tool.vedro]
 plugins = []
-
-[dependency-groups]
-dev = [
-    "d42>=2.2.0",
-    "asyncpg>=0.30.0",  # PostgreSQL async driver for CI migration tests
-]

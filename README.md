@@ -139,6 +139,7 @@ Developer                      Bot                           GitLab
 | **Hotfix Priority** | MRs with `hotfix` label jump to front (without interrupting current work!) |
 | **Automatic Rebase** | Rebases onto target branch before merge |
 | **Pipeline Waiting** | Waits for CI/CD pipeline to complete |
+| **Auto-rebase During Testing** | If target branch changes while pipeline runs, auto-rebases without losing progress |
 | **Pipeline Retry** | Retries failed pipelines once before failing |
 | **Automatic Merge** | Merges when pipeline succeeds |
 
@@ -435,8 +436,10 @@ deploy-merge-queue:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `GITLAB_QUEUE_POLL_INTERVAL_SECONDS` | `30` | Polling interval for fallback sync |
+| `GITLAB_QUEUE_PIPELINE_POLL_INTERVAL_SECONDS` | `5` | Pipeline status check interval |
 | `GITLAB_QUEUE_PIPELINE_TIMEOUT_SECONDS` | `7200` | Max pipeline wait time (2 hours) |
 | `GITLAB_QUEUE_REBASE_TIMEOUT_SECONDS` | `300` | Max rebase wait time (5 minutes) |
+| `GITLAB_QUEUE_REBASE_CHECK_INTERVAL_SECONDS` | `30` | Interval to check if rebase needed during testing |
 | `GITLAB_QUEUE_STALE_MR_WARNING_HOURS` | `24` | Warn about stuck MRs after this time |
 
 ### Retry Logic
@@ -445,6 +448,7 @@ deploy-merge-queue:
 |----------|---------|-------------|
 | `GITLAB_QUEUE_PIPELINE_RETRY_COUNT` | `1` | Retry failed pipelines this many times |
 | `GITLAB_QUEUE_API_MAX_RETRIES` | `5` | Max retries for API calls |
+| `GITLAB_QUEUE_MAX_REBASE_DURING_TESTING` | `3` | Max auto-rebases while pipeline runs |
 
 ### Rate Limiting
 

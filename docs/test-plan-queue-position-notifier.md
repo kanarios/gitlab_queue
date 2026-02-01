@@ -8,30 +8,39 @@ Unit tests for `QueuePositionNotifier` class (`backend/src/gitlab_queue/core/que
 
 ```text
 backend/scenarios/unit/
-├── queue_position_notifier/
+├── queue_position_notifier/         # QueuePositionNotifier unit tests
 │   ├── __init__.py
 │   ├── _helpers.py
 │   ├── notify_initial_position/
 │   │   ├── __init__.py
 │   │   ├── sends_notification_with_correct_position.py
 │   │   ├── uses_queued_at_from_queue_item.py
+│   │   ├── calculates_estimated_time_for_various_positions.py
 │   │   └── does_not_notify_when_mr_not_in_queue.py
 │   ├── capture_queue_positions/
 │   │   ├── __init__.py
 │   │   ├── captures_only_queued_state_mrs.py
-│   │   └── returns_correct_positions.py
-│   ├── notify_affected_mrs_after_completion/
+│   │   ├── excludes_non_queued_states.py
+│   │   ├── returns_correct_1_indexed_positions.py
+│   │   └── returns_empty_dict_for_empty_queue.py
+│   ├── notify_position_changes/     # _notify_position_changes internal method tests
 │   │   ├── __init__.py
 │   │   ├── notifies_mrs_with_changed_position.py
-│   │   ├── skips_excluded_mr.py
-│   │   ├── skips_unchanged_positions.py
-│   │   └── skips_non_queued_states.py
+│   │   ├── returns_correct_notified_count.py
+│   │   ├── skips_excluded_mr_iid.py
+│   │   ├── skips_mrs_not_in_positions_before.py
+│   │   ├── skips_non_queued_states.py
+│   │   └── skips_unchanged_positions.py
+│   ├── notify_affected_mrs_after_completion/
+│   │   ├── __init__.py
+│   │   └── notifies_affected_mrs_after_mr_completes.py
 │   └── notify_affected_mrs_after_hotfix_added/
 │       ├── __init__.py
 │       └── notifies_with_hotfix_context.py
-└── handlers/
+│
+└── handlers/                        # Handler integration tests
     ├── __init__.py
-    └── notify_position_after_add/
+    └── notify_position_after_add/   # MRWebhookHandler notification tests
         ├── __init__.py
         ├── catches_exceptions_and_logs_warning.py
         ├── calls_hotfix_notification_when_is_hotfix.py

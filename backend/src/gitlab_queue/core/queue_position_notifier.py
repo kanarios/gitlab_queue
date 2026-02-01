@@ -69,12 +69,14 @@ class QueuePositionNotifier:
             total=total,
         )
 
+        # Estimated time includes processing time for all MRs ahead plus this MR
+        estimated_minutes = position * ESTIMATED_MINUTES_PER_POSITION
         await self.notifier.notify(
             mr_iid,
             "queued",
             position=position,
             total=total,
-            estimated_minutes=position * ESTIMATED_MINUTES_PER_POSITION,
+            estimated_minutes=estimated_minutes,
             queued_at=matched_item.queued_at,
         )
 

@@ -663,6 +663,59 @@ class MRStateMachine(StateMachine):
             position=position or 1,
         )
 
+    async def notify_rebase_during_testing(
+        self,
+        *,
+        old_pipeline_id: int | None,
+        new_pipeline_id: int,
+        rebase_count: int,
+        max_attempts: int,
+    ) -> None:
+        """Notify about rebase during testing (stays in testing state).
+
+        Called when target branch changes while pipeline is running,
+        requiring a rebase and new pipeline.
+
+        Args:
+            old_pipeline_id: ID of the cancelled pipeline (may be None).
+            new_pipeline_id: ID of the new pipeline after rebase.
+            rebase_count: Current rebase attempt number.
+            max_attempts: Maximum rebase attempts allowed.
+        """
+        log.info(
+            "Notifying rebase during testing",
+            mr_iid=self.mr_iid,
+            old_pipeline_id=old_pipeline_id,
+            new_pipeline_id=new_pipeline_id,
+            rebase_count=rebase_count,
+            max_attempts=max_attempts,
+        )
+
+        # Update pipeline_id in DB
+        await self.queue_manager.update_mr_state(
+            self.mr_iid,
+            "testing",
+            pipeline_id=new_pipeline_id,
+            pipeline_status="running",
+        )
+
+        # Build pipeline URL
+        pipeline_url = self.notifier.build_pipeline_url(new_pipeline_id)
+
+        # Update context
+        self._context["pipeline_id"] = new_pipeline_id
+        self._context["pipeline_url"] = pipeline_url
+
+        await self.notifier.notify(
+            self.mr_iid,
+            "rebase_during_testing",
+            old_pipeline_id=old_pipeline_id,
+            pipeline_id=new_pipeline_id,
+            pipeline_url=pipeline_url,
+            rebase_count=rebase_count,
+            max_attempts=max_attempts,
+        )
+
     # =========================================================================
     # Helper Methods
     # =========================================================================
