@@ -53,7 +53,6 @@ log = get_logger(__name__)
 
 # Polling intervals (seconds)
 REBASE_POLL_INTERVAL_SECONDS = 5
-PIPELINE_POLL_INTERVAL_SECONDS = 2
 QUICK_REBASE_POLL_INTERVAL_SECONDS = 3
 
 # Timeouts (seconds)
@@ -537,7 +536,7 @@ class MergeProcessor:
 
         config = PollingConfig(
             timeout_seconds=timeout_seconds,
-            poll_interval_seconds=PIPELINE_POLL_INTERVAL_SECONDS,
+            poll_interval_seconds=self.settings.pipeline_poll_interval_seconds,
             operation_name="post_rebase_pipeline",
         )
         outcome: PollOutcome[tuple[Pipeline | None, str]] = await poll_until_done(
