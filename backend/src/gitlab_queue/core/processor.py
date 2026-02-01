@@ -404,6 +404,7 @@ class MergeProcessor:
         )
 
         async def check_rebase() -> tuple[PollStatus, ProcessingResult | None]:
+            """Poll rebase status until complete or conflict detected."""
             rebase_in_progress, has_conflicts = await self.gitlab_client.check_rebase_status(mr_iid)
 
             if has_conflicts:
@@ -490,6 +491,7 @@ class MergeProcessor:
             timeout_seconds = DEFAULT_POST_REBASE_PIPELINE_WAIT_SECONDS
 
         async def check_pipeline() -> tuple[PollStatus, tuple[Pipeline | None, str] | None]:
+            """Poll for new pipeline on updated SHA after rebase."""
             mr = await self.gitlab_client.get_mr(mr_iid)
 
             if mr.rebase_in_progress:
@@ -559,9 +561,6 @@ class MergeProcessor:
             current_sha=mr.sha[:8] if mr.sha else "unknown",
             pipeline_id=pipeline.id if pipeline else None,
         )
-        # Don't return terminal failed pipelines on timeout - let outer rebase wait continue
-        if pipeline and pipeline.status in TERMINAL_FAILED_PIPELINE_STATUSES:
-            return None, mr.sha
         return pipeline, mr.sha
 
     # =========================================================================
@@ -994,6 +993,7 @@ class MergeProcessor:
         captured_error: Exception | None = None
 
         async def check_rebase() -> tuple[PollStatus, bool | None]:
+            """Poll rebase status for quick retry scenario."""
             nonlocal captured_error
             rebase_in_progress, has_conflicts = await self.gitlab_client.check_rebase_status(mr_iid)
 
