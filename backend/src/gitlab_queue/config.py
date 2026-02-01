@@ -72,9 +72,11 @@ class Secret:
         return value
 
     def __repr__(self) -> str:
+        """Return masked representation for debugging."""
         return "Secret('***')"
 
     def __str__(self) -> str:
+        """Return masked string to prevent accidental exposure."""
         return "***"
 
     def __eq__(self, other: object) -> bool:
@@ -93,12 +95,15 @@ class Secret:
         return object.__getattribute__(self, name)
 
     def __hash__(self) -> int:
+        """Return hash for use in sets and dicts."""
         return hash(object.__getattribute__(self, "_secret_value"))
 
     def __setattr__(self, name: str, value: Any) -> None:
+        """Prevent attribute modification to ensure immutability."""
         raise AttributeError("Secret is immutable")
 
     def __delattr__(self, name: str) -> None:
+        """Prevent attribute deletion to ensure immutability."""
         raise AttributeError("Secret is immutable")
 
     def __len__(self) -> int:
@@ -362,6 +367,8 @@ def _validate_timing_settings(settings: Settings, errors: list[str]) -> None:
         )
     if settings.stale_mr_warning_hours < 1:
         errors.append(f"stale_mr_warning_hours must be at least 1, got: {settings.stale_mr_warning_hours}")
+    if settings.rebase_check_interval_seconds <= 0:
+        errors.append(f"rebase_check_interval_seconds must be positive, got: {settings.rebase_check_interval_seconds}")
 
 
 def _validate_retry_settings(settings: Settings, errors: list[str]) -> None:
@@ -372,8 +379,6 @@ def _validate_retry_settings(settings: Settings, errors: list[str]) -> None:
         errors.append(f"api_max_retries cannot be negative, got: {settings.api_max_retries}")
     if settings.max_rebase_during_testing < 0:
         errors.append(f"max_rebase_during_testing cannot be negative, got: {settings.max_rebase_during_testing}")
-    if settings.rebase_check_interval_seconds <= 0:
-        errors.append(f"rebase_check_interval_seconds must be positive, got: {settings.rebase_check_interval_seconds}")
 
 
 def _validate_rate_limit_settings(settings: Settings, errors: list[str]) -> None:
