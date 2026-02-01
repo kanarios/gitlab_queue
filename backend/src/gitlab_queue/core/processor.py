@@ -964,6 +964,16 @@ class MergeProcessor:
             )
             return ProcessingResult.CONFLICT
 
+        except GitLabAPIError as e:
+            # Handle API errors from rebase wait, new pipeline wait, or API calls
+            log.warning("GitLab API error during rebase in testing", mr_iid=mr_iid, error=str(e))
+            await sm.trigger_pipeline_failed(
+                failed_jobs=[],
+                retry_count=retry_count,
+                error_message=f"Rebase during testing failed: {e}",
+            )
+            return ProcessingResult.PIPELINE_FAILED
+
     async def _wait_for_rebase_quick(self, ctx: ProcessingContext) -> None:
         """Wait for rebase with a short timeout (for retry scenarios).
 
@@ -976,16 +986,19 @@ class MergeProcessor:
         """
         mr_iid = ctx.mr_iid
 
-        # Exception holder for capturing errors from poll function
-        poll_error: dict[str, Exception] = {}
+        # Exception holder for capturing errors from poll function.
+        # poll_until_done doesn't propagate exceptions from poll_fn,
+        # so we capture them here and raise after the poll completes.
+        captured_error: Exception | None = None
 
         async def check_rebase() -> tuple[PollStatus, bool | None]:
+            nonlocal captured_error
             rebase_in_progress, has_conflicts = await self.gitlab_client.check_rebase_status(mr_iid)
 
             if has_conflicts:
                 conflicted_files = await self.gitlab_client.get_mr_conflicts(mr_iid)
                 files_info = f": {conflicted_files}" if conflicted_files else ""
-                poll_error["exception"] = GitLabConflictError(f"Rebase conflict during retry{files_info}")
+                captured_error = GitLabConflictError(f"Rebase conflict during retry{files_info}")
                 return PollStatus.DONE, False
 
             if not rebase_in_progress:
@@ -1001,8 +1014,8 @@ class MergeProcessor:
         outcome = await poll_until_done(config, check_rebase, self._shutdown_event)
 
         # Check for captured exception
-        if "exception" in poll_error:
-            raise poll_error["exception"]
+        if captured_error is not None:
+            raise captured_error
 
         if outcome.completed and outcome.result:
             return
