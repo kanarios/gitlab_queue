@@ -166,7 +166,7 @@ jobs:
 
       - name: Check Alembic - single head
         run: |
-          HEADS=$(uv run alembic heads | wc -l)
+          HEADS=$(uv run alembic heads | grep -cE '^[a-f0-9]+ ' || true)
           if [ "$HEADS" -ne 1 ]; then
             echo "ERROR: Multiple Alembic heads detected!"
             uv run alembic heads

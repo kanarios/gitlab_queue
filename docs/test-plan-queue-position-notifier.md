@@ -173,6 +173,10 @@ Location: `backend/scenarios/unit/handlers/`
 
 ## Test Helpers (`_helpers.py`)
 
+> **Note**: The code below is illustrative. See
+> `backend/scenarios/unit/queue_position_notifier/_helpers.py` for the
+> authoritative implementation.
+
 ```python
 from unittest.mock import AsyncMock, MagicMock
 from datetime import datetime, UTC

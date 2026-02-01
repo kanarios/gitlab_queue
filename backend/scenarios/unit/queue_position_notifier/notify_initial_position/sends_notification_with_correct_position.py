@@ -32,11 +32,11 @@ class Scenario(vedro.Scenario):
 
     def then_notify_is_called_with_queued_template(self):
         call_args = self.notifier.notify.call_args
-        assert call_args[0][1] == "queued"
+        assert call_args.args[1] == "queued"
 
     def and_notify_is_called_with_correct_mr_iid(self):
         call_args = self.notifier.notify.call_args
-        assert call_args[0][0] == self.mr_iid
+        assert call_args.args[0] == self.mr_iid
 
     def and_position_is_2(self):
         call_kwargs = self.notifier.notify.call_args.kwargs

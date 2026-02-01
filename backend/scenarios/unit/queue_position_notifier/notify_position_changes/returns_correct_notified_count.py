@@ -1,4 +1,10 @@
-"""Test _notify_position_changes returns correct notified count."""
+"""Test _notify_position_changes returns correct notified count.
+
+NOTE: Intentionally testing private method _notify_position_changes
+to verify internal logic (return count behavior).
+Public methods notify_affected_mrs_after_completion and
+notify_affected_mrs_after_hotfix_added don't expose the count.
+"""
 
 import vedro
 from vedro import params

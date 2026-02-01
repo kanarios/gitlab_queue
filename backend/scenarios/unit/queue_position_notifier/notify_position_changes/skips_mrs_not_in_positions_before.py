@@ -13,7 +13,7 @@ from .._helpers import (
 class Scenario(vedro.Scenario):
     subject = "_notify_position_changes skips MRs not in positions_before"
 
-    async def given_new_mr_not_in_positions_before(self):
+    def given_new_mr_not_in_positions_before(self):
         self.positions_before = {101: 1}
         queue_items_after = [
             MockQueueItem(mr_iid=101, state="queued"),
@@ -35,7 +35,7 @@ class Scenario(vedro.Scenario):
 
     def then_new_mr_is_not_notified(self):
         calls = self.notifier.notify.call_args_list
-        notified_iids = [call[0][0] for call in calls]
+        notified_iids = [call.kwargs.get("mr_iid", call.args[0]) for call in calls]
         assert 102 not in notified_iids
 
     def and_notified_count_is_0(self):

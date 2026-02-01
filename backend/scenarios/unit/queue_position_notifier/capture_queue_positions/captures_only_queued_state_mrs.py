@@ -12,7 +12,7 @@ from .._helpers import (
 class Scenario(vedro.Scenario):
     subject = "capture_queue_positions captures only MRs in queued state"
 
-    async def given_queue_with_mixed_states(self):
+    def given_queue_with_mixed_states(self):
         queue_items = create_queue_with_mixed_states()
         self.queue_manager = create_mock_queue_manager(queue_items)
         self.position_notifier = create_position_notifier(

@@ -20,8 +20,11 @@ class Scenario(vedro.Scenario):
     def __init__(self, state: str):
         self.non_queued_state = state
 
-    async def given_mr_in_non_queued_state_with_changed_position(self):
-        self.positions_before = {101: 1, 102: 2}
+    def given_mr_in_non_queued_state_with_changed_position(self):
+        # Before: MR 101 at position 1, MR 102 at position 3
+        # After: MR 101 is non-queued (skipped), MR 102 is queued at position 2
+        # MR 102 moves from 3 to 2, so it should be notified
+        self.positions_before = {101: 1, 102: 3}
         queue_items_after = [
             MockQueueItem(mr_iid=101, state=self.non_queued_state),
             MockQueueItem(mr_iid=102, state="queued"),
@@ -40,7 +43,15 @@ class Scenario(vedro.Scenario):
             log_context="",
         )
 
+    @property
+    def notified_iids(self) -> list[int]:
+        return [
+            call.kwargs.get("mr_iid", call.args[0])
+            for call in self.notifier.notify.call_args_list
+        ]
+
     def then_mr_in_non_queued_state_is_not_notified(self):
-        calls = self.notifier.notify.call_args_list
-        notified_iids = [call[0][0] for call in calls]
-        assert 101 not in notified_iids
+        assert 101 not in self.notified_iids
+
+    def and_queued_mr_is_notified(self):
+        assert 102 in self.notified_iids

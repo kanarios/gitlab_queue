@@ -1,4 +1,10 @@
-"""Test _notify_position_changes skips excluded mr_iid."""
+"""Test _notify_position_changes skips excluded mr_iid.
+
+NOTE: Intentionally testing private method _notify_position_changes
+to verify internal logic (excluded_mr_iid handling).
+Public methods notify_affected_mrs_after_completion and
+notify_affected_mrs_after_hotfix_added don't expose this behavior.
+"""
 
 import vedro
 

@@ -145,6 +145,22 @@ async def poll_until_done[T](
                 result=result,
             )
 
+        # Check timeout again after poll_fn (it may have taken significant time)
+        elapsed = datetime.now(UTC) - start_time
+        if elapsed > timeout:
+            log.debug(
+                "Polling timed out after poll_fn",
+                operation=config.operation_name,
+                elapsed_seconds=elapsed.total_seconds(),
+                timeout_seconds=config.timeout_seconds,
+            )
+            return PollOutcome(
+                completed=False,
+                timed_out=True,
+                shutdown_requested=False,
+                result=None,
+            )
+
         # Sleep with shutdown check
         if not await sleep(config.poll_interval_seconds, shutdown_event):
             return PollOutcome(
