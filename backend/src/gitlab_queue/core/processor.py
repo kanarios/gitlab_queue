@@ -752,15 +752,8 @@ class MergeProcessor:
             if outcome.context is not None:
                 rebase_ctx = outcome.context
 
-            # Skip pipelines created before current start_time (stale after rebase/retry)
-            if pipeline.created_at is not None and pipeline.created_at < start_time:
-                log.debug(
-                    "Skipping stale pipeline created before start_time",
-                    mr_iid=mr_iid,
-                    pipeline_id=pipeline.id,
-                    pipeline_created_at=pipeline.created_at.isoformat(),
-                    start_time=start_time.isoformat(),
-                )
+            # Skip stale pipelines using pipeline_id/SHA validation (not time-based)
+            if await self._should_skip_stale_pipeline(mr_iid, pipeline):
                 await self._interruptible_sleep(self.settings.pipeline_poll_interval_seconds)
                 continue
 
@@ -803,6 +796,46 @@ class MergeProcessor:
             return ProcessingResult.REMOVED
 
         return None
+
+    async def _should_skip_stale_pipeline(self, mr_iid: int, pipeline: Pipeline) -> bool:
+        """Check if pipeline should be skipped as stale.
+
+        Uses pipeline_id/SHA validation to detect old pipelines from before
+        rebase/retry. This matches the approach in PipelineWebhookHandler.
+
+        Args:
+            mr_iid: MR IID to check.
+            pipeline: Current pipeline from GitLab API.
+
+        Returns:
+            True if pipeline should be skipped, False otherwise.
+        """
+        queue_item = await self.queue_manager.get_queue_item(mr_iid)
+        if queue_item is None:
+            return False
+
+        # Skip if pipeline_id doesn't match (old pipeline from before rebase/retry)
+        if queue_item.pipeline_id is not None and queue_item.pipeline_id != pipeline.id:
+            log.debug(
+                "Skipping old pipeline (pipeline_id mismatch)",
+                mr_iid=mr_iid,
+                current_pipeline_id=pipeline.id,
+                expected_pipeline_id=queue_item.pipeline_id,
+            )
+            return True
+
+        # Skip if SHA doesn't match (pipeline for wrong commit after rebase)
+        if queue_item.expected_sha is not None and pipeline.sha != queue_item.expected_sha:
+            log.debug(
+                "Skipping pipeline with wrong SHA",
+                mr_iid=mr_iid,
+                pipeline_id=pipeline.id,
+                pipeline_sha=pipeline.sha[:8] if pipeline.sha else "unknown",
+                expected_sha=queue_item.expected_sha[:8],
+            )
+            return True
+
+        return False
 
     async def _maybe_rebase_during_testing(
         self,

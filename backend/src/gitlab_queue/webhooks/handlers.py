@@ -202,7 +202,7 @@ class MRWebhookHandler:
     async def _handle_merge(self, event: MergeRequestEvent) -> None:
         """Handle MR merge event.
 
-        Cleans up queue entry for merged MR.
+        Cleans up queue entry for merged MR and removes queue label.
 
         Args:
             event: The merge request webhook event.
@@ -214,13 +214,16 @@ class MRWebhookHandler:
 
         if removed:
             log.info("MR cleaned up from queue after merge", mr_iid=mr_iid)
+
+            # Remove queue label to prevent stale labels on merged MRs
+            await self._remove_queue_label(mr_iid)
         else:
             log.debug("Merged MR was not in queue", mr_iid=mr_iid)
 
     async def _handle_close(self, event: MergeRequestEvent) -> None:
         """Handle MR close event.
 
-        Removes MR from queue when closed.
+        Removes MR from queue when closed and removes queue label.
 
         Args:
             event: The merge request webhook event.
@@ -231,6 +234,9 @@ class MRWebhookHandler:
 
         if removed:
             log.info("MR removed from queue after close", mr_iid=mr_iid)
+
+            # Remove queue label to prevent stale labels on closed MRs
+            await self._remove_queue_label(mr_iid)
         else:
             log.debug("Closed MR was not in queue", mr_iid=mr_iid)
 
@@ -293,6 +299,31 @@ class MRWebhookHandler:
             current_state=queue_item.state,
             rebase_in_progress=event.object_attributes.rebase_in_progress,
         )
+
+    async def _remove_queue_label(self, mr_iid: int) -> None:
+        """Remove queue label from MR.
+
+        Called when MR is merged or closed externally (not by the bot)
+        to ensure the queue label is cleaned up.
+
+        Args:
+            mr_iid: The MR's internal ID.
+        """
+        try:
+            await self.gitlab_client.remove_mr_label(mr_iid, self.settings.queue_label)
+            log.info(
+                "Queue label removed from MR",
+                mr_iid=mr_iid,
+                label=self.settings.queue_label,
+            )
+        except Exception as e:
+            # Don't fail the whole operation if label removal fails
+            log.warning(
+                "Failed to remove queue label from MR",
+                mr_iid=mr_iid,
+                label=self.settings.queue_label,
+                error=str(e),
+            )
 
     async def _broadcast_queue_update(self) -> None:
         """Broadcast current queue state to all WebSocket clients."""
