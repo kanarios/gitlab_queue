@@ -1,7 +1,8 @@
 """Scenario: remove queue label handles GitLab API error gracefully."""
 
-import vedro
 from unittest.mock import AsyncMock, MagicMock
+
+import vedro
 
 from gitlab_queue.webhooks.handlers import MRWebhookHandler
 
@@ -31,5 +32,5 @@ class Scenario(vedro.Scenario):
     async def when_remove_queue_label_is_called(self):
         await self.handler._remove_queue_label(123)
 
-    def then_gitlab_client_was_called(self):
+    def then_it_completes_and_calls_gitlab_client(self):
         self.gitlab_client.remove_mr_label.assert_called_once_with(123, "merge_queue")
