@@ -18,7 +18,12 @@ def create_mock_settings() -> MagicMock:
 
 
 def create_gitlab_client_for_test() -> GitLabClient:
-    """Create GitLabClient instance with mock settings for testing."""
+    """Create GitLabClient instance with mock settings for testing.
+
+    Uses __new__ to skip __init__, leaving most attributes uninitialized.
+    Only _settings is set. Tests using this helper MUST patch any methods
+    they call (e.g., get_mr, put) to avoid AttributeError.
+    """
     client = GitLabClient.__new__(GitLabClient)
     client._settings = create_mock_settings()
     return client
