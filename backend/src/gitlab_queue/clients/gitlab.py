@@ -1151,11 +1151,12 @@ class GitLabClient:
                     )
                     return merged_mr
                 except GitLabAPIError as e:
-                    # HTTP 422 "Branch cannot be merged" may be temporary after rebase
-                    if e.status_code == 422 and not mr.has_conflicts:
+                    # HTTP 405/422 may be temporary after rebase
+                    if e.status_code in (405, 422) and not mr.has_conflicts:
                         log.info(
-                            "Merge API returned 422, retrying",
+                            "Merge API returned error, retrying",
                             mr_iid=iid,
+                            status_code=e.status_code,
                             attempt=attempt + 1,
                             error=str(e),
                         )

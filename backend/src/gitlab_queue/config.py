@@ -202,7 +202,7 @@ class Settings:
     pipeline_retry_count: int = var(default=1, converter=int)
     api_max_retries: int = var(default=5, converter=int)
     merge_status_retry_max: int = var(default=10, converter=int)
-    merge_status_retry_delay_seconds: float = var(default=2.0, converter=float)
+    merge_status_retry_delay_seconds: float = var(default=5.0, converter=float)
 
     # Auto-Rebase During Testing
     max_rebase_during_testing: int = var(default=3, converter=int)
