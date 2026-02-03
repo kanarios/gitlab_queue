@@ -1,9 +1,11 @@
 """Scenario: handle merge skips label removal when MR was not in queue."""
 
-import vedro
 from unittest.mock import AsyncMock, MagicMock
 
-from gitlab_queue.models.events import MergeRequestAttributes, MergeRequestEvent
+import vedro
+
+from gitlab_queue.models.events import (MergeRequestAttributes,
+                                        MergeRequestEvent)
 from gitlab_queue.webhooks.handlers import MRWebhookHandler
 
 

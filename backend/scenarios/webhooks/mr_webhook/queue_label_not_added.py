@@ -4,12 +4,9 @@ import vedro
 
 from gitlab_queue.webhooks.handlers import MRWebhookHandler
 
-from ._helpers import (
-    create_gitlab_client_with_transport,
-    create_mock_queue_manager,
-    create_mr_event,
-    created_mock_settings,
-)
+from ._helpers import (create_gitlab_client_with_transport,
+                       create_mock_queue_manager, create_mr_event,
+                       created_mock_settings)
 
 
 class Scenario(vedro.Scenario):

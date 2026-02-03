@@ -1,16 +1,13 @@
 """Test: detect queue label removed."""
 
 import vedro
-from scenarios.library import Labels
 
 from gitlab_queue.webhooks.handlers import MRWebhookHandler
+from scenarios.library import Labels
 
-from ._helpers import (
-    create_gitlab_client_with_transport,
-    create_mock_queue_manager,
-    create_mr_event,
-    created_mock_settings,
-)
+from ._helpers import (create_gitlab_client_with_transport,
+                       create_mock_queue_manager, create_mr_event,
+                       created_mock_settings)
 
 
 class Scenario(vedro.Scenario):
