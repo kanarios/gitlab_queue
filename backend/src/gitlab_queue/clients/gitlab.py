@@ -130,6 +130,18 @@ class RateLimitState:
             return None
         return 1.0 - (self.remaining / self.limit)
 
+    def _exceeds_threshold(self, threshold: float) -> bool:
+        """Check if usage exceeds the given threshold.
+
+        Args:
+            threshold: Usage ratio threshold (0.0 to 1.0).
+
+        Returns:
+            True if usage ratio is known and exceeds threshold.
+        """
+        ratio = self.usage_ratio
+        return ratio is not None and ratio > threshold
+
     def is_approaching_limit(self, threshold: float) -> bool:
         """Check if usage exceeds the warning threshold.
 
@@ -139,8 +151,7 @@ class RateLimitState:
         Returns:
             True if usage ratio is known and exceeds threshold.
         """
-        ratio = self.usage_ratio
-        return ratio is not None and ratio > threshold
+        return self._exceeds_threshold(threshold)
 
     def is_critical(self, threshold: float) -> bool:
         """Check if usage exceeds the critical threshold.
@@ -151,8 +162,7 @@ class RateLimitState:
         Returns:
             True if usage ratio is known and exceeds threshold.
         """
-        ratio = self.usage_ratio
-        return ratio is not None and ratio > threshold
+        return self._exceeds_threshold(threshold)
 
     @property
     def seconds_until_reset(self) -> float | None:
@@ -1094,6 +1104,8 @@ class GitLabClient:
         """Merge a merge request using fast-forward strategy.
 
         Checks merge_status before attempting merge to ensure MR is ready.
+        If merge_status is 'checking' (GitLab recalculating after rebase),
+        waits and retries up to max_retries times.
 
         Args:
             iid: Internal ID of the merge request to merge.
@@ -1103,14 +1115,56 @@ class GitLabClient:
 
         Raises:
             GitLabNotFoundError: If MR does not exist.
-            GitLabConflictError: If MR cannot be merged (conflicts, not ready).
+            GitLabConflictError: If MR cannot be merged (conflicts, not ready, timeout).
             GitLabAPIError: On other API errors.
         """
         log.info("Attempting to merge MR", mr_iid=iid)
 
-        # First check if MR is ready to merge
-        mr = await self.get_mr(iid)
-        if mr.merge_status != "can_be_merged":
+        max_retries = self._settings.merge_status_retry_max
+        retry_delay = self._settings.merge_status_retry_delay_seconds
+
+        for attempt in range(max_retries):
+            mr = await self.get_mr(iid)
+
+            if mr.merge_status == "checking":
+                log.info(
+                    "Waiting for merge status check",
+                    mr_iid=iid,
+                    attempt=attempt + 1,
+                    max_retries=max_retries,
+                )
+                await asyncio.sleep(retry_delay)
+                continue
+
+            if mr.merge_status == "can_be_merged":
+                # Proceed with merge
+                try:
+                    data = await self.put(
+                        f"/merge_requests/{iid}/merge",
+                        json={"merge_method": "ff"},  # Fast-forward merge
+                    )
+                    merged_mr = parse_merge_request(data)
+                    log.info(
+                        "MR merged successfully",
+                        mr_iid=merged_mr.iid,
+                        state=merged_mr.state,
+                    )
+                    return merged_mr
+                except GitLabAPIError as e:
+                    # HTTP 422 "Branch cannot be merged" may be temporary after rebase
+                    if e.status_code == 422 and not mr.has_conflicts:
+                        log.info(
+                            "Merge API returned 422, retrying",
+                            mr_iid=iid,
+                            attempt=attempt + 1,
+                            error=str(e),
+                        )
+                        await asyncio.sleep(retry_delay)
+                        continue
+                    log.exception("Failed to merge MR", mr_iid=iid)
+                    raise
+
+            # Any other status is a real error
             log.warning(
                 "MR not ready for merge",
                 mr_iid=iid,
@@ -1122,22 +1176,17 @@ class GitLabClient:
                 status_code=409,
             )
 
-        # Perform the merge with fast-forward strategy
-        try:
-            data = await self.put(
-                f"/merge_requests/{iid}/merge",
-                json={"merge_method": "ff"},  # Fast-forward merge
-            )
-            merged_mr = parse_merge_request(data)
-            log.info(
-                "MR merged successfully",
-                mr_iid=merged_mr.iid,
-                state=merged_mr.state,
-            )
-            return merged_mr
-        except GitLabAPIError:
-            log.exception("Failed to merge MR", mr_iid=iid)
-            raise
+        # Timeout after all retries
+        log.warning(
+            "Merge status check timeout",
+            mr_iid=iid,
+            merge_status="checking",
+            attempts=max_retries,
+        )
+        raise GitLabConflictError(
+            f"MR !{iid} merge status check timeout (status: 'checking')",
+            status_code=409,
+        )
 
     async def add_comment(self, iid: int, body: str) -> Note:
         """Add a comment to a merge request.

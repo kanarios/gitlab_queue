@@ -448,6 +448,8 @@ deploy-merge-queue:
 |----------|---------|-------------|
 | `GITLAB_QUEUE_PIPELINE_RETRY_COUNT` | `1` | Retry failed pipelines this many times |
 | `GITLAB_QUEUE_API_MAX_RETRIES` | `5` | Max retries for API calls |
+| `GITLAB_QUEUE_MERGE_STATUS_RETRY_MAX` | `10` | Max retries when merge_status is 'checking' |
+| `GITLAB_QUEUE_MERGE_STATUS_RETRY_DELAY_SECONDS` | `2.0` | Delay between merge status retries |
 | `GITLAB_QUEUE_MAX_REBASE_DURING_TESTING` | `3` | Max auto-rebases while pipeline runs |
 
 ### Rate Limiting
