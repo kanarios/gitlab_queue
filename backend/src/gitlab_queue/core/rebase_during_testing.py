@@ -134,9 +134,10 @@ class RebaseDuringTestingHandler:
         if ctx.current_pipeline_id:
             await self._cancel_pipeline_safe(ctx.current_pipeline_id)
 
-        # 2. Capture old SHA for new pipeline detection
+        # 2. Capture old SHA and pipeline ID for new pipeline detection
         mr = await self.gitlab_client.get_mr(mr_iid)
         old_sha = mr.sha
+        old_pipeline_id = ctx.current_pipeline_id
 
         # 3. Initiate rebase
         try:
@@ -148,8 +149,8 @@ class RebaseDuringTestingHandler:
         # 4. Wait for rebase completion
         await self._wait_for_rebase(mr_iid)
 
-        # 5. Wait for new pipeline with correct SHA
-        new_pipeline = await self._wait_for_new_pipeline(mr_iid, old_sha)
+        # 5. Wait for new pipeline with correct SHA and different ID
+        new_pipeline = await self._wait_for_new_pipeline(mr_iid, old_sha, old_pipeline_id)
 
         # 6. Return updated context
         new_ctx = RebaseDuringTestingContext(
@@ -237,12 +238,14 @@ class RebaseDuringTestingHandler:
         self,
         mr_iid: int,
         old_sha: str,
+        old_pipeline_id: int | None = None,
     ) -> Pipeline | None:
         """Wait for a new pipeline after rebase.
 
         Args:
             mr_iid: MR internal ID.
             old_sha: SHA before rebase to detect new pipeline.
+            old_pipeline_id: Pipeline ID before rebase (to detect new pipelines).
 
         Returns:
             New Pipeline if found, None if timeout.
@@ -256,12 +259,27 @@ class RebaseDuringTestingHandler:
             # Check if SHA changed (rebase created new commit) or rebase completed
             # without changing SHA (no-op rebase). Using "is False" to distinguish
             # from None/unknown state.
-            # Note: Fast-forward scenario (SHA unchanged) is handled by line 261
-            # which validates pipeline.sha == new_sha before returning.
             if new_sha != old_sha or mr.rebase_in_progress is False:
                 pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
+                # Skip old pipeline (same ID as before rebase)
+                if pipeline and old_pipeline_id is not None and pipeline.id == old_pipeline_id:
+                    log.debug(
+                        "Skipping old pipeline after rebase (same ID)",
+                        mr_iid=mr_iid,
+                        pipeline_id=pipeline.id,
+                        old_pipeline_id=old_pipeline_id,
+                    )
+                    return PollStatus.CONTINUE, None
                 # Skip cancelled/failed pipelines from before
                 if pipeline and pipeline.sha == new_sha and pipeline.status not in ("canceled", "failed"):
+                    log.info(
+                        "Found new pipeline after rebase",
+                        mr_iid=mr_iid,
+                        pipeline_id=pipeline.id,
+                        old_pipeline_id=old_pipeline_id,
+                        old_sha=old_sha[:8],
+                        new_sha=new_sha[:8],
+                    )
                     return PollStatus.DONE, pipeline
 
             return PollStatus.CONTINUE, None
@@ -284,10 +302,13 @@ class RebaseDuringTestingHandler:
             "Timeout waiting for new pipeline after rebase",
             mr_iid=mr_iid,
             old_sha=old_sha[:8],
+            old_pipeline_id=old_pipeline_id,
         )
         mr = await self.gitlab_client.get_mr(mr_iid)
         pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
-        if pipeline and pipeline.sha == mr.sha and pipeline.status not in ("canceled", "failed"):
+        # Must be a new pipeline (different ID) with correct SHA and not failed/canceled
+        is_new_pipeline = old_pipeline_id is None or (pipeline and pipeline.id != old_pipeline_id)
+        if pipeline and is_new_pipeline and pipeline.sha == mr.sha and pipeline.status not in ("canceled", "failed"):
             return pipeline
         log.warning(
             "No valid pipeline found after rebase timeout",

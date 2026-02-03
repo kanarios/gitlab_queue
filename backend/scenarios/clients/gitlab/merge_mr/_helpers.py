@@ -13,7 +13,7 @@ def create_mock_settings() -> MagicMock:
     """Create mock Settings for merge_mr tests."""
     settings = MagicMock()
     settings.merge_status_retry_max = 10
-    settings.merge_status_retry_delay_seconds = 2.0
+    settings.merge_status_retry_delay_seconds = 5.0
     return settings
 
 
