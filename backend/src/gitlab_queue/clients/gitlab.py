@@ -1120,8 +1120,8 @@ class GitLabClient:
         """
         log.info("Attempting to merge MR", mr_iid=iid)
 
-        max_retries = 10
-        retry_delay = 2.0
+        max_retries = self._settings.merge_status_retry_max
+        retry_delay = self._settings.merge_status_retry_delay_seconds
 
         for attempt in range(max_retries):
             mr = await self.get_mr(iid)
@@ -1150,7 +1150,17 @@ class GitLabClient:
                         state=merged_mr.state,
                     )
                     return merged_mr
-                except GitLabAPIError:
+                except GitLabAPIError as e:
+                    # HTTP 422 "Branch cannot be merged" may be temporary after rebase
+                    if e.status_code == 422 and not mr.has_conflicts:
+                        log.info(
+                            "Merge API returned 422, retrying",
+                            mr_iid=iid,
+                            attempt=attempt + 1,
+                            error=str(e),
+                        )
+                        await asyncio.sleep(retry_delay)
+                        continue
                     log.exception("Failed to merge MR", mr_iid=iid)
                     raise
 

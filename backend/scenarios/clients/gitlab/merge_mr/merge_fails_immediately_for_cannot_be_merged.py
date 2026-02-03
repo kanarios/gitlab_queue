@@ -7,7 +7,7 @@ from vedro import catched
 
 from gitlab_queue.clients.gitlab import GitLabClient, GitLabConflictError
 
-from ._helpers import create_mr
+from ._helpers import create_gitlab_client_for_test, create_mr
 
 
 class Scenario(vedro.Scenario):
@@ -21,11 +21,10 @@ class Scenario(vedro.Scenario):
         with (
             patch.object(GitLabClient, "get_mr", new_callable=AsyncMock) as mock_get_mr,
             patch.object(GitLabClient, "put", new_callable=AsyncMock) as mock_put,
-            patch.object(GitLabClient, "__init__", lambda self, *args, **kwargs: None),
         ):
             mock_get_mr.return_value = self.mr
 
-            client = GitLabClient.__new__(GitLabClient)
+            client = create_gitlab_client_for_test()
             with catched(GitLabConflictError) as self.exception:
                 await client.merge_mr(self.iid)
 

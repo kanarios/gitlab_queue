@@ -6,7 +6,7 @@ import vedro
 
 from gitlab_queue.clients.gitlab import GitLabClient
 
-from ._helpers import _mr_to_dict, create_mr
+from ._helpers import _mr_to_dict, create_gitlab_client_for_test, create_mr
 
 
 class Scenario(vedro.Scenario):
@@ -20,12 +20,11 @@ class Scenario(vedro.Scenario):
         with (
             patch.object(GitLabClient, "get_mr", new_callable=AsyncMock) as mock_get_mr,
             patch.object(GitLabClient, "put", new_callable=AsyncMock) as mock_put,
-            patch.object(GitLabClient, "__init__", lambda self, *args, **kwargs: None),
         ):
             mock_get_mr.return_value = self.mr
             mock_put.return_value = _mr_to_dict("merged")
 
-            client = GitLabClient.__new__(GitLabClient)
+            client = create_gitlab_client_for_test()
             self.result = await client.merge_mr(self.iid)
             self.mock_get_mr = mock_get_mr
             self.mock_put = mock_put

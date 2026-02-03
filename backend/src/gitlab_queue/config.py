@@ -201,6 +201,8 @@ class Settings:
     # Retry Logic
     pipeline_retry_count: int = var(default=1, converter=int)
     api_max_retries: int = var(default=5, converter=int)
+    merge_status_retry_max: int = var(default=10, converter=int)
+    merge_status_retry_delay_seconds: float = var(default=2.0, converter=float)
 
     # Auto-Rebase During Testing
     max_rebase_during_testing: int = var(default=3, converter=int)
@@ -289,6 +291,8 @@ def _settings_repr(self: Settings) -> str:
         "stale_mr_warning_hours",
         "pipeline_retry_count",
         "api_max_retries",
+        "merge_status_retry_max",
+        "merge_status_retry_delay_seconds",
         "max_rebase_during_testing",
         "rebase_check_interval_seconds",
         "rate_limit_warning_threshold",
@@ -379,6 +383,12 @@ def _validate_retry_settings(settings: Settings, errors: list[str]) -> None:
         errors.append(f"api_max_retries cannot be negative, got: {settings.api_max_retries}")
     if settings.max_rebase_during_testing < 0:
         errors.append(f"max_rebase_during_testing cannot be negative, got: {settings.max_rebase_during_testing}")
+    if settings.merge_status_retry_max < 1:
+        errors.append(f"merge_status_retry_max must be at least 1, got: {settings.merge_status_retry_max}")
+    if settings.merge_status_retry_delay_seconds <= 0:
+        errors.append(
+            f"merge_status_retry_delay_seconds must be positive, got: {settings.merge_status_retry_delay_seconds}"
+        )
 
 
 def _validate_rate_limit_settings(settings: Settings, errors: list[str]) -> None:
