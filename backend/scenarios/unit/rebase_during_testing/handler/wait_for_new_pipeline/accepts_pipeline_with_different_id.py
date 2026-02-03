@@ -3,7 +3,6 @@
 import asyncio
 
 import vedro
-from unittest.mock import AsyncMock
 
 from ..._helpers import (
     MockMergeRequest,

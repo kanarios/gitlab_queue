@@ -1,9 +1,9 @@
 """Test _wait_for_new_pipeline skips pipeline with same ID as before rebase."""
 
 import asyncio
+from unittest.mock import AsyncMock
 
 import vedro
-from unittest.mock import AsyncMock
 
 from ..._helpers import (
     MockMergeRequest,
@@ -38,9 +38,7 @@ class Scenario(vedro.Scenario):
         )
 
         self.client = create_mock_gitlab_client(mr=mr)
-        self.client.get_latest_mr_pipeline = AsyncMock(
-            side_effect=[old_pipeline, new_pipeline]
-        )
+        self.client.get_latest_mr_pipeline = AsyncMock(side_effect=[old_pipeline, new_pipeline])
 
         self.handler = create_handler(gitlab_client=self.client)
         self.handler.set_shutdown_event(asyncio.Event())
