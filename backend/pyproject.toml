@@ -113,5 +113,19 @@ module = [
 ]
 ignore_missing_imports = true
 
+[tool.coverage.run]
+source = ["src/gitlab_queue"]
+omit = [
+    "src/gitlab_queue/main.py",
+    "src/gitlab_queue/__main__.py",
+    "src/gitlab_queue/dependencies.py",
+    "src/gitlab_queue/utils/shutdown.py",
+    "src/gitlab_queue/jobs/__init__.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+
 [tool.vedro]
 plugins = []

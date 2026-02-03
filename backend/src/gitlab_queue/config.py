@@ -203,6 +203,7 @@ class Settings:
     api_max_retries: int = var(default=5, converter=int)
     merge_status_retry_max: int = var(default=10, converter=int)
     merge_status_retry_delay_seconds: float = var(default=5.0, converter=float)
+    merge_timeout_seconds: int = var(default=90, converter=int)  # Merge operation timeout
 
     # Auto-Rebase During Testing
     max_rebase_during_testing: int = var(default=3, converter=int)
@@ -293,6 +294,7 @@ def _settings_repr(self: Settings) -> str:
         "api_max_retries",
         "merge_status_retry_max",
         "merge_status_retry_delay_seconds",
+        "merge_timeout_seconds",
         "max_rebase_during_testing",
         "rebase_check_interval_seconds",
         "rate_limit_warning_threshold",
@@ -389,6 +391,8 @@ def _validate_retry_settings(settings: Settings, errors: list[str]) -> None:
         errors.append(
             f"merge_status_retry_delay_seconds must be positive, got: {settings.merge_status_retry_delay_seconds}"
         )
+    if settings.merge_timeout_seconds <= 0:
+        errors.append(f"merge_timeout_seconds must be positive, got: {settings.merge_timeout_seconds}")
 
 
 def _validate_rate_limit_settings(settings: Settings, errors: list[str]) -> None:

@@ -1,4 +1,10 @@
-"""Test _notify_position_changes skips MRs not in positions_before."""
+"""Test _notify_position_changes skips MRs not in positions_before.
+
+When a new MR is added to the queue, it won't be in positions_before
+(since it didn't exist before), so it won't be notified.
+However, existing MRs that WERE in positions_before will be notified
+if the total changed.
+"""
 
 import vedro
 
@@ -30,6 +36,7 @@ class Scenario(vedro.Scenario):
         self.notified_count = await self.position_notifier._notify_position_changes(
             excluded_mr_iid=999,
             positions_before=self.positions_before,
+            old_total=len(self.positions_before),
             log_context="",
         )
 
@@ -38,5 +45,12 @@ class Scenario(vedro.Scenario):
         notified_iids = [call.kwargs.get("mr_iid", call.args[0]) for call in calls]
         assert 102 not in notified_iids
 
-    def and_notified_count_is_0(self):
-        assert self.notified_count == 0
+    def and_existing_mr_is_notified_about_total_change(self):
+        # MR 101 was at position 1 with old_total=1
+        # Now it's at position 1 with new_total=2, so it gets notified
+        calls = self.notifier.notify.call_args_list
+        notified_iids = [call.kwargs.get("mr_iid", call.args[0]) for call in calls]
+        assert 101 in notified_iids
+
+    def and_notified_count_is_1(self):
+        assert self.notified_count == 1

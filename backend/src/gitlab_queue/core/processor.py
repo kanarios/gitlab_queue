@@ -57,12 +57,16 @@ QUICK_REBASE_POLL_INTERVAL_SECONDS = 3
 
 # Timeouts (seconds)
 QUICK_REBASE_TIMEOUT_SECONDS = 60
-MERGE_TIMEOUT_SECONDS = 30
 DEFAULT_POST_REBASE_PIPELINE_WAIT_SECONDS = 60
 
-# Terminal pipeline statuses to skip when waiting for post-rebase pipeline
-# These are pipelines that failed/were canceled before rebase and should not be used
+# Failed/canceled pipeline statuses to skip in the fast-forward case
+# (SHA unchanged after rebase — success pipeline is still valid).
 TERMINAL_FAILED_PIPELINE_STATUSES = frozenset(("canceled", "failed"))
+
+# ALL terminal pipeline statuses to skip when SHA changed after rebase.
+# After rebase, ANY terminal pipeline (including success) is stale —
+# it was started before the rebase and doesn't reflect the new code.
+TERMINAL_PIPELINE_STATUSES = frozenset(("canceled", "failed", "success"))
 
 
 # =============================================================================
@@ -517,7 +521,7 @@ class MergeProcessor:
             # SHA changed, need pipeline with new SHA
             pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
             if pipeline and pipeline.sha == new_sha:
-                if pipeline.status in TERMINAL_FAILED_PIPELINE_STATUSES:
+                if pipeline.status in TERMINAL_PIPELINE_STATUSES:
                     log.info(
                         "Skipping pre-existing terminal pipeline after rebase",
                         mr_iid=mr_iid,
@@ -551,17 +555,30 @@ class MergeProcessor:
         if outcome.shutdown_requested:
             return None, old_sha
 
-        # Timeout - return current state
+        # Timeout - return current state with SHA validation
         mr = await self.gitlab_client.get_mr(mr_iid)
+        new_sha = mr.sha
         pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
         log.warning(
             "Timeout waiting for post-rebase pipeline",
             mr_iid=mr_iid,
             old_sha=old_sha[:8],
-            current_sha=mr.sha[:8] if mr.sha else "unknown",
+            current_sha=new_sha[:8] if new_sha else "unknown",
             pipeline_id=pipeline.id if pipeline else None,
+            pipeline_sha=pipeline.sha[:8] if pipeline and pipeline.sha else None,
         )
-        return pipeline, mr.sha
+
+        # Don't return stale pipeline if SHA doesn't match
+        if pipeline and pipeline.sha != new_sha:
+            log.warning(
+                "Timeout with stale pipeline - SHA mismatch",
+                mr_iid=mr_iid,
+                pipeline_sha=pipeline.sha[:8] if pipeline.sha else "unknown",
+                expected_sha=new_sha[:8] if new_sha else "unknown",
+            )
+            return None, new_sha
+
+        return pipeline, new_sha
 
     # =========================================================================
     # Pipeline Step
@@ -894,6 +911,19 @@ class MergeProcessor:
         mr_iid = ctx.mr_iid
 
         if pipeline.status == "success":
+            # Validate SHA before processing success to prevent acting on stale pipeline
+            queue_item = await self.queue_manager.get_queue_item(mr_iid)
+            if queue_item and queue_item.expected_sha:
+                if pipeline.sha != queue_item.expected_sha:
+                    log.warning(
+                        "Pipeline success but SHA mismatch - waiting for correct pipeline",
+                        mr_iid=mr_iid,
+                        pipeline_id=pipeline.id,
+                        pipeline_sha=pipeline.sha[:8] if pipeline.sha else "unknown",
+                        expected_sha=queue_item.expected_sha[:8],
+                    )
+                    return None  # Continue polling
+
             log.info("Pipeline succeeded", mr_iid=mr_iid, pipeline_id=pipeline.id)
             await sm.trigger_pipeline_success()
             return ProcessingResult.SUCCESS
@@ -1119,13 +1149,17 @@ class MergeProcessor:
         mr_iid = ctx.mr_iid
         sm = ctx.state_machine
 
-        log.info("Executing merge", mr_iid=mr_iid)
+        # Get expected SHA from queue item for race condition detection
+        queue_item = await self.queue_manager.get_queue_item(mr_iid)
+        expected_sha = queue_item.expected_sha if queue_item else None
+
+        log.info("Executing merge", mr_iid=mr_iid, expected_sha=expected_sha[:8] if expected_sha else None)
 
         try:
             # Add timeout for merge operation to prevent hanging
             merged_mr = await asyncio.wait_for(
-                self.gitlab_client.merge_mr(mr_iid),
-                timeout=float(MERGE_TIMEOUT_SECONDS),
+                self.gitlab_client.merge_mr(mr_iid, expected_sha=expected_sha),
+                timeout=float(self.settings.merge_timeout_seconds),
             )
             log.info("Merge successful", mr_iid=mr_iid, state=merged_mr.state)
             await sm.trigger_merge_success()

@@ -86,6 +86,7 @@ def create_pipeline_event(
     status: str = "success",
     mr_iid: int | None = None,
     include_mr_iid: bool = True,
+    sha: str | None = None,
 ) -> PipelineEvent:
     """Create a PipelineEvent for testing.
 
@@ -120,7 +121,7 @@ def create_pipeline_event(
         object_attributes=PipelineAttributes(
             id=actual_pipeline_id,
             status=status,
-            sha=event_data["object_attributes"]["sha"],
+            sha=sha or event_data["object_attributes"]["sha"],
             ref=event_data["object_attributes"]["ref"],
         ),
         merge_request_iid=actual_mr_iid,

@@ -239,6 +239,14 @@ class GitLabMockTransport(httpx.AsyncBaseTransport):
         """
         assert len(self._history) == 1, f"Expected exactly 1 request, but {len(self._history)} were made"
 
+    def assert_not_called(self) -> None:
+        """Assert that no requests were made.
+
+        Raises:
+            AssertionError: If any requests were made.
+        """
+        assert len(self._history) == 0, f"Expected no requests, but {len(self._history)} were made"
+
     def assert_called_with_path(self, path: str) -> None:
         """Assert that a request was made to the specified path.
 

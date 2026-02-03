@@ -31,6 +31,7 @@ class Scenario(vedro.Scenario):
         await self.position_notifier.notify_affected_mrs_after_completion(
             completed_mr_iid=self.completed_mr_iid,
             positions_before=self.positions_before,
+            old_total=len(self.positions_before) + 1,  # +1 for the completed MR
         )
 
     def then_affected_mrs_are_notified(self):

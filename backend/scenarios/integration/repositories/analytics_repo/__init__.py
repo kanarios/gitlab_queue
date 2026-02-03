@@ -1,0 +1,1 @@
+"""AnalyticsRepository integration tests."""

@@ -40,15 +40,13 @@ class Scenario(vedro.Scenario):
         self.notified_count = await self.position_notifier._notify_position_changes(
             excluded_mr_iid=999,
             positions_before=self.positions_before,
+            old_total=len(self.positions_before),
             log_context="",
         )
 
     @property
     def notified_iids(self) -> list[int]:
-        return [
-            call.kwargs.get("mr_iid", call.args[0])
-            for call in self.notifier.notify.call_args_list
-        ]
+        return [call.kwargs.get("mr_iid", call.args[0]) for call in self.notifier.notify.call_args_list]
 
     def then_mr_in_non_queued_state_is_not_notified(self):
         assert 101 not in self.notified_iids

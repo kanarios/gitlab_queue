@@ -46,6 +46,33 @@ _Remove `{queue_label}` label to exit queue._
 ---
 _Your position changed because MRs ahead were processed._
 """,
+    "position_changed_hotfix": """## 🤖 Merge Queue Bot
+
+**Status:** ⏳ Waiting in queue
+**Position:** {position} of {total} _(was {old_position})_
+**Estimated wait:** ~{estimated_minutes} min
+
+---
+_Your position changed because a hotfix MR was inserted ahead._
+""",
+    "total_changed": """## 🤖 Merge Queue Bot
+
+**Status:** ⏳ Waiting in queue
+**Position:** {position} of {total} _(queue size changed from {old_total})_
+**Estimated wait:** ~{estimated_minutes} min
+
+---
+_A new MR was added to the queue._
+""",
+    "total_changed_hotfix": """## 🤖 Merge Queue Bot
+
+**Status:** ⏳ Waiting in queue
+**Position:** {position} of {total} _(queue size changed from {old_total})_
+**Estimated wait:** ~{estimated_minutes} min
+
+---
+_A hotfix MR was added to the queue._
+""",
     # === PROCESSING EVENTS ===
     "rebasing": """## 🤖 Merge Queue Bot
 

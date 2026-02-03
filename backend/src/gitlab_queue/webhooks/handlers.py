@@ -51,6 +51,7 @@ class MRWebhookHandler:
         mr_iid: int,
         is_hotfix: bool,
         positions_before: dict[int, int],
+        old_total: int,
     ) -> None:
         """Send position notifications after adding MR to queue.
 
@@ -58,6 +59,7 @@ class MRWebhookHandler:
             mr_iid: The MR's internal ID.
             is_hotfix: Whether the MR is a hotfix.
             positions_before: Positions captured before adding.
+            old_total: Total queue size before adding.
         """
         if not self.position_notifier:
             return
@@ -65,10 +67,12 @@ class MRWebhookHandler:
         try:
             await self.position_notifier.notify_initial_position(mr_iid)
 
-            if is_hotfix and positions_before:
-                await self.position_notifier.notify_affected_mrs_after_hotfix_added(
+            if positions_before:
+                await self.position_notifier.notify_affected_mrs_after_mr_added(
                     mr_iid,
                     positions_before,
+                    old_total,
+                    is_hotfix=is_hotfix,
                 )
         except Exception as e:
             log.warning(
@@ -141,10 +145,12 @@ class MRWebhookHandler:
             await self._refresh_queue_item_metadata(mr_iid, event)
             return
 
-        # Capture positions before adding (for hotfix notification)
+        # Capture positions before adding (for notifying existing MRs about queue changes)
         positions_before: dict[int, int] = {}
-        if is_hotfix and self.position_notifier:
+        old_total: int = 0
+        if self.position_notifier:
             positions_before = await self.position_notifier.capture_queue_positions()
+            old_total = await self.queue_manager.get_queue_length()
 
         # Fetch full MR data from API for new queue entry
         mr = await self.gitlab_client.get_mr(mr_iid)
@@ -160,7 +166,7 @@ class MRWebhookHandler:
         )
 
         # Send position notification
-        await self._notify_position_after_add(mr_iid, is_hotfix, positions_before)
+        await self._notify_position_after_add(mr_iid, is_hotfix, positions_before, old_total)
 
     async def _handle_unlabeled(self, event: MergeRequestEvent) -> None:
         """Handle label removal from MR.
@@ -266,10 +272,12 @@ class MRWebhookHandler:
 
         if not is_in_active_queue:
             if has_trigger_label:
-                # Capture positions before adding (for hotfix notification)
+                # Capture positions before adding (for notifying existing MRs about queue changes)
                 positions_before: dict[int, int] = {}
-                if has_hotfix_label and self.position_notifier:
+                old_total: int = 0
+                if self.position_notifier:
                     positions_before = await self.position_notifier.capture_queue_positions()
+                    old_total = await self.queue_manager.get_queue_length()
 
                 # MR has label but not in active queue - add it
                 mr = await self.gitlab_client.get_mr(mr_iid)
@@ -285,7 +293,7 @@ class MRWebhookHandler:
                 await self._broadcast_queue_update()
 
                 # Send position notification
-                await self._notify_position_after_add(mr_iid, is_hotfix, positions_before)
+                await self._notify_position_after_add(mr_iid, is_hotfix, positions_before, old_total)
             else:
                 log.debug("Updated MR not in queue and no trigger label", mr_iid=mr_iid)
             return

@@ -244,8 +244,10 @@ class MRStateMachine(StateMachine):
 
         # Capture positions before completion for notification
         positions_before: dict[int, int] = {}
+        old_total: int = 0
         if self.position_notifier:
             positions_before = await self.position_notifier.capture_queue_positions()
+            old_total = await self.queue_manager.get_queue_length()
 
         # Move MR to history table
         pipeline_duration = self._context.get("pipeline_duration_seconds")
@@ -260,6 +262,7 @@ class MRStateMachine(StateMachine):
             await self.position_notifier.notify_affected_mrs_after_completion(
                 self.mr_iid,
                 positions_before,
+                old_total,
             )
 
     async def on_enter_failed(self) -> None:
@@ -323,8 +326,10 @@ class MRStateMachine(StateMachine):
 
         # Capture positions before completion for notification
         positions_before: dict[int, int] = {}
+        old_total: int = 0
         if self.position_notifier:
             positions_before = await self.position_notifier.capture_queue_positions()
+            old_total = await self.queue_manager.get_queue_length()
 
         # Move MR to history table
         # Map internal failure_reason to history status
@@ -347,6 +352,7 @@ class MRStateMachine(StateMachine):
             await self.position_notifier.notify_affected_mrs_after_completion(
                 self.mr_iid,
                 positions_before,
+                old_total,
             )
 
     async def on_enter_removed(self) -> None:
@@ -384,8 +390,10 @@ class MRStateMachine(StateMachine):
 
         # Capture positions before completion for notification
         positions_before: dict[int, int] = {}
+        old_total: int = 0
         if self.position_notifier:
             positions_before = await self.position_notifier.capture_queue_positions()
+            old_total = await self.queue_manager.get_queue_length()
 
         # Move MR to history table
         await self.queue_manager.complete_mr(
@@ -399,6 +407,7 @@ class MRStateMachine(StateMachine):
             await self.position_notifier.notify_affected_mrs_after_completion(
                 self.mr_iid,
                 positions_before,
+                old_total,
             )
 
     # =========================================================================

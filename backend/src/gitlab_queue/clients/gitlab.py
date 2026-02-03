@@ -1100,7 +1100,43 @@ class GitLabClient:
     # Bot comment signature marker (invisible in rendered markdown)
     BOT_COMMENT_SIGNATURE = "<!-- merge-queue-bot -->"
 
-    async def merge_mr(self, iid: int) -> MergeRequest:
+    def _validate_sha_unchanged(
+        self, iid: int, expected_sha: str | None, current_sha: str | None, attempt: int
+    ) -> None:
+        """Validate that SHA hasn't changed during merge retries.
+
+        Raises:
+            GitLabConflictError: If SHA changed (race condition detected).
+        """
+        if expected_sha and current_sha != expected_sha:
+            log.warning(
+                "SHA changed during merge attempt",
+                mr_iid=iid,
+                expected_sha=expected_sha[:8],
+                current_sha=current_sha[:8] if current_sha else "unknown",
+                attempt=attempt,
+            )
+            raise GitLabConflictError(
+                f"MR !{iid} SHA changed during merge (expected: {expected_sha[:8]}, "
+                f"got: {current_sha[:8] if current_sha else 'unknown'})",
+                status_code=409,
+            )
+
+    async def _execute_merge(self, iid: int) -> MergeRequest:
+        """Execute the merge API call.
+
+        Returns:
+            MergeRequest model with updated state.
+        """
+        data = await self.put(
+            f"/merge_requests/{iid}/merge",
+            json={"merge_method": "ff"},  # Fast-forward merge
+        )
+        merged_mr = parse_merge_request(data)
+        log.info("MR merged successfully", mr_iid=merged_mr.iid, state=merged_mr.state)
+        return merged_mr
+
+    async def merge_mr(self, iid: int, *, expected_sha: str | None = None) -> MergeRequest:
         """Merge a merge request using fast-forward strategy.
 
         Checks merge_status before attempting merge to ensure MR is ready.
@@ -1109,85 +1145,56 @@ class GitLabClient:
 
         Args:
             iid: Internal ID of the merge request to merge.
+            expected_sha: Optional expected SHA to validate during retry loop.
+                If provided, merge will fail with sha_changed error if MR's SHA
+                changes during retries (indicating a race condition).
 
         Returns:
             MergeRequest model with updated state (should be 'merged').
 
         Raises:
             GitLabNotFoundError: If MR does not exist.
-            GitLabConflictError: If MR cannot be merged (conflicts, not ready, timeout).
+            GitLabConflictError: If MR cannot be merged (conflicts, not ready, timeout, sha_changed).
             GitLabAPIError: On other API errors.
         """
-        log.info("Attempting to merge MR", mr_iid=iid)
+        log.info("Attempting to merge MR", mr_iid=iid, expected_sha=expected_sha[:8] if expected_sha else None)
 
         max_retries = self._settings.merge_status_retry_max
         retry_delay = self._settings.merge_status_retry_delay_seconds
 
         for attempt in range(max_retries):
             mr = await self.get_mr(iid)
+            self._validate_sha_unchanged(iid, expected_sha, mr.sha, attempt + 1)
 
             if mr.merge_status == "checking":
-                log.info(
-                    "Waiting for merge status check",
-                    mr_iid=iid,
-                    attempt=attempt + 1,
-                    max_retries=max_retries,
-                )
+                log.info("Waiting for merge status check", mr_iid=iid, attempt=attempt + 1, max_retries=max_retries)
                 await asyncio.sleep(retry_delay)
                 continue
 
-            if mr.merge_status == "can_be_merged":
-                # Proceed with merge
-                try:
-                    data = await self.put(
-                        f"/merge_requests/{iid}/merge",
-                        json={"merge_method": "ff"},  # Fast-forward merge
-                    )
-                    merged_mr = parse_merge_request(data)
+            if mr.merge_status != "can_be_merged":
+                log.warning(
+                    "MR not ready for merge", mr_iid=iid, merge_status=mr.merge_status, has_conflicts=mr.has_conflicts
+                )
+                raise GitLabConflictError(f"MR !{iid} cannot be merged: status is '{mr.merge_status}'", status_code=409)
+
+            try:
+                return await self._execute_merge(iid)
+            except GitLabAPIError as e:
+                if e.status_code in (405, 422) and not mr.has_conflicts:
                     log.info(
-                        "MR merged successfully",
-                        mr_iid=merged_mr.iid,
-                        state=merged_mr.state,
+                        "Merge API returned error, retrying",
+                        mr_iid=iid,
+                        status_code=e.status_code,
+                        attempt=attempt + 1,
+                        error=str(e),
                     )
-                    return merged_mr
-                except GitLabAPIError as e:
-                    # HTTP 405/422 may be temporary after rebase
-                    if e.status_code in (405, 422) and not mr.has_conflicts:
-                        log.info(
-                            "Merge API returned error, retrying",
-                            mr_iid=iid,
-                            status_code=e.status_code,
-                            attempt=attempt + 1,
-                            error=str(e),
-                        )
-                        await asyncio.sleep(retry_delay)
-                        continue
-                    log.exception("Failed to merge MR", mr_iid=iid)
-                    raise
+                    await asyncio.sleep(retry_delay)
+                    continue
+                log.exception("Failed to merge MR", mr_iid=iid)
+                raise
 
-            # Any other status is a real error
-            log.warning(
-                "MR not ready for merge",
-                mr_iid=iid,
-                merge_status=mr.merge_status,
-                has_conflicts=mr.has_conflicts,
-            )
-            raise GitLabConflictError(
-                f"MR !{iid} cannot be merged: status is '{mr.merge_status}'",
-                status_code=409,
-            )
-
-        # Timeout after all retries
-        log.warning(
-            "Merge status check timeout",
-            mr_iid=iid,
-            merge_status="checking",
-            attempts=max_retries,
-        )
-        raise GitLabConflictError(
-            f"MR !{iid} merge status check timeout (status: 'checking')",
-            status_code=409,
-        )
+        log.warning("Merge status check timeout", mr_iid=iid, merge_status="checking", attempts=max_retries)
+        raise GitLabConflictError(f"MR !{iid} merge status check timeout (status: 'checking')", status_code=409)
 
     async def add_comment(self, iid: int, body: str) -> Note:
         """Add a comment to a merge request.

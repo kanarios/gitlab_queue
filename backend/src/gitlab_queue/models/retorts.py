@@ -124,6 +124,9 @@ def _parse_datetime(value: str | None) -> datetime | None:
     """
     if not value:
         return None
+    # Handle "YYYY-MM-DD HH:MM:SS UTC" format from GitLab pipeline webhooks
+    if value.endswith(" UTC"):
+        return datetime.fromisoformat(value[:-4] + "+00:00")
     # Handle Z suffix (UTC timezone)
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 

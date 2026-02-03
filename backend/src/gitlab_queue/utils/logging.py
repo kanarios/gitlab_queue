@@ -64,7 +64,7 @@ _SENSITIVE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     # Generic API keys and secrets in key=value format
     (re.compile(r"(api[_-]?key|secret|password|auth)[=:]\s*[^\s,}\"']+", re.IGNORECASE), r"\1=***"),
     # Token patterns (but not Private-Token which is handled above)
-    (re.compile(r"(?<!Private-)([Tt]oken)[=:]\s*[^\s,}\"']+"), r"\1=***"),
+    (re.compile(r"(?<!Private-)([Tt]oken)[=:]\s*(?!\S*\*\*\*)[^\s,}\"']+"), r"\1=***"),
     # JWT tokens (three base64 parts separated by dots)
     (re.compile(r"eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+"), "***JWT***"),
 ]
