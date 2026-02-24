@@ -913,16 +913,15 @@ class MergeProcessor:
         if pipeline.status == "success":
             # Validate SHA before processing success to prevent acting on stale pipeline
             queue_item = await self.queue_manager.get_queue_item(mr_iid)
-            if queue_item and queue_item.expected_sha:
-                if pipeline.sha != queue_item.expected_sha:
-                    log.warning(
-                        "Pipeline success but SHA mismatch - waiting for correct pipeline",
-                        mr_iid=mr_iid,
-                        pipeline_id=pipeline.id,
-                        pipeline_sha=pipeline.sha[:8] if pipeline.sha else "unknown",
-                        expected_sha=queue_item.expected_sha[:8],
-                    )
-                    return None  # Continue polling
+            if queue_item and queue_item.expected_sha and pipeline.sha != queue_item.expected_sha:
+                log.warning(
+                    "Pipeline success but SHA mismatch - waiting for correct pipeline",
+                    mr_iid=mr_iid,
+                    pipeline_id=pipeline.id,
+                    pipeline_sha=pipeline.sha[:8] if pipeline.sha else "unknown",
+                    expected_sha=queue_item.expected_sha[:8],
+                )
+                return None  # Continue polling
 
             log.info("Pipeline succeeded", mr_iid=mr_iid, pipeline_id=pipeline.id)
             await sm.trigger_pipeline_success()

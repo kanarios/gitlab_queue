@@ -1,4 +1,4 @@
-"""Test that context variables (request_id) propagate to log entries."""
+"""Test that context variables (request_id, mr_iid, operation) propagate within LogContext."""
 
 from __future__ import annotations
 

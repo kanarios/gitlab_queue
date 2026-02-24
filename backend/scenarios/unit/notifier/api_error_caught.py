@@ -56,7 +56,7 @@ class Scenario2(vedro.Scenario):
         assert self.result.id == 42
 
     def and_gitlab_client_was_called(self):
-        self.gitlab_client.add_or_update_pinned_comment.assert_called_once()
+        self.gitlab_client.add_or_update_pinned_comment.assert_awaited_once()
         call_args = self.gitlab_client.add_or_update_pinned_comment.call_args
         assert call_args[0][0] == 10  # mr_iid
         assert "Removed from queue" in call_args[0][1]

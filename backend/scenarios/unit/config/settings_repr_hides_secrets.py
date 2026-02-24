@@ -32,3 +32,6 @@ class Scenario(vedro.Scenario):
 
     def and_jwt_value_is_not_in_result(self):
         assert self.jwt_value not in self.result, "Expected jwt_secret to be hidden in repr"
+
+    def and_webhook_value_is_not_in_result(self):
+        assert "webhook-secret-value" not in self.result, "Expected webhook_secret to be hidden in repr"

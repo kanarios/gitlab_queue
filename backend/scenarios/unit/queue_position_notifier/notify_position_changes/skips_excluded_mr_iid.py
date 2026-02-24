@@ -3,7 +3,7 @@
 NOTE: Intentionally testing private method _notify_position_changes
 to verify internal logic (excluded_mr_iid handling).
 Public methods notify_affected_mrs_after_completion and
-notify_affected_mrs_after_hotfix_added don't expose this behavior.
+notify_affected_mrs_after_mr_added don't expose this behavior.
 """
 
 import vedro

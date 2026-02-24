@@ -98,6 +98,7 @@ def create_pipeline_event(
         status: Pipeline status (success, failed, etc.).
         mr_iid: MR IID (generated if not provided and include_mr_iid is True).
         include_mr_iid: Whether to include merge_request_iid in the event.
+        sha: Pipeline commit SHA (generated if not provided).
     """
     event_data = fake(
         PipelineEventSchema

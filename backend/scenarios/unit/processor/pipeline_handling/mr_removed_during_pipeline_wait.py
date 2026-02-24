@@ -52,4 +52,4 @@ class Scenario(vedro.Scenario):
         assert self.result == ProcessingResult.REMOVED
 
     def and_trigger_mark_removed_was_called(self):
-        self.mock_sm.trigger_mark_removed.assert_called_once_with(reason="label_removed")
+        self.mock_sm.trigger_mark_removed.assert_awaited_once_with(reason="label_removed")

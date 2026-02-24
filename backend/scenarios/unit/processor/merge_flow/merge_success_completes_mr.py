@@ -49,11 +49,11 @@ class Scenario(vedro.Scenario):
         assert self.result == ProcessingResult.SUCCESS
 
     def and_merge_success_is_triggered_on_state_machine(self):
-        self.mock_sm.trigger_merge_success.assert_called_once()
+        self.mock_sm.trigger_merge_success.assert_awaited_once()
 
     def and_merge_mr_is_called_with_correct_sha(self):
-        self.processor.gitlab_client.merge_mr.assert_called_once_with(42, expected_sha="sha_merge_ok")
+        self.processor.gitlab_client.merge_mr.assert_awaited_once_with(42, expected_sha="sha_merge_ok")
 
     def and_no_failure_transitions_are_triggered(self):
-        self.mock_sm.trigger_merge_failed.assert_not_called()
-        self.mock_sm.trigger_timeout.assert_not_called()
+        self.mock_sm.trigger_merge_failed.assert_not_awaited()
+        self.mock_sm.trigger_timeout.assert_not_awaited()

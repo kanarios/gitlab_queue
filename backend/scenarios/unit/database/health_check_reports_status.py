@@ -35,7 +35,8 @@ class Scenario(vedro.Scenario):
         assert len(self.status.database_path) > 0
 
     async def do_cleanup(self):
-        await self._db_ctx.__aexit__(None, None, None)
+        if hasattr(self, "_db_ctx"):
+            await self._db_ctx.__aexit__(None, None, None)
 
 
 class Scenario2(vedro.Scenario):
@@ -53,3 +54,7 @@ class Scenario2(vedro.Scenario):
     def and_error_should_mention_not_initialized(self):
         assert self.status.error is not None
         assert "not initialized" in self.status.error.lower()
+
+    async def do_cleanup(self):
+        if hasattr(self, "db"):
+            await self.db.close()

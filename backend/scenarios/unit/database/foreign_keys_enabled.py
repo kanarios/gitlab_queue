@@ -23,4 +23,5 @@ class Scenario(vedro.Scenario):
         assert self.status.connected, "Database should be connected"
 
     async def do_cleanup(self):
-        await self._db_ctx.__aexit__(None, None, None)
+        if hasattr(self, "_db_ctx"):
+            await self._db_ctx.__aexit__(None, None, None)

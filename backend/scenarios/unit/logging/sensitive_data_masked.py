@@ -11,7 +11,7 @@ class Scenario(vedro.Scenario):
     subject = "GitLab personal access token is masked"
 
     def given_string_with_gitlab_token(self):
-        self.input_value = "Authorization: glpat-abc123def456_xyz"
+        self.input_value = "Authorization: glpat-abc123def456_xyz"  # gitleaks:allow
 
     def when_mask_is_applied(self):
         self.result = _mask_sensitive_value(self.input_value)
@@ -70,7 +70,7 @@ class Scenario5(vedro.Scenario):
     subject = "Private-Token header is masked"
 
     def given_string_with_private_token_header(self):
-        self.input_value = "Private-Token: glpat-some_secret_token_here"
+        self.input_value = "Private-Token: glpat-some_secret_token_here"  # gitleaks:allow
 
     def when_mask_is_applied(self):
         self.result = _mask_sensitive_value(self.input_value)
@@ -96,7 +96,7 @@ class Scenario7(vedro.Scenario):
     subject = "GitLab deploy token is masked"
 
     def given_string_with_deploy_token(self):
-        self.input_value = "Token: gldt-abcdefg123456"
+        self.input_value = "Token: gldt-abcdefg123456"  # gitleaks:allow
 
     def when_mask_is_applied(self):
         self.result = _mask_sensitive_value(self.input_value)
