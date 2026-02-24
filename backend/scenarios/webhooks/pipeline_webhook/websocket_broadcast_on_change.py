@@ -68,13 +68,13 @@ class Scenario(vedro.Scenario):
         await self.handler._broadcast_queue_update()
 
     def then_active_queue_should_be_fetched(self):
-        self.queue_manager.get_active_queue.assert_called_once()
+        self.queue_manager.get_active_queue.assert_awaited_once()
 
     def and_queue_stats_should_be_fetched(self):
-        self.queue_manager.get_queue_stats.assert_called_once()
+        self.queue_manager.get_queue_stats.assert_awaited_once()
 
     def and_websocket_broadcast_should_be_called(self):
-        self.websocket_manager.broadcast_queue_updated.assert_called_once()
+        self.websocket_manager.broadcast_queue_updated.assert_awaited_once()
 
     def and_broadcast_data_should_contain_queue_items(self):
         call_args = self.websocket_manager.broadcast_queue_updated.call_args

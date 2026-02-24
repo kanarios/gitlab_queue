@@ -64,4 +64,4 @@ class Scenario(vedro.Scenario):
         assert self.new_start_time is None
 
     def and_pipeline_failed_was_triggered(self):
-        self.mock_sm.trigger_pipeline_failed.assert_called_once()
+        self.mock_sm.trigger_pipeline_failed.assert_awaited_once()

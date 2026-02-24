@@ -41,7 +41,7 @@ class Scenario(vedro.Scenario):
         self.transport.assert_called_with_path("/api/v4/projects/123/merge_requests/123")
 
     def and_mr_should_be_added_to_queue(self):
-        self.queue_manager.add_to_queue.assert_called_once()
+        self.queue_manager.add_to_queue.assert_awaited_once()
 
     async def cleanup(self):
         await self.gitlab_client.close()

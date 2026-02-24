@@ -29,7 +29,7 @@ class Scenario(vedro.Scenario):
         await self.manager.broadcast_queue_updated(self.queue_data, self.stats_data)
 
     def then_broadcast_should_be_sent_to_connection(self):
-        self.mock_ws.send_json.assert_called_once()
+        self.mock_ws.send_json.assert_awaited_once()
         call_args = self.mock_ws.send_json.call_args[0][0]
         assert call_args["type"] == "queue:updated"
         assert call_args["data"]["queue"] == self.queue_data

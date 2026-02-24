@@ -47,7 +47,7 @@ class Scenario(vedro.Scenario):
         assert self.result == ProcessingResult.SUCCESS
 
     def and_pipeline_success_is_triggered_on_state_machine(self):
-        self.mock_sm.trigger_pipeline_success.assert_called_once()
+        self.mock_sm.trigger_pipeline_success.assert_awaited_once()
 
     def and_pipeline_failed_is_not_triggered(self):
-        self.mock_sm.trigger_pipeline_failed.assert_not_called()
+        self.mock_sm.trigger_pipeline_failed.assert_not_awaited()

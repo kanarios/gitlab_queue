@@ -88,4 +88,4 @@ class Scenario(vedro.Scenario):
         )
 
     def and_rebase_should_have_been_attempted(self):
-        self.gitlab_client.rebase_mr.assert_called_once_with(42)
+        self.gitlab_client.rebase_mr.assert_awaited_once_with(42)

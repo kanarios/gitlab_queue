@@ -17,8 +17,8 @@ class Scenario(vedro.Scenario):
 
     def given_app_with_dlq_entries(self):
         self.app, self.state = created_test_app()
-        self.item1 = create_test_dlq_item(id=1, event_type="merge_request")
-        self.item2 = create_test_dlq_item(id=2, event_type="pipeline")
+        self.item1 = create_test_dlq_item(entry_id=1, event_type="merge_request")
+        self.item2 = create_test_dlq_item(entry_id=2, event_type="pipeline")
         self.state.retry_manager.get_dlq_entries = AsyncMock(
             return_value=[self.item1, self.item2],
         )

@@ -78,7 +78,7 @@ class Scenario(vedro.Scenario):
         assert isinstance(self.new_start_time, datetime)
 
     def and_pipeline_retry_is_notified_on_state_machine(self):
-        self.mock_sm.notify_pipeline_retry.assert_called_once()
+        self.mock_sm.notify_pipeline_retry.assert_awaited_once()
         call_kwargs = self.mock_sm.notify_pipeline_retry.call_args.kwargs
         assert call_kwargs["old_pipeline_id"] == 100
         assert call_kwargs["new_pipeline_id"] == 200
@@ -86,4 +86,4 @@ class Scenario(vedro.Scenario):
         assert call_kwargs["max_retries"] == 1
 
     def and_pipeline_failed_is_not_triggered(self):
-        self.mock_sm.trigger_pipeline_failed.assert_not_called()
+        self.mock_sm.trigger_pipeline_failed.assert_not_awaited()

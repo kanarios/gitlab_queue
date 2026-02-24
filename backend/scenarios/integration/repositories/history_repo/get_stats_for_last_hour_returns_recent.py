@@ -44,4 +44,5 @@ class Scenario(vedro.Scenario):
         assert self.stats.success_count == 1
 
     async def do_cleanup(self):
-        await self._db_ctx.__aexit__(None, None, None)
+        if hasattr(self, "_db_ctx"):
+            await self._db_ctx.__aexit__(None, None, None)

@@ -49,7 +49,7 @@ class Scenario(vedro.Scenario):
 
     def then_aggregate_daily_was_called_with_yesterday(self):
         yesterday = date.today() - timedelta(days=1)
-        self.mock_uow.analytics.aggregate_daily.assert_called_once_with(yesterday)
+        self.mock_uow.analytics.aggregate_daily.assert_awaited_once_with(yesterday)
 
 
 class Scenario2(vedro.Scenario):
@@ -86,4 +86,4 @@ class Scenario2(vedro.Scenario):
         assert self.raised is False
 
     def and_aggregate_daily_was_still_called(self):
-        self.mock_uow.analytics.aggregate_daily.assert_called_once()
+        self.mock_uow.analytics.aggregate_daily.assert_awaited_once()

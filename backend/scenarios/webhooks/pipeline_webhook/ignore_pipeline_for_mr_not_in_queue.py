@@ -35,10 +35,10 @@ class Scenario(vedro.Scenario):
         await self.handler.handle(self.event)
 
     def then_queue_item_should_be_checked(self):
-        self.queue_manager.get_queue_item.assert_called_once_with(123)
+        self.queue_manager.get_queue_item.assert_awaited_once_with(123)
 
     def and_no_state_update_should_happen(self):
-        self.queue_manager.update_mr_state.assert_not_called()
+        self.queue_manager.update_mr_state.assert_not_awaited()
 
     async def cleanup(self):
         await self.gitlab_client.close()

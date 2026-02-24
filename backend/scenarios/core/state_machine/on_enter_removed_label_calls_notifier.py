@@ -24,7 +24,7 @@ class Scenario(vedro.Scenario):
         await self.sm.trigger_mark_removed(reason="label_removed")
 
     def then_notifier_should_be_called_with_removed_label_template(self):
-        self.notifier.notify.assert_called()
+        self.notifier.notify.assert_awaited()
         call_args = self.notifier.notify.call_args
         assert call_args[0][0] == 123  # mr_iid
         assert call_args[0][1] == "removed_label"  # template

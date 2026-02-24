@@ -61,10 +61,10 @@ class Scenario(vedro.Scenario):
         await self.handler.handle(self.event)
 
     def then_mr_should_still_be_added_to_queue(self):
-        self.queue_manager.add_to_queue.assert_called_once()
+        self.queue_manager.add_to_queue.assert_awaited_once()
 
     def and_notification_should_have_been_attempted(self):
-        self.position_notifier.notify_initial_position.assert_called_once_with(123)
+        self.position_notifier.notify_initial_position.assert_awaited_once_with(123)
 
     async def cleanup(self):
         await self.gitlab_client.close()

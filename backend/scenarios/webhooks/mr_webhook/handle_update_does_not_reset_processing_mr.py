@@ -47,7 +47,7 @@ class Scenario(vedro.Scenario):
 
     def then_mr_state_should_not_be_changed(self):
         # MR updates don't reset state to avoid race conditions with bot-initiated rebases
-        self.queue_manager.update_mr_state.assert_not_called()
+        self.queue_manager.update_mr_state.assert_not_awaited()
 
     async def cleanup(self):
         await self.gitlab_client.close()

@@ -42,4 +42,5 @@ class Scenario(vedro.Scenario):
         assert "message" in self.error.response_body
 
     async def do_cleanup(self):
-        await self.client.close()
+        if hasattr(self, "client"):
+            await self.client.close()

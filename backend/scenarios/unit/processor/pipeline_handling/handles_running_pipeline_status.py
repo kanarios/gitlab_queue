@@ -41,5 +41,5 @@ class Scenario(vedro.Scenario):
         assert self.result is None
 
     def and_no_state_machine_transitions_are_triggered(self):
-        self.mock_sm.trigger_pipeline_success.assert_not_called()
-        self.mock_sm.trigger_pipeline_failed.assert_not_called()
+        self.mock_sm.trigger_pipeline_success.assert_not_awaited()
+        self.mock_sm.trigger_pipeline_failed.assert_not_awaited()

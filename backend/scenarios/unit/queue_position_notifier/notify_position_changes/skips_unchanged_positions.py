@@ -36,7 +36,7 @@ class Scenario(vedro.Scenario):
         )
 
     def then_no_notifications_are_sent(self):
-        self.notifier.notify.assert_not_called()
+        self.notifier.notify.assert_not_awaited()
 
     def and_notified_count_is_0(self):
         assert self.notified_count == 0

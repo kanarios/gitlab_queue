@@ -25,4 +25,4 @@ class Scenario(vedro.Scenario):
         await self.position_notifier.notify_initial_position(self.mr_iid)
 
     def then_notify_is_not_called(self):
-        self.notifier.notify.assert_not_called()
+        self.notifier.notify.assert_not_awaited()

@@ -30,4 +30,4 @@ class Scenario(vedro.Scenario):
         await self.processor._recover_interrupted_state()
 
     def then_mr_is_marked_as_removed(self):
-        self.processor.queue_manager.update_mr_state.assert_called_once_with(42, "removed")
+        self.processor.queue_manager.update_mr_state.assert_awaited_once_with(42, "removed")

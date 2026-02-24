@@ -26,7 +26,7 @@ class Scenario(vedro.Scenario):
         await self.manager.broadcast_mr_status_changed(42, QueueState.QUEUED, QueueState.REBASING)
 
     def then_broadcast_should_contain_status_change(self):
-        self.mock_ws.send_json.assert_called_once()
+        self.mock_ws.send_json.assert_awaited_once()
         call_args = self.mock_ws.send_json.call_args[0][0]
         assert call_args["type"] == "mr:status_changed"
         assert call_args["data"]["iid"] == 42

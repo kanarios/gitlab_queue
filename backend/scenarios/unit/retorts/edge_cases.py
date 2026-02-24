@@ -33,6 +33,9 @@ class Scenario(vedro.Scenario):
     def then_result_is_datetime(self):
         assert isinstance(self.result, datetime)
 
+    def and_result_has_timezone(self):
+        assert self.result.tzinfo is not None
+
     def and_year_is_correct(self):
         assert self.result.year == 2025
 

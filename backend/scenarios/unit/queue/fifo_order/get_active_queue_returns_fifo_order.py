@@ -39,4 +39,5 @@ class Scenario(vedro.Scenario):
         assert len(self.active_queue) == 5
 
     async def do_cleanup(self):
-        await self._db_context.__aexit__(None, None, None)
+        if hasattr(self, "_db_context"):
+            await self._db_context.__aexit__(None, None, None)

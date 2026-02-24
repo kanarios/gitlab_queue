@@ -81,10 +81,10 @@ class Scenario(vedro.Scenario):
         self.new_ctx, self.new_pipeline = await self.handler.handle_rebase_if_needed(42, self.ctx)
 
     def then_old_pipeline_should_be_cancelled(self):
-        self.gitlab_client.cancel_pipeline.assert_called_once_with(100)
+        self.gitlab_client.cancel_pipeline.assert_awaited_once_with(100)
 
     def and_rebase_should_have_been_initiated(self):
-        self.gitlab_client.rebase_mr.assert_called_once_with(42)
+        self.gitlab_client.rebase_mr.assert_awaited_once_with(42)
 
     def and_new_pipeline_should_be_returned(self):
         assert self.new_pipeline is not None, "Expected new pipeline after rebase"

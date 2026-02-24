@@ -33,4 +33,4 @@ class Scenario(vedro.Scenario):
         await self.handler._remove_queue_label(123)
 
     def then_it_completes_and_calls_gitlab_client(self):
-        self.gitlab_client.remove_mr_label.assert_called_once_with(123, "merge_queue")
+        self.gitlab_client.remove_mr_label.assert_awaited_once_with(123, "merge_queue")

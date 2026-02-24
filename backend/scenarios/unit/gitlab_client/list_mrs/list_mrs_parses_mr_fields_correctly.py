@@ -46,4 +46,5 @@ class Scenario(vedro.Scenario):
         assert mr.author.username == "user42"
 
     async def do_cleanup(self):
-        await self.client.close()
+        if hasattr(self, "client"):
+            await self.client.close()

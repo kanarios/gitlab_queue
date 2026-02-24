@@ -1,4 +1,4 @@
-"""Test _process_retry_item logs DLQ warning when mark_retry_failed returns True."""
+"""Test _process_retry_item moves event to DLQ when max retries exceeded."""
 
 from __future__ import annotations
 

@@ -44,7 +44,7 @@ class Scenario(vedro.Scenario):
             self.mock_state_machine = mock_state_machine
 
     def then_pipeline_failed_should_be_triggered(self):
-        self.mock_state_machine.trigger_pipeline_failed.assert_called_once()
+        self.mock_state_machine.trigger_pipeline_failed.assert_awaited_once()
 
     async def cleanup(self):
         await self.gitlab_client.close()

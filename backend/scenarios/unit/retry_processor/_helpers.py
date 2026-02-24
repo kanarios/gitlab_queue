@@ -87,7 +87,7 @@ def create_pipeline_payload() -> dict[str, Any]:
 
 
 def create_test_retry_item(
-    id: int = 1,
+    item_id: int = 1,
     event_type: str = "merge_request",
     payload: dict[str, Any] | None = None,
     attempt_count: int = 0,
@@ -95,7 +95,7 @@ def create_test_retry_item(
     """Create a RetryQueueItem for testing.
 
     Args:
-        id: Item ID.
+        item_id: Item ID.
         event_type: Event type string.
         payload: Webhook payload dict (auto-generated if None).
         attempt_count: Number of attempts already made.
@@ -110,7 +110,7 @@ def create_test_retry_item(
             payload = create_pipeline_payload()
 
     return RetryQueueItem(
-        id=id,
+        id=item_id,
         event_type=event_type,
         payload=payload,
         attempt_count=attempt_count,

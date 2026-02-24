@@ -26,8 +26,8 @@ class Scenario(vedro.Scenario):
 
     def and_root_logger_level_should_match(self):
         root_logger = logging.getLogger()
-        assert root_logger.level == logging.DEBUG, (
-            f"Expected DEBUG level, got {logging.getLevelName(root_logger.level)}"
+        assert root_logger.getEffectiveLevel() == logging.DEBUG, (
+            f"Expected DEBUG level, got {logging.getLevelName(root_logger.getEffectiveLevel())}"
         )
 
     def and_structlog_should_be_configured(self):
@@ -37,7 +37,7 @@ class Scenario(vedro.Scenario):
 
     def and_app_logger_level_should_be_set(self):
         app_logger = logging.getLogger("gitlab_queue")
-        assert app_logger.level == logging.DEBUG
+        assert app_logger.getEffectiveLevel() == logging.DEBUG
 
     def and_httpx_logger_should_be_suppressed(self):
         httpx_logger = logging.getLogger("httpx")

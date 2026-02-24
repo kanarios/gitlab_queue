@@ -60,4 +60,5 @@ class Scenario(vedro.Scenario):
         assert self.stats.stats_window_days == 7, f"Expected 7 day window, got {self.stats.stats_window_days}"
 
     async def do_cleanup(self):
-        await self._db_context.__aexit__(None, None, None)
+        if hasattr(self, "_db_context"):
+            await self._db_context.__aexit__(None, None, None)

@@ -42,4 +42,5 @@ class Scenario(vedro.Scenario):
         assert self.stats["merging"] == 0, f"Expected 0 merging, got {self.stats['merging']}"
 
     async def do_cleanup(self):
-        await self._db_context.__aexit__(None, None, None)
+        if hasattr(self, "_db_context"):
+            await self._db_context.__aexit__(None, None, None)

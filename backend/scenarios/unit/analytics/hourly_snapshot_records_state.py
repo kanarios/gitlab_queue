@@ -58,13 +58,13 @@ class Scenario(vedro.Scenario):
             await self.processor._save_hourly_snapshot()
 
     def then_queue_depth_was_fetched(self):
-        self.mock_uow.merge_requests.count_active.assert_called_once()
+        self.mock_uow.merge_requests.count_active.assert_awaited_once()
 
     def and_hourly_stats_were_fetched(self):
-        self.mock_uow.history.get_stats_for_last_hour.assert_called_once()
+        self.mock_uow.history.get_stats_for_last_hour.assert_awaited_once()
 
     def and_snapshot_was_saved_with_correct_data(self):
-        self.mock_uow.analytics.save_hourly_snapshot.assert_called_once_with(
+        self.mock_uow.analytics.save_hourly_snapshot.assert_awaited_once_with(
             queue_depth=5,
             processed_count=10,
             success_count=8,

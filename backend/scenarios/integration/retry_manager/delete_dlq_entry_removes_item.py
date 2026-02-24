@@ -42,4 +42,5 @@ class Scenario(vedro.Scenario):
         assert len(entries) == 0, f"Expected 0 DLQ entries after deletion, got {len(entries)}"
 
     async def do_cleanup(self):
-        await self._db_ctx.__aexit__(None, None, None)
+        if hasattr(self, "_db_ctx"):
+            await self._db_ctx.__aexit__(None, None, None)

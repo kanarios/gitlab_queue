@@ -46,4 +46,5 @@ class Scenario(vedro.Scenario):
         assert self.result[2].title == "Third MR"
 
     async def do_cleanup(self):
-        await self.client.close()
+        if hasattr(self, "client"):
+            await self.client.close()

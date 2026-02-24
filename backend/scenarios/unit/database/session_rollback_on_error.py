@@ -37,4 +37,5 @@ class Scenario(vedro.Scenario):
             assert count == 0, f"Expected 0 rows after rollback, got {count}"
 
     async def do_cleanup(self):
-        await self._db_ctx.__aexit__(None, None, None)
+        if hasattr(self, "_db_ctx"):
+            await self._db_ctx.__aexit__(None, None, None)

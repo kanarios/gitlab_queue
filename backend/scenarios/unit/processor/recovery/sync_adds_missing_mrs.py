@@ -37,4 +37,4 @@ class Scenario(vedro.Scenario):
         await self.processor._sync_missing_mrs_from_gitlab()
 
     def then_add_to_queue_is_called_with_the_mr(self):
-        self.processor.queue_manager.add_to_queue.assert_called_once_with(self.mock_mr, is_hotfix=False)
+        self.processor.queue_manager.add_to_queue.assert_awaited_once_with(self.mock_mr, is_hotfix=False)

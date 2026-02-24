@@ -122,7 +122,7 @@ def create_pipeline_event(
         object_attributes=PipelineAttributes(
             id=actual_pipeline_id,
             status=status,
-            sha=sha or event_data["object_attributes"]["sha"],
+            sha=sha if sha is not None else event_data["object_attributes"]["sha"],
             ref=event_data["object_attributes"]["ref"],
         ),
         merge_request_iid=actual_mr_iid,

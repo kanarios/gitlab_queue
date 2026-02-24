@@ -37,4 +37,5 @@ class Scenario(vedro.Scenario):
         assert self.error.status_code == 400
 
     async def do_cleanup(self):
-        await self.client.close()
+        if hasattr(self, "client"):
+            await self.client.close()

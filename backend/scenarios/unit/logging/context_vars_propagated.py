@@ -1,4 +1,10 @@
-"""Test that context variables (request_id, mr_iid, operation) propagate within LogContext."""
+"""Test that context variables (request_id, mr_iid, operation) propagate within LogContext.
+
+Covers LogContext propagation for all three context variables:
+- request_id_ctx: tracks the current request ID
+- mr_iid_ctx: tracks the current merge request IID
+- operation_ctx: tracks the current operation name
+"""
 
 from __future__ import annotations
 

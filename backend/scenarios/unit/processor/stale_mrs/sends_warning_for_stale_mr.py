@@ -40,11 +40,11 @@ class Scenario(vedro.Scenario):
             await self.processor._check_stale_mrs()
 
     def then_stale_warning_is_sent(self):
-        self.mock_sm.notify_stale_warning.assert_called_once_with(
+        self.mock_sm.notify_stale_warning.assert_awaited_once_with(
             warning_hours=24,
         )
 
     def and_warning_flag_is_marked(self):
-        self.processor.queue_manager.mark_stale_warning_sent.assert_called_once_with(
+        self.processor.queue_manager.mark_stale_warning_sent.assert_awaited_once_with(
             42,
         )

@@ -46,7 +46,7 @@ class Scenario(vedro.Scenario):
         await self.handler.handle(self.event)
 
     def then_mr_state_should_not_be_updated(self):
-        self.queue_manager.update_mr_state.assert_not_called()
+        self.queue_manager.update_mr_state.assert_not_awaited()
 
     async def cleanup(self):
         await self.gitlab_client.close()

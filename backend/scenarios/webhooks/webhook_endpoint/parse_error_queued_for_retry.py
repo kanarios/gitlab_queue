@@ -50,6 +50,6 @@ class Scenario(vedro.Scenario):
         assert "retry_id" in data
 
     def and_retry_manager_should_be_called(self):
-        self.state.retry_manager.add_to_retry_queue.assert_called_once()
+        self.state.retry_manager.add_to_retry_queue.assert_awaited_once()
         call_kwargs = self.state.retry_manager.add_to_retry_queue.call_args.kwargs
         assert call_kwargs["event_type"] == "pipeline"

@@ -61,4 +61,4 @@ class Scenario(vedro.Scenario):
         assert self.result.rebase_count == 1
 
     def and_notify_rebase_during_testing_was_called(self):
-        self.mock_sm.notify_rebase_during_testing.assert_called_once()
+        self.mock_sm.notify_rebase_during_testing.assert_awaited_once()

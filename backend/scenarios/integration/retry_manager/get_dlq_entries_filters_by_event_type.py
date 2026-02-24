@@ -49,4 +49,5 @@ class Scenario(vedro.Scenario):
             assert entry.event_type == "merge_request", f"Expected event_type='merge_request', got '{entry.event_type}'"
 
     async def do_cleanup(self):
-        await self._db_ctx.__aexit__(None, None, None)
+        if hasattr(self, "_db_ctx"):
+            await self._db_ctx.__aexit__(None, None, None)

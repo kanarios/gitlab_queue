@@ -4,8 +4,8 @@ When a pipeline fails and retry_count >= max_retries, the processor must
 trigger pipeline_failed on the state machine and signal the caller to stop
 retrying (should_continue=False).
 
-Covers lines 604-610 in _handle_pipeline_failure_retry: the exhausted-retry
-branch that calls trigger_pipeline_failed and returns (False, None).
+Covers _handle_pipeline_failure_retry: the exhausted-retry branch that calls
+trigger_pipeline_failed and returns (False, None).
 """
 
 from __future__ import annotations
@@ -56,10 +56,10 @@ class Scenario(vedro.Scenario):
         assert self.new_start_time is None
 
     def and_pipeline_failed_is_triggered_on_state_machine(self):
-        self.mock_sm.trigger_pipeline_failed.assert_called_once()
+        self.mock_sm.trigger_pipeline_failed.assert_awaited_once()
         call_kwargs = self.mock_sm.trigger_pipeline_failed.call_args.kwargs
         assert call_kwargs["failed_jobs"] == self.failed_jobs
         assert call_kwargs["retry_count"] == self.retry_count
 
     def and_rebase_is_not_attempted(self):
-        self.processor.gitlab_client.rebase_mr.assert_not_called()
+        self.processor.gitlab_client.rebase_mr.assert_not_awaited()

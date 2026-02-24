@@ -35,4 +35,5 @@ class Scenario(vedro.Scenario):
         assert self.positions[30] == 3, f"Third hotfix expected at 3, got {self.positions[30]}"
 
     async def do_cleanup(self):
-        await self._db_context.__aexit__(None, None, None)
+        if hasattr(self, "_db_context"):
+            await self._db_context.__aexit__(None, None, None)

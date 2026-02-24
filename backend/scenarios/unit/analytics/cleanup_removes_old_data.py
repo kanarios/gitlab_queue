@@ -45,10 +45,10 @@ class Scenario(vedro.Scenario):
             await self.processor._cleanup_hourly_analytics()
 
     def then_cleanup_was_called_with_30_day_retention(self):
-        self.mock_uow.analytics.cleanup_hourly.assert_called_once_with(30)
+        self.mock_uow.analytics.cleanup_hourly.assert_awaited_once_with(30)
 
     def and_vacuum_was_triggered(self):
-        self.processor._vacuum_database.assert_called_once()
+        self.processor._vacuum_database.assert_awaited_once()
 
 
 class Scenario2(vedro.Scenario):
@@ -79,10 +79,10 @@ class Scenario2(vedro.Scenario):
             await self.processor._cleanup_hourly_analytics()
 
     def then_cleanup_was_called(self):
-        self.mock_uow.analytics.cleanup_hourly.assert_called_once_with(30)
+        self.mock_uow.analytics.cleanup_hourly.assert_awaited_once_with(30)
 
     def and_vacuum_was_not_triggered(self):
-        self.processor._vacuum_database.assert_not_called()
+        self.processor._vacuum_database.assert_not_awaited()
 
 
 class Scenario3(vedro.Scenario):
@@ -113,7 +113,7 @@ class Scenario3(vedro.Scenario):
             await self.processor._cleanup_history()
 
     def then_cleanup_was_called_with_365_day_retention(self):
-        self.mock_uow.history.cleanup_old_records.assert_called_once_with(365)
+        self.mock_uow.history.cleanup_old_records.assert_awaited_once_with(365)
 
     def and_vacuum_was_triggered(self):
-        self.processor._vacuum_database.assert_called_once()
+        self.processor._vacuum_database.assert_awaited_once()

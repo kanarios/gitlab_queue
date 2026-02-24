@@ -38,4 +38,5 @@ class Scenario(vedro.Scenario):
         assert request_json["remove_labels"] == "merge_queue"
 
     async def do_cleanup(self):
-        await self.client.close()
+        if hasattr(self, "client"):
+            await self.client.close()

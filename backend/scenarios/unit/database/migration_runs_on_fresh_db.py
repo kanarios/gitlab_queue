@@ -33,4 +33,5 @@ class Scenario(vedro.Scenario):
         assert result is False, "Expected no migrations on second run (already up-to-date)"
 
     def do_cleanup(self):
-        self._tmp_dir.cleanup()
+        if hasattr(self, "_tmp_dir"):
+            self._tmp_dir.cleanup()

@@ -8,20 +8,20 @@ from gitlab_queue.models.retry import DLQItem, DLQStats
 
 
 def create_test_dlq_item(
-    id: int = 1,
+    entry_id: int = 1,
     event_type: str = "merge_request",
 ) -> DLQItem:
     """Create a test DLQ item.
 
     Args:
-        id: DLQ item database ID.
+        entry_id: DLQ item database ID.
         event_type: Type of webhook event.
 
     Returns:
         DLQItem with test data.
     """
     return DLQItem(
-        id=id,
+        id=entry_id,
         event_type=event_type,
         payload={"object_kind": event_type, "test": True},
         attempt_count=3,

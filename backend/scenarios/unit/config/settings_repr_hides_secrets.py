@@ -13,12 +13,13 @@ class Scenario(vedro.Scenario):
     def given_settings_with_secrets(self):
         self.token_value = "glpat-super-secret-token"
         self.jwt_value = "b" * 64
+        self.webhook_value = "webhook-secret-value"
         self.settings = Settings(
             gitlab_url="https://gitlab.com",
             gitlab_token=self.token_value,
             gitlab_project_id=1,
             jwt_secret=self.jwt_value,
-            webhook_secret="webhook-secret-value",
+            webhook_secret=self.webhook_value,
         )
 
     def when_repr_is_called(self):
@@ -34,4 +35,7 @@ class Scenario(vedro.Scenario):
         assert self.jwt_value not in self.result, "Expected jwt_secret to be hidden in repr"
 
     def and_webhook_value_is_not_in_result(self):
-        assert "webhook-secret-value" not in self.result, "Expected webhook_secret to be hidden in repr"
+        assert self.webhook_value not in self.result, "Expected webhook_secret to be hidden in repr"
+
+    def and_webhook_secret_is_masked(self):
+        assert "webhook_secret='***'" in self.result or "webhook_secret=***" in self.result

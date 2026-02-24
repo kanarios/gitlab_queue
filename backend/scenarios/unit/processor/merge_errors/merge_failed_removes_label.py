@@ -45,7 +45,7 @@ class Scenario(vedro.Scenario):
         assert self.result == ProcessingResult.MERGE_FAILED
 
     def and_trigger_merge_failed_is_called_on_state_machine(self):
-        self.mock_sm.trigger_merge_failed.assert_called_once()
+        self.mock_sm.trigger_merge_failed.assert_awaited_once()
 
     def and_error_message_is_passed_to_state_machine(self):
         call_kwargs = self.mock_sm.trigger_merge_failed.call_args.kwargs
@@ -53,4 +53,4 @@ class Scenario(vedro.Scenario):
         assert "Merge conflict" in call_kwargs["error_message"]
 
     def and_merge_success_is_not_triggered(self):
-        self.mock_sm.trigger_merge_success.assert_not_called()
+        self.mock_sm.trigger_merge_success.assert_not_awaited()

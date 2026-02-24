@@ -32,7 +32,7 @@ class Scenario(vedro.Scenario):
         await self.handler.handle(self.event)
 
     def then_mr_should_be_removed_from_queue(self):
-        self.queue_manager.remove_from_queue.assert_called_once_with(123)
+        self.queue_manager.remove_from_queue.assert_awaited_once_with(123)
 
     async def cleanup(self):
         await self.gitlab_client.close()

@@ -39,7 +39,7 @@ class Scenario(vedro.Scenario):
         assert "expired" in data["detail"].lower()
 
 
-class Scenario2(vedro.Scenario):
+class ScenarioInvalidToken(vedro.Scenario):
     subject = "middleware returns 401 for invalid JWT token"
 
     def given_app_with_invalid_token(self):
@@ -61,7 +61,7 @@ class Scenario2(vedro.Scenario):
         assert "invalid" in data["detail"].lower()
 
 
-class Scenario3(vedro.Scenario):
+class ScenarioMissingAuth(vedro.Scenario):
     subject = "middleware returns 401 for missing Authorization header"
 
     def given_app_with_no_auth_header(self):
@@ -79,7 +79,7 @@ class Scenario3(vedro.Scenario):
         assert "authorization" in data["detail"].lower() or "missing" in data["detail"].lower()
 
 
-class Scenario4(vedro.Scenario):
+class ScenarioMalformedAuth(vedro.Scenario):
     subject = "middleware returns 401 for malformed Authorization header"
 
     def given_app_with_malformed_auth_header(self):

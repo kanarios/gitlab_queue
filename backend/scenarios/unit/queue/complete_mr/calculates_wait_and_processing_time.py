@@ -43,4 +43,5 @@ class Scenario(vedro.Scenario):
         assert state["finished_at"] is not None, "Expected finished_at to be set"
 
     async def do_cleanup(self):
-        await self._db_context.__aexit__(None, None, None)
+        if hasattr(self, "_db_context"):
+            await self._db_context.__aexit__(None, None, None)

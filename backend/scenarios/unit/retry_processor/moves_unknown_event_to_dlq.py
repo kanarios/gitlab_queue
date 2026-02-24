@@ -31,7 +31,7 @@ class Scenario(vedro.Scenario):
 
     def and_error_message_mentions_unknown(self):
         call_args = self.processor.retry_manager.mark_retry_failed.call_args
-        error_msg = call_args[0][1]
+        error_msg = call_args.args[1]
         assert "Unknown event type" in error_msg
 
     def and_mark_retry_success_is_not_called(self):

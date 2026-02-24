@@ -22,9 +22,9 @@ class Scenario(vedro.Scenario):
 
     def given_processor_with_multiple_retry_items(self):
         self.processor = create_test_retry_processor()
-        self.item1 = create_test_retry_item(id=1, event_type="merge_request")
-        self.item2 = create_test_retry_item(id=2, event_type="pipeline")
-        self.item3 = create_test_retry_item(id=3, event_type="merge_request")
+        self.item1 = create_test_retry_item(item_id=1, event_type="merge_request")
+        self.item2 = create_test_retry_item(item_id=2, event_type="pipeline")
+        self.item3 = create_test_retry_item(item_id=3, event_type="merge_request")
         self.processor.retry_manager.get_events_ready_for_retry = AsyncMock(
             return_value=[self.item1, self.item2, self.item3]
         )

@@ -37,4 +37,4 @@ class Scenario(vedro.Scenario):
         assert self.raised is None, f"Expected no error, got {self.raised}"
 
     def and_mr_state_is_not_updated(self):
-        self.processor.queue_manager.update_mr_state.assert_not_called()
+        self.processor.queue_manager.update_mr_state.assert_not_awaited()

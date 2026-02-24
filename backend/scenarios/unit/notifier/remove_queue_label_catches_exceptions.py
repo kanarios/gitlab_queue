@@ -36,7 +36,7 @@ class Scenario(vedro.Scenario):
         assert self.raised is False
 
     def and_gitlab_client_was_called_with_correct_args(self):
-        self.notifier.gitlab_client.remove_mr_label.assert_called_once_with(
+        self.notifier.gitlab_client.remove_mr_label.assert_awaited_once_with(
             self.mr_iid,
             self.notifier.settings.queue_label,
         )

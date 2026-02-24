@@ -34,4 +34,5 @@ class Scenario(vedro.Scenario):
         assert self.has_conflicts is True
 
     async def do_cleanup(self):
-        await self.client.close()
+        if hasattr(self, "client"):
+            await self.client.close()

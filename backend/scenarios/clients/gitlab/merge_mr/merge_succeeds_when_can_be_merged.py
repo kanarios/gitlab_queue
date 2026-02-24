@@ -36,6 +36,6 @@ class Scenario(vedro.Scenario):
         assert self.mock_get_mr.call_count == 1
 
     def and_put_called_with_merge_endpoint(self):
-        self.mock_put.assert_called_once()
+        self.mock_put.assert_awaited_once()
         call_args = self.mock_put.call_args
         assert "/merge_requests/42/merge" in call_args.args[0]

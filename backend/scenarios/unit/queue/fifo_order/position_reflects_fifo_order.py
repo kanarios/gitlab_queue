@@ -42,4 +42,5 @@ class Scenario(vedro.Scenario):
         assert pos_25 == 2, f"After removal, MR 25 expected at 2, got {pos_25}"
 
     async def do_cleanup(self):
-        await self._db_context.__aexit__(None, None, None)
+        if hasattr(self, "_db_context"):
+            await self._db_context.__aexit__(None, None, None)

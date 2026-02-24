@@ -33,4 +33,5 @@ class Scenario(vedro.Scenario):
         assert delay > 0
 
     async def do_cleanup(self):
-        await self.client.close()
+        if hasattr(self, "client"):
+            await self.client.close()

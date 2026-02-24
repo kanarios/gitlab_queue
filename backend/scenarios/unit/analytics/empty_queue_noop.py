@@ -54,7 +54,7 @@ class Scenario(vedro.Scenario):
             await self.processor._save_hourly_snapshot()
 
     def then_snapshot_was_saved_with_zero_values(self):
-        self.mock_uow.analytics.save_hourly_snapshot.assert_called_once_with(
+        self.mock_uow.analytics.save_hourly_snapshot.assert_awaited_once_with(
             queue_depth=0,
             processed_count=0,
             success_count=0,

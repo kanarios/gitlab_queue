@@ -58,4 +58,4 @@ class Scenario(vedro.Scenario):
         assert self.result == ProcessingResult.SUCCESS
 
     def and_wait_for_rebase_was_called(self):
-        self.mock_wait_for_rebase.assert_called_once_with(self.ctx)
+        self.mock_wait_for_rebase.assert_awaited_once_with(self.ctx)

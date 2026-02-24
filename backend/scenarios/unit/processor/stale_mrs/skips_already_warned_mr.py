@@ -32,7 +32,7 @@ class Scenario(vedro.Scenario):
             await self.processor._check_stale_mrs()
 
     def then_state_machine_is_not_created(self):
-        self.mock_create_sm.assert_not_called()
+        self.mock_create_sm.assert_not_awaited()
 
     def and_warning_flag_is_not_marked(self):
-        self.processor.queue_manager.mark_stale_warning_sent.assert_not_called()
+        self.processor.queue_manager.mark_stale_warning_sent.assert_not_awaited()

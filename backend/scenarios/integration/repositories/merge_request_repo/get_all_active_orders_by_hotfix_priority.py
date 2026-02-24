@@ -59,5 +59,7 @@ class Scenario(vedro.Scenario):
         assert self.result[2].iid == 3, "Newer regular MR should be third"
 
     async def do_cleanup(self):
-        await self._session_ctx.__aexit__(None, None, None)
-        await self._db_ctx.__aexit__(None, None, None)
+        if hasattr(self, "_session_ctx"):
+            await self._session_ctx.__aexit__(None, None, None)
+        if hasattr(self, "_db_ctx"):
+            await self._db_ctx.__aexit__(None, None, None)

@@ -33,7 +33,7 @@ class Scenario(vedro.Scenario):
         )
 
     def then_broadcast_should_contain_failure_reason(self):
-        self.mock_ws.send_json.assert_called_once()
+        self.mock_ws.send_json.assert_awaited_once()
         call_args = self.mock_ws.send_json.call_args[0][0]
         assert call_args["type"] == "mr:completed"
         assert call_args["data"]["iid"] == 42

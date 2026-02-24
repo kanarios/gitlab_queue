@@ -45,4 +45,5 @@ class Scenario(vedro.Scenario):
         assert "cannot_be_merged" in str(self.error)
 
     async def do_cleanup(self):
-        await self.client.close()
+        if hasattr(self, "client"):
+            await self.client.close()

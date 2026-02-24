@@ -43,4 +43,4 @@ class Scenario(vedro.Scenario):
         assert self.mock_get_mr.call_count == 3
 
     def and_put_called_once(self):
-        self.mock_put.assert_called_once()
+        self.mock_put.assert_awaited_once()

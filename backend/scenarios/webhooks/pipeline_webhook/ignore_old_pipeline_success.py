@@ -60,13 +60,13 @@ class Scenario(vedro.Scenario):
             self.mock_state_machine = mock_state_machine
 
     def then_queue_item_should_be_checked(self):
-        self.queue_manager.get_queue_item.assert_called_once_with(MR_IID)
+        self.queue_manager.get_queue_item.assert_awaited_once_with(MR_IID)
 
     def and_state_machine_should_not_be_created(self):
-        self.mock_create_sm.assert_not_called()
+        self.mock_create_sm.assert_not_awaited()
 
     def and_pipeline_success_should_not_be_triggered(self):
-        self.mock_state_machine.trigger_pipeline_success.assert_not_called()
+        self.mock_state_machine.trigger_pipeline_success.assert_not_awaited()
 
     async def cleanup(self):
         await self.gitlab_client.close()

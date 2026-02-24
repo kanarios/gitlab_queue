@@ -179,7 +179,7 @@ async def sync_removes_orphaned_mrs_from_queue():
         assert stats.unchanged == 1
 
         # Verify remove_from_queue was called for MR 2
-        queue_manager.remove_from_queue.assert_called_once_with(2)
+        queue_manager.remove_from_queue.assert_awaited_once_with(2)
 
 
 @scenario()
@@ -375,7 +375,7 @@ async def sync_removes_mr_with_removed_queue_label():
         assert stats.unchanged == 0
 
         # Verify remove_from_queue was called
-        queue_manager.remove_from_queue.assert_called_once_with(1)
+        queue_manager.remove_from_queue.assert_awaited_once_with(1)
 
 
 @scenario()
@@ -430,4 +430,4 @@ async def sync_handles_404_mr_not_found():
         assert stats.unchanged == 0
 
         # Verify remove_from_queue was called
-        queue_manager.remove_from_queue.assert_called_once_with(999)
+        queue_manager.remove_from_queue.assert_awaited_once_with(999)

@@ -32,5 +32,7 @@ class Scenario(vedro.Scenario):
         assert self.status.connected, "Database should be connected after initialization"
 
     async def do_cleanup(self):
-        await self.db.close()
-        self._tmp_dir.cleanup()
+        if hasattr(self, "db"):
+            await self.db.close()
+        if hasattr(self, "_tmp_dir"):
+            self._tmp_dir.cleanup()

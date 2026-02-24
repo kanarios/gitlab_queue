@@ -41,6 +41,6 @@ class Scenario(vedro.Scenario):
         assert self.result == ProcessingResult.MERGE_FAILED
 
     def and_merge_failed_is_triggered_on_state_machine(self):
-        self.mock_sm.trigger_merge_failed.assert_called_once()
+        self.mock_sm.trigger_merge_failed.assert_awaited_once()
         call_kwargs = self.mock_sm.trigger_merge_failed.call_args.kwargs
         assert "error_message" in call_kwargs

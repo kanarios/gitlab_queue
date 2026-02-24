@@ -46,4 +46,5 @@ class Scenario(vedro.Scenario):
         assert item.created_at is not None
 
     async def do_cleanup(self):
-        await self._db_ctx.__aexit__(None, None, None)
+        if hasattr(self, "_db_ctx"):
+            await self._db_ctx.__aexit__(None, None, None)

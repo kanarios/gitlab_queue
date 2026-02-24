@@ -1,9 +1,9 @@
-"""Test that retry max wait is capped properly.
+"""Test retry parameter validation and edge cases.
 
-Covers retry.py lines 166, 229-230, 256:
+Covers retry.py:
 - is_retryable_sqlite_error returns False for non-matching OperationalError
-- _create_async_retry_decorator validates negative wait parameters
-- _create_async_retry_decorator correctly caps wait time via wait_exponential_jitter
+- _create_async_retry_decorator rejects negative wait parameters (initial_wait, max_wait, jitter)
+- _create_async_retry_decorator accepts zero wait parameters
 """
 
 from __future__ import annotations

@@ -37,4 +37,5 @@ class Scenario(vedro.Scenario):
         assert length == 2, f"Expected length 2, got {length}"
 
     async def do_cleanup(self):
-        await self._db_context.__aexit__(None, None, None)
+        if hasattr(self, "_db_context"):
+            await self._db_context.__aexit__(None, None, None)

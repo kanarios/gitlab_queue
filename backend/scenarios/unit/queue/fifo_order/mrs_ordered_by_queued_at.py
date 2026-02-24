@@ -33,4 +33,5 @@ class Scenario(vedro.Scenario):
         assert actual_order == self.iid_order, f"Expected {self.iid_order}, got {actual_order}"
 
     async def do_cleanup(self):
-        await self._db_context.__aexit__(None, None, None)
+        if hasattr(self, "_db_context"):
+            await self._db_context.__aexit__(None, None, None)

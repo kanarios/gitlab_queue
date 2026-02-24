@@ -24,4 +24,5 @@ class Scenario(vedro.Scenario):
         assert self.state is None, f"Expected None, got {self.state}"
 
     async def do_cleanup(self):
-        await self._db_context.__aexit__(None, None, None)
+        if hasattr(self, "_db_context"):
+            await self._db_context.__aexit__(None, None, None)

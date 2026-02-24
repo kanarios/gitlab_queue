@@ -38,4 +38,5 @@ class Scenario(vedro.Scenario):
         assert second_next.mr_iid == 100
 
     async def do_cleanup(self):
-        await self._db_context.__aexit__(None, None, None)
+        if hasattr(self, "_db_context"):
+            await self._db_context.__aexit__(None, None, None)

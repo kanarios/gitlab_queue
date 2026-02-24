@@ -41,4 +41,5 @@ class Scenario(vedro.Scenario):
         assert "unchecked" in str(self.error)
 
     async def do_cleanup(self):
-        await self.client.close()
+        if hasattr(self, "client"):
+            await self.client.close()

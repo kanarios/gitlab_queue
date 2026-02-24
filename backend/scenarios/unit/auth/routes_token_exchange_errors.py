@@ -42,7 +42,7 @@ class Scenario(vedro.Scenario):
         assert "oauth" in data["detail"].lower() or "not configured" in data["detail"].lower()
 
 
-class Scenario2(vedro.Scenario):
+class ScenarioMissingAccessToken(vedro.Scenario):
     subject = "exchange_token returns 502 when access_token is missing from response"
 
     def given_app_with_gitlab_returning_no_access_token(self):
@@ -81,7 +81,7 @@ class Scenario2(vedro.Scenario):
         assert "access token" in data["detail"].lower() or "token" in data["detail"].lower()
 
 
-class Scenario3(vedro.Scenario):
+class ScenarioUserInfoFetchFails(vedro.Scenario):
     subject = "exchange_token returns 502 when userinfo fetch fails"
 
     def given_app_with_gitlab_userinfo_failing(self):
@@ -125,7 +125,7 @@ class Scenario3(vedro.Scenario):
         assert "user" in data["detail"].lower() or "failed" in data["detail"].lower()
 
 
-class Scenario4(vedro.Scenario):
+class ScenarioNetworkError(vedro.Scenario):
     subject = "exchange_token returns 502 when network error during userinfo fetch"
 
     def given_app_with_network_error_on_userinfo(self):

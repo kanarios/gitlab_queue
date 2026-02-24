@@ -38,10 +38,10 @@ class Scenario(vedro.Scenario):
             await self.processor._process_iteration()
 
     def then_get_next_mr_is_called(self):
-        self.processor.queue_manager.get_next_mr.assert_called_once()
+        self.processor.queue_manager.get_next_mr.assert_awaited_once()
 
     def and_process_mr_is_called_with_the_queue_item(self):
-        self.mock_process_mr.assert_called_once_with(self.queue_item)
+        self.mock_process_mr.assert_awaited_once_with(self.queue_item)
 
     def and_current_mr_iid_is_cleared_after_processing(self):
         assert self.processor._current_mr_iid is None

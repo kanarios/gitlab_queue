@@ -30,4 +30,5 @@ class Scenario(vedro.Scenario):
         assert retrieved.is_hotfix is True
 
     async def do_cleanup(self):
-        await self._db_context.__aexit__(None, None, None)
+        if hasattr(self, "_db_context"):
+            await self._db_context.__aexit__(None, None, None)

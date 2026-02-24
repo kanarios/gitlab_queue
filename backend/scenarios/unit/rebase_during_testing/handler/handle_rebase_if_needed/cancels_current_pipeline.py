@@ -32,4 +32,4 @@ class Scenario(vedro.Scenario):
         await self.handler.handle_rebase_if_needed(42, self.ctx)
 
     def then_cancel_pipeline_was_called_with_current_id(self):
-        self.client.cancel_pipeline.assert_called_once_with(123)
+        self.client.cancel_pipeline.assert_awaited_once_with(123)

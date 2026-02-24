@@ -60,4 +60,4 @@ class Scenario(vedro.Scenario):
         assert self.result == ProcessingResult.CONFLICT
 
     def and_trigger_rebase_failed_was_called(self):
-        self.mock_sm.trigger_rebase_failed.assert_called_once()
+        self.mock_sm.trigger_rebase_failed.assert_awaited_once()

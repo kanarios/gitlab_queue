@@ -32,7 +32,7 @@ class Scenario(vedro.Scenario):
         assert self.result is True
 
     def and_it_should_call_correct_url(self):
-        self.mock_client.get.assert_called_once()
+        self.mock_client.get.assert_awaited_once()
         call_args = self.mock_client.get.call_args
         assert call_args[0][0] == "https://gitlab.example.com/api/v4/projects/123"
         assert call_args[1]["headers"]["Authorization"] == "Bearer test-token"

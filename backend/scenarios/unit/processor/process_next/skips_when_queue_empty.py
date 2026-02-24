@@ -30,7 +30,7 @@ class Scenario(vedro.Scenario):
             await self.processor._process_iteration()
 
     def then_get_next_mr_is_called(self):
-        self.processor.queue_manager.get_next_mr.assert_called_once()
+        self.processor.queue_manager.get_next_mr.assert_awaited_once()
 
     def and_process_mr_is_not_called(self):
-        self.mock_process_mr.assert_not_called()
+        self.mock_process_mr.assert_not_awaited()

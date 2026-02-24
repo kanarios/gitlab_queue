@@ -25,7 +25,7 @@ class Scenario(vedro.Scenario):
         assert self.sm.current_state.id == "rebasing", f"Expected 'rebasing', got '{self.sm.current_state.id}'"
 
     def and_queue_manager_should_update_state(self):
-        self.queue_manager.update_mr_state.assert_called_once_with(42, "rebasing")
+        self.queue_manager.update_mr_state.assert_awaited_once_with(42, "rebasing")
 
     def and_notifier_should_be_called_with_rebasing(self):
         calls = self.notifier.notify.call_args_list

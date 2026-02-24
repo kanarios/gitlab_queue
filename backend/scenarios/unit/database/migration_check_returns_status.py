@@ -38,10 +38,11 @@ class Scenario(vedro.Scenario):
             assert isinstance(rev, str), f"Expected string revision, got {type(rev)}"
 
     def do_cleanup(self):
-        self._tmp_dir.cleanup()
+        if hasattr(self, "_tmp_dir"):
+            self._tmp_dir.cleanup()
 
 
-class Scenario2(vedro.Scenario):
+class ScenarioFullyMigrated(vedro.Scenario):
     subject = "migration check returns empty list after all migrations applied"
 
     def given_fully_migrated_database(self):
@@ -57,4 +58,5 @@ class Scenario2(vedro.Scenario):
         assert len(self.pending) == 0, f"Expected no pending migrations after full run, got {self.pending}"
 
     def do_cleanup(self):
-        self._tmp_dir.cleanup()
+        if hasattr(self, "_tmp_dir"):
+            self._tmp_dir.cleanup()

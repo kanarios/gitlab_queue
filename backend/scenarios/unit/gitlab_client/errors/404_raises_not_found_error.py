@@ -44,5 +44,7 @@ class Scenario(vedro.Scenario):
         assert isinstance(self.error, GitLabAPIError)
 
     async def do_cleanup(self):
-        await self.client.close()
-        await self._mock_ctx.__aexit__(None, None, None)
+        if hasattr(self, "client"):
+            await self.client.close()
+        if hasattr(self, "_mock_ctx"):
+            await self._mock_ctx.__aexit__(None, None, None)

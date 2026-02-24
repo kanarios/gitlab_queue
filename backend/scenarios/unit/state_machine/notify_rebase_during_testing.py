@@ -45,7 +45,7 @@ class Scenario(vedro.Scenario):
         )
 
     def then_queue_manager_should_update_pipeline(self):
-        self.queue_manager.update_mr_state.assert_called_once_with(
+        self.queue_manager.update_mr_state.assert_awaited_once_with(
             42,
             "testing",
             pipeline_id=200,
@@ -53,7 +53,7 @@ class Scenario(vedro.Scenario):
         )
 
     def and_notifier_should_be_called_with_rebase_during_testing_template(self):
-        self.notifier.notify.assert_called_once()
+        self.notifier.notify.assert_awaited_once()
         call_args = self.notifier.notify.call_args
         assert call_args.args[1] == "rebase_during_testing", (
             f"Expected 'rebase_during_testing' template, got '{call_args.args[1]}'"

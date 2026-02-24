@@ -30,4 +30,4 @@ class Scenario(vedro.Scenario):
         await self.sm.notify_position_changed(old_position=2)
 
     def then_notifier_should_not_be_called(self):
-        self.notifier.notify.assert_not_called()
+        self.notifier.notify.assert_not_awaited()

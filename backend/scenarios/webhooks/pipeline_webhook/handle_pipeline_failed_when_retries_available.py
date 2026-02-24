@@ -39,7 +39,7 @@ class Scenario(vedro.Scenario):
         await self.handler.handle(self.event)
 
     def then_mr_should_be_marked_for_retry(self):
-        self.queue_manager.update_mr_state.assert_called_once_with(
+        self.queue_manager.update_mr_state.assert_awaited_once_with(
             123,
             "testing",
             pipeline_status="failed",

@@ -43,10 +43,10 @@ class Scenario(vedro.Scenario):
             self.mock_state_machine = mock_state_machine
 
     def then_state_machine_should_be_created(self):
-        self.mock_sm.assert_called_once()
+        self.mock_sm.assert_awaited_once()
 
     def and_pipeline_success_should_be_triggered(self):
-        self.mock_state_machine.trigger_pipeline_success.assert_called_once()
+        self.mock_state_machine.trigger_pipeline_success.assert_awaited_once()
 
     async def cleanup(self):
         await self.gitlab_client.close()

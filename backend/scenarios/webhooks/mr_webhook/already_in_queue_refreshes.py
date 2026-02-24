@@ -67,10 +67,10 @@ class Scenario(vedro.Scenario):
         await self.handler.handle(self.event)
 
     def then_mr_should_not_be_added_again(self):
-        self.queue_manager.add_to_queue.assert_not_called()
+        self.queue_manager.add_to_queue.assert_not_awaited()
 
     def and_hotfix_status_should_be_refreshed(self):
-        self.queue_manager.update_hotfix_status.assert_called_once()
+        self.queue_manager.update_hotfix_status.assert_awaited_once()
         call_kwargs = self.queue_manager.update_hotfix_status.call_args.kwargs
         assert call_kwargs["mr_iid"] == 123
         assert call_kwargs["is_hotfix"] is True

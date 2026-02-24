@@ -49,4 +49,5 @@ class Scenario(vedro.Scenario):
         assert self.position == 2, f"Expected position 2, got {self.position}"
 
     async def do_cleanup(self):
-        await self._db_ctx.__aexit__(None, None, None)
+        if hasattr(self, "_db_ctx"):
+            await self._db_ctx.__aexit__(None, None, None)
