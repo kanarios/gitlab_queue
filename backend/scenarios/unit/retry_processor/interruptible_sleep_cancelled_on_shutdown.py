@@ -15,7 +15,7 @@ class Scenario(vedro.Scenario):
         self.processor.request_shutdown()
 
     async def when_interruptible_sleep_is_called(self):
-        self.result = await self.processor._interruptible_sleep(10)
+        self.result = await self.processor._interruptible_sleep(1)
 
     def then_result_is_false(self):
         assert self.result is False

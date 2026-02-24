@@ -58,7 +58,7 @@ class Scenario(vedro.Scenario):
     async def when_get_metrics_is_called(self):
         async with self.db.session() as session:
             repo = AnalyticsRepository(session)
-            self.metrics = await repo.get_metrics(7)
+            self.metrics = await repo.get_metrics(period_days=7)
 
     def then_metrics_should_contain_queue_count(self):
         assert self.metrics.total_in_queue == 2

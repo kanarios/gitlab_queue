@@ -36,7 +36,7 @@ def create_mock_gitlab_mr(iid: int, labels: list[str] | None = None) -> MagicMoc
         labels=labels or ["merge_queue"],
         sha=f"sha{iid}",
         source_branch=f"feature-{iid}",
-        target_branch="master",
+        target_branch="main",
         merge_status="can_be_merged",
         author=Author(id=iid, name=f"User {iid}", username=f"user{iid}"),
     )

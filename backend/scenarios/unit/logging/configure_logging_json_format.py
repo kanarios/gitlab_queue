@@ -41,7 +41,7 @@ class Scenario(vedro.Scenario):
 
     def and_httpx_logger_should_be_suppressed(self):
         httpx_logger = logging.getLogger("httpx")
-        assert httpx_logger.level >= logging.WARNING
+        assert httpx_logger.getEffectiveLevel() >= logging.WARNING
 
     def do_cleanup(self):
         reset_logging()

@@ -38,4 +38,4 @@ class Scenario(vedro.Scenario):
         assert self.webhook_value not in self.result, "Expected webhook_secret to be hidden in repr"
 
     def and_webhook_secret_is_masked(self):
-        assert "webhook_secret='***'" in self.result or "webhook_secret=***" in self.result
+        assert "webhook_secret=Secret('***')" in self.result

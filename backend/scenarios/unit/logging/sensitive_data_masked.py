@@ -25,14 +25,14 @@ class Scenario2(vedro.Scenario):
     subject = "database URL credentials are masked"
 
     def given_string_with_db_credentials(self):
-        self.input_value = "postgresql://admin:supersecret@localhost/mydb"
+        self.input_value = "postgresql://admin:supersecret@localhost/mydb"  # gitleaks:allow
 
     def when_mask_is_applied(self):
         self.result = _mask_sensitive_value(self.input_value)
 
     def then_password_should_be_masked(self):
         assert "supersecret" not in self.result
-        assert "***" in self.result
+        assert "admin:***@" in self.result
 
     def and_username_should_be_preserved(self):
         assert "admin" in self.result
@@ -42,21 +42,21 @@ class Scenario3(vedro.Scenario):
     subject = "Bearer token is masked"
 
     def given_string_with_bearer_token(self):
-        self.input_value = "Bearer eyJhbGciOiJIUzI1NiJ9.payload.signature"
+        self.input_value = "Bearer eyJhbGciOiJIUzI1NiJ9.payload.signature"  # gitleaks:allow
 
     def when_mask_is_applied(self):
         self.result = _mask_sensitive_value(self.input_value)
 
     def then_bearer_token_should_be_masked(self):
         assert "eyJhbGciOiJIUzI1NiJ9" not in self.result
-        assert "Bearer ***" in self.result or "***JWT***" in self.result
+        assert "Bearer ***" in self.result
 
 
 class Scenario4(vedro.Scenario):
     subject = "password in key=value format is masked"
 
     def given_string_with_password_key_value(self):
-        self.input_value = "password=my_secret_password123"
+        self.input_value = "password=my_secret_password123"  # gitleaks:allow
 
     def when_mask_is_applied(self):
         self.result = _mask_sensitive_value(self.input_value)

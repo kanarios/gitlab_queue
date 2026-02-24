@@ -33,7 +33,7 @@ class Scenario(vedro.Scenario):
                 session,
                 iid=1,
                 status="merged",
-                is_hotfix=1,
+                is_hotfix=True,
                 wait_time_seconds=60,
                 processing_time_seconds=120,
                 finished_at=now.isoformat(),

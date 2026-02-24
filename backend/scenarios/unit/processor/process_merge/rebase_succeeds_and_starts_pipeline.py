@@ -11,7 +11,7 @@ rebase succeeds and a new pipeline is found.
 from __future__ import annotations
 
 from datetime import datetime
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import vedro
 
@@ -43,13 +43,21 @@ class Scenario(vedro.Scenario):
         # Rebase completes immediately (not in progress, no conflicts)
         self.processor.gitlab_client.check_rebase_status = AsyncMock(return_value=(False, False))
 
-        # After the retry rebase, the processor fetches the MR then the pipeline.
-        # _capture_pre_rebase_sha calls get_mr, then _wait_for_post_rebase_pipeline
-        # also calls get_mr and get_latest_mr_pipeline repeatedly.
-        mock_mr = self.processor.gitlab_client.get_mr.return_value
-        mock_mr.sha = "sha_new"
-        mock_mr.rebase_in_progress = False
-        mock_mr.source_branch = "feature/mr-42"
+        # _capture_pre_rebase_sha calls get_mr (returns pre-rebase SHA),
+        # then _wait_for_post_rebase_pipeline calls get_mr again (returns post-rebase SHA).
+        mock_mr_before = MagicMock()
+        mock_mr_before.sha = "sha_old"
+        mock_mr_before.rebase_in_progress = False
+        mock_mr_before.source_branch = "feature/mr-42"
+
+        mock_mr_after = MagicMock()
+        mock_mr_after.sha = "sha_new"
+        mock_mr_after.rebase_in_progress = False
+        mock_mr_after.source_branch = "feature/mr-42"
+
+        self.processor.gitlab_client.get_mr = AsyncMock(
+            side_effect=[mock_mr_before, mock_mr_after, mock_mr_after]
+        )
 
         self.processor.gitlab_client.get_latest_mr_pipeline = AsyncMock(return_value=self.new_pipeline)
         self.processor.notifier.build_pipeline_url.side_effect = lambda pid: f"https://gitlab.com/pipeline/{pid}"
