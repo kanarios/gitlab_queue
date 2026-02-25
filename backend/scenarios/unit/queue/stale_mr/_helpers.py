@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from sqlalchemy import text
 
-from gitlab_queue.core.database import DatabaseManager
 from gitlab_queue.models.mr import Author, MergeRequest
 
+if TYPE_CHECKING:
+    from gitlab_queue.db.database import Database
 
-async def backfill_queued_at_hours_ago(db: DatabaseManager, *, iid: int, hours: int) -> None:
+
+async def backfill_queued_at_hours_ago(db: Database, *, iid: int, hours: int) -> None:
     """Set queued_at to N hours ago for a given MR (raw SQL backfill for tests)."""
     async with db.transaction() as session:
         await session.execute(
