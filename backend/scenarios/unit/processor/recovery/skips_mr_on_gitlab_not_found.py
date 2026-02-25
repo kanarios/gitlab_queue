@@ -27,6 +27,9 @@ class Scenario(vedro.Scenario):
         self.processor.gitlab_client.get_mr.side_effect = GitLabNotFoundError("MR not found", status_code=404)
 
     async def when_recover_interrupted_state_is_called(self):
+        """
+        Invoke the processor's interrupted-state recovery routine to exercise recovery behavior with the configured test fixtures.
+        """
         await self.processor._recover_interrupted_state()
 
     def then_mr_is_marked_as_removed(self):

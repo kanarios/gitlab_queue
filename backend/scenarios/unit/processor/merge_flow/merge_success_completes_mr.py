@@ -28,6 +28,11 @@ class Scenario(vedro.Scenario):
     subject = "process merge triggers merge success and returns SUCCESS on successful merge"
 
     def given_processor_with_successful_merge(self):
+        """
+        Set up test fixtures for a successful merge scenario.
+        
+        Creates a mock processor, a queue item with an expected SHA, configures the processor's queue manager to return that item, stubs the GitLab client's merge_mr to return a merged MR, and prepares a mock state machine and processing context for mr_iid 42.
+        """
         self.processor = create_mock_processor()
 
         # Queue item with an expected SHA to test the race-condition guard
@@ -43,17 +48,42 @@ class Scenario(vedro.Scenario):
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
 
     async def when_process_merge_is_called(self):
+        """
+        Call the processor's _process_merge with the prepared context and store its result on self.result.
+        
+        The awaited ProcessingResult returned by _process_merge is saved to the instance attribute `self.result` for later assertions.
+        """
         self.result = await self.processor._process_merge(self.ctx)
 
     def then_result_is_success(self):
+        """
+        Assert that the processing result equals ProcessingResult.SUCCESS.
+        
+        Verifies the processor reported a successful merge by checking the stored result.
+        """
         assert self.result == ProcessingResult.SUCCESS
 
     def and_merge_success_is_triggered_on_state_machine(self):
+        """
+        Assert that the state machine's merge-success transition was awaited exactly once.
+        
+        Verifies the processor triggered the merge success transition on the mocked state machine.
+        """
         self.mock_sm.trigger_merge_success.assert_awaited_once()
 
     def and_merge_mr_is_called_with_correct_sha(self):
+        """
+        Asserts the GitLab client's merge_mr was awaited exactly once with the expected MR IID and expected SHA.
+        
+        Checks that merge_mr was called with MR IID 42 and keyword argument expected_sha set to "sha_merge_ok".
+        """
         self.processor.gitlab_client.merge_mr.assert_awaited_once_with(42, expected_sha="sha_merge_ok")
 
     def and_no_failure_transitions_are_triggered(self):
+        """
+        Asserts that no failure or timeout transitions were triggered on the mock state machine.
+        
+        Verifies that neither `trigger_merge_failed` nor `trigger_timeout` was awaited.
+        """
         self.mock_sm.trigger_merge_failed.assert_not_awaited()
         self.mock_sm.trigger_timeout.assert_not_awaited()

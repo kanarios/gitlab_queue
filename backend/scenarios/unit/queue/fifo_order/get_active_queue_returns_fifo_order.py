@@ -12,6 +12,11 @@ class Scenario(vedro.Scenario):
     subject = "get_active_queue returns MRs in FIFO order"
 
     async def given_queue_with_mrs_in_various_states(self):
+        """
+        Prepare a test database and queue populated with five merge requests, with two MR states changed.
+        
+        Sets up an initialized test database and a QueueManager, ensures the schema, adds merge requests with iids 1–5 to the queue, and updates the state of MR 2 to "rebasing" and MR 4 to "testing". The updated MRs remain part of the active queue.
+        """
         self._db_context = initialized_test_database()
         self.db = await self._db_context.__aenter__()
         self.queue = QueueManager(db=self.db)
@@ -28,11 +33,20 @@ class Scenario(vedro.Scenario):
         self.active_queue = await self.queue.get_active_queue()
 
     def then_all_active_mrs_should_be_in_fifo_order(self):
+        """
+        Asserts that the active queue's merge requests are in FIFO order with iids 1 through 5.
+        
+        Raises:
+            AssertionError: If the extracted MR iids from self.active_queue do not equal [1, 2, 3, 4, 5].
+        """
         actual_order = [item.mr_iid for item in self.active_queue]
         expected_order = [1, 2, 3, 4, 5]
         assert actual_order == expected_order
 
     def and_queue_should_have_5_items(self):
+        """
+        Assert the active queue contains exactly five merge requests.
+        """
         assert len(self.active_queue) == 5
 
     async def do_cleanup(self):

@@ -29,6 +29,16 @@ class Scenario(vedro.Scenario):
     subject = "rebase during testing returns pipeline failed on retry limit exceeded"
 
     def given_processor_with_rebase_retry_limit_exceeded(self):
+        """
+        Prepare a processor and related mocks configured to simulate hitting the rebase retry limit during testing.
+        
+        Sets up:
+        - a mock processor,
+        - a mock state machine and processing context with mr_iid=42,
+        - a RebaseDuringTestingContext with rebase_count and max_attempts both set to 3,
+        - a running mock pipeline (id 100, sha "abc123"),
+        - a rebase_handler whose handle_rebase_if_needed coroutine raises RebaseRetryLimitExceeded("MR !42: 3/3 rebase attempts exhausted").
+        """
         self.processor = create_mock_processor()
 
         self.mock_sm = create_mock_state_machine()
@@ -54,6 +64,9 @@ class Scenario(vedro.Scenario):
         )
 
     def then_result_is_pipeline_failed(self):
+        """
+        Assert that the scenario result is ProcessingResult.PIPELINE_FAILED.
+        """
         assert self.result == ProcessingResult.PIPELINE_FAILED
 
     def and_trigger_pipeline_failed_was_called(self):

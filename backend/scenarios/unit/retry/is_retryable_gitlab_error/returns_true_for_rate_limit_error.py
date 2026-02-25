@@ -13,9 +13,17 @@ class Scenario(vedro.Scenario):
     subject = "is_retryable_gitlab_error returns True for rate limit error"
 
     def given_rate_limit_error(self):
+        """
+        Create and store a GitLab rate limit error on the scenario.
+        
+        Sets self.error to an error object representing a GitLab rate limit condition (created via create_rate_limit_error()).
+        """
         self.error = create_rate_limit_error()
 
     def when_checked_for_retryability(self):
+        """
+        Checks whether the stored GitLab error should be retried and stores the boolean result on `self.result`.
+        """
         self.result = is_retryable_gitlab_error(self.error)
 
     def then_result_is_true(self):

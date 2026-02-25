@@ -41,16 +41,31 @@ class Scenario(vedro.Scenario):
 
     def then_positions_should_reflect_hotfix_priority(self):
         # Expected order: hotfix1(2), hotfix2(4), regular1(1), regular2(3)
+        """
+        Assert that queue positions reflect hotfix-priority ordering.
+        
+        Verifies the expected positions: hotfix1 (iid 2) at 1, hotfix2 (iid 4) at 2, regular1 (iid 1) at 3, and regular2 (iid 3) at 4.
+        """
         assert self.positions[2] == 1
         assert self.positions[4] == 2
         assert self.positions[1] == 3
         assert self.positions[3] == 4
 
     async def and_active_queue_should_be_in_correct_order(self):
+        """
+        Asserts the active queue orders merge requests with hotfixes first and regulars after, preserving FIFO order within each group.
+        
+        The expected order of merge request IIDs is [2, 4, 1, 3].
+        """
         active = await self.queue.get_active_queue()
         expected_order = [2, 4, 1, 3]  # hotfixes first, then regulars, each group FIFO
         actual_order = [item.mr_iid for item in active]
         assert actual_order == expected_order
 
     async def do_cleanup(self):
+        """
+        Close the test database context and release its associated resources.
+        
+        This finalizes and exits the database context established for the scenario, ensuring any held connections or temporary state are cleaned up.
+        """
         await self._db_context.__aexit__(None, None, None)

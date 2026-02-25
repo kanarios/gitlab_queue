@@ -25,6 +25,18 @@ class Scenario(vedro.Scenario):
     subject = "rebase during testing returns updated context with new pipeline"
 
     def given_processor_with_successful_rebase_during_testing(self):
+        """
+        Prepare test fixtures simulating a successful rebase during testing.
+        
+        Creates and attaches to self:
+        - processor: mock processor instance.
+        - mock_sm: mock state machine and ctx: processing context with mr_iid=42.
+        - rebase_ctx: initial RebaseDuringTestingContext (rebase_count=0, max_attempts=3, current_pipeline_id=100).
+        - pipeline: mock pipeline with pipeline_id=100.
+        - new_pipeline: mock pipeline with pipeline_id=200.
+        - new_ctx: RebaseDuringTestingContext after rebase (rebase_count=1, current_pipeline_id=200).
+        - rebase_handler: MagicMock whose handle_rebase_if_needed coroutine returns (new_ctx, new_pipeline).
+        """
         self.processor = create_mock_processor()
 
         self.mock_sm = create_mock_state_machine()
@@ -55,6 +67,9 @@ class Scenario(vedro.Scenario):
         assert isinstance(self.result, RebaseDuringTestingContext)
 
     def and_context_has_updated_pipeline_id(self):
+        """
+        Verifies that the scenario result's RebaseDuringTestingContext has current_pipeline_id equal to 200.
+        """
         assert self.result.current_pipeline_id == 200
 
     def and_context_has_incremented_rebase_count(self):

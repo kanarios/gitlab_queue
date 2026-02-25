@@ -29,8 +29,18 @@ class Scenario(vedro.Scenario):
         self.active_queue = await self.queue.get_active_queue()
 
     def then_order_should_match_insertion_order(self):
+        """
+        Asserts that the active queue's MR iids match the original insertion order.
+        
+        Builds a list of mr_iid values from the current active queue and raises an AssertionError if that list differs from the recorded insertion order (self.iid_order).
+        """
         actual_order = [item.mr_iid for item in self.active_queue]
         assert actual_order == self.iid_order
 
     async def do_cleanup(self):
+        """
+        Exit the scenario's test database context and release associated resources.
+        
+        Calls the asynchronous context-exit on the stored _db_context to close the connection and perform cleanup.
+        """
         await self._db_context.__aexit__(None, None, None)

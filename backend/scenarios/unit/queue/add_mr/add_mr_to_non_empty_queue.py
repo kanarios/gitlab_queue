@@ -25,16 +25,39 @@ class Scenario(vedro.Scenario):
         self.item = await self.queue.add_to_queue(second_mr)
 
     async def then_item_should_be_at_position_2(self):
+        """
+        Verify that the merge request with iid 2 is at queue position 2.
+        
+        Raises:
+        	AssertionError: If the queue position for iid 2 is not equal to 2.
+        """
         position = await self.queue.get_queue_position(2)
         assert position == 2
 
     async def and_first_mr_should_still_be_at_position_1(self):
+        """
+        Asserts that the merge request with IID 1 remains at queue position 1.
+        
+        Raises:
+            AssertionError: If the MR's queue position is not 1.
+        """
         position = await self.queue.get_queue_position(1)
         assert position == 1
 
     async def and_queue_length_should_be_2(self):
+        """
+        Assert that the queue contains exactly two items.
+        
+        Raises:
+            AssertionError: if the queue length is not 2.
+        """
         length = await self.queue.get_queue_length()
         assert length == 2
 
     async def do_cleanup(self):
+        """
+        Release the test database context and clean up associated resources.
+        
+        Exits the asynchronous database context manager obtained during scenario setup to close connections and perform teardown.
+        """
         await self._db_context.__aexit__(None, None, None)

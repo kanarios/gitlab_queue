@@ -126,6 +126,14 @@ class Scenario(vedro.Scenario):
         )
 
     async def when_processor_runs_one_processing_cycle(self):
+        """
+        Runs a single MergeProcessor cycle under HTTP mock context and records outcomes.
+        
+        Executes one processing iteration using the configured JJ HTTP mocks, creating
+        GitLabClient, MRNotifier, and MergeProcessor, then processing the next MR from
+        the queue. Records the processing result and captures HTTP call histories into
+        self.result, self.merge_history, and self.comment_history for later assertions.
+        """
         async with (
             mocked(self.get_mr_matcher, self.get_mr_response),
             mocked(self.rebase_matcher, self.rebase_response),
@@ -156,18 +164,45 @@ class Scenario(vedro.Scenario):
 
     async def then_mr_should_be_successfully_merged(self):
         # Check processing result
+        """
+        Verify that the merge request processing completed successfully.
+        
+        Asserts that self.result is equal to ProcessingResult.SUCCESS.
+        """
         assert self.result == ProcessingResult.SUCCESS
 
     async def and_merge_should_be_called_once(self):
+        """
+        Verify that exactly one merge API call was recorded during the processing cycle.
+        
+        Asserts that the captured merge call history contains exactly one entry.
+        """
         assert len(self.merge_history) == 1
 
     async def and_queue_state_should_be_merged(self):
+        """
+        Assert that the merge request with IID 42 in the queue has status "merged".
+        
+        Raises:
+            AssertionError: If the MR status is not "merged" or the MR is not present in the queue.
+        """
         mr_state = await self.queue.get_mr_state(42)
         assert mr_state["status"] == "merged"
 
     async def and_at_least_one_comment_should_be_posted(self):
+        """
+        Assert that at least one comment was posted during processing.
+        
+        Raises:
+            AssertionError: If no comments were posted (comment history is empty).
+        """
         assert len(self.comment_history) >= 1
 
     async def and_queue_should_be_empty_after_processing(self):
+        """
+        Assert that the merge request queue contains no remaining items after processing.
+        
+        Verifies by attempting to retrieve the next queue entry and asserting that it does not exist.
+        """
         next_item = await self.queue.get_next_mr()
         assert next_item is None

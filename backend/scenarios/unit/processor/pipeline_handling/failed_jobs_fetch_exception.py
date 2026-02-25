@@ -18,6 +18,11 @@ class Scenario(vedro.Scenario):
     subject = "get failed jobs returns empty list on exception"
 
     def given_processor_with_failing_pipeline_jobs_fetch(self):
+        """
+        Prepare self.processor as a mock processor whose gitlab_client.get_pipeline_jobs raises Exception("Connection error") when called.
+        
+        Sets self.processor to a mock processor and replaces its gitlab_client.get_pipeline_jobs with an AsyncMock that raises Exception("Connection error") on await, simulating a failing pipeline jobs fetch.
+        """
         self.processor = create_mock_processor()
         self.processor.gitlab_client.get_pipeline_jobs = AsyncMock(side_effect=Exception("Connection error"))
 

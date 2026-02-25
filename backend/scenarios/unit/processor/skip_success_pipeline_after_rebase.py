@@ -31,6 +31,11 @@ class Scenario(vedro.Scenario):
 
     async def given_mr_in_queue_with_stale_success_then_running_pipeline(self):
         # Setup test database and queue
+        """
+        Set up an in-memory database, queue, test merge request, and HTTP mocks to simulate a post-rebase stale-success pipeline being skipped in favor of a running pipeline.
+        
+        Initializes an in-memory Database and QueueManager, enqueues a merge request with a pre-rebase SHA, constructs MR payloads for pre- and post-rebase states, defines pipeline fixtures (stale success, running, final success), prepares JJ HTTP matchers and responses for MR, rebase, pipelines, merge and notes endpoints, and builds Settings used by the processor. Populates instance attributes used by the scenario: db, queue, mock_url, mr_data_old, mr_data_new, stale_success_pipeline, running_pipeline, final_success_pipeline, merged_mr_data, get_mr_matcher, get_mr_response_new, get_mr_response_old, rebase_matcher, rebase_response, pipelines_matcher, pipelines_response_stale, pipelines_response_running, pipelines_response_final, merge_matcher, merge_response, comment_matcher, comment_response, get_notes_matcher, get_notes_response, and settings.
+        """
         self.db = Database(database_url="sqlite+aiosqlite:///:memory:")
         await self.db.initialize()
         self.queue = QueueManager(self.db)
@@ -161,6 +166,15 @@ class Scenario(vedro.Scenario):
         )
 
     async def when_processor_skips_stale_success_and_uses_running_pipeline(self):
+        """
+        Execute the merge processor against a mocked GitLab scenario where a stale successful pipeline (tied to a pre-rebase SHA) is skipped and a running pipeline for the post-rebase SHA is used to complete the merge.
+        
+        Sets up HTTP mocks for MR fetches (pre- and post-rebase), rebase, pipelines (stale success, running, final success), merge, and notes; constructs GitLabClient, MRNotifier, and MergeProcessor; processes the next queued MR; and records results and fetch histories for assertions:
+        - self.result: the ProcessingResult returned by the processor
+        - self.merge_history: fetch history of the merge call mock
+        - self.pipeline_stale_history: fetch history of the stale pipeline mock
+        - self.pipeline_running_history: fetch history of the running pipeline mock
+        """
         async with (
             # Default MR response: new SHA (registered first, used after old expires)
             mocked(self.get_mr_matcher, self.get_mr_response_new),
@@ -211,22 +225,51 @@ class Scenario(vedro.Scenario):
             self.pipeline_running_history = await self.pipelines_running_mock.fetch_history()
 
     async def then_mr_should_be_successfully_merged(self):
+        """
+        Assert that the merge request was processed and merged successfully.
+        
+        Raises:
+            AssertionError: If the processor result is not `ProcessingResult.SUCCESS`.
+        """
         assert self.result == ProcessingResult.SUCCESS
 
     async def and_merge_should_be_called_once(self):
+        """
+        Assert that the merge API was called exactly once.
+        
+        Raises:
+            AssertionError: If the recorded merge call count is not exactly 1.
+        """
         assert len(self.merge_history) == 1
 
     async def and_stale_success_pipeline_was_fetched_first(self):
         # Verify stale success pipeline mock was called (the skip happened)
+        """
+        Assert that the stale success pipeline was fetched exactly once.
+        
+        Raises:
+            AssertionError: If the stale pipeline fetch count is not 1.
+        """
         assert len(self.pipeline_stale_history) == 1, (
             f"Stale success pipeline mock should be called exactly once (got {len(self.pipeline_stale_history)})"
         )
 
     async def and_running_pipeline_was_used_after_skip(self):
         # Verify running pipeline mock was called after stale was skipped
+        """
+        Asserts that the running pipeline mock was invoked exactly once after the stale pipeline was skipped.
+        
+        Raises:
+            AssertionError: If the running pipeline mock was not called exactly once.
+        """
         assert len(self.pipeline_running_history) == 1, (
             f"Running pipeline mock should be called exactly once (got {len(self.pipeline_running_history)})"
         )
 
     async def do_cleanup(self):
+        """
+        Close the scenario's database connection.
+        
+        Await the asynchronous close operation on self.db to release resources used by the in-memory test database.
+        """
         await self.db.close()

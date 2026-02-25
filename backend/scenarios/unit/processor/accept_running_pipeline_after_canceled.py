@@ -154,6 +154,11 @@ class Scenario(vedro.Scenario):
         # 1. canceled (expires after 1 request) - will be skipped
         # 2. running (expires after 1 request) - will be accepted by _wait_for_post_rebase_pipeline
         # 3. success (used for polling during testing phase) - will complete the merge
+        """
+        Exercise the merge processor to verify it skips a canceled pipeline and accepts a subsequent running pipeline, resulting in a successful merge.
+        
+        Sets up mocked GitLab endpoints with an ExpireAfterRequests sequence (canceled -> running -> success), constructs GitLabClient, MRNotifier, and MergeProcessor, retrieves the next MR from the queue, processes it, and records outcomes. Side effects: stores the processing result on self.result, the merge API call history on self.merge_history, and the pipeline fetch history on self.pipeline_history.
+        """
         async with (
             mocked(self.get_mr_matcher, self.get_mr_response),
             mocked(self.rebase_matcher, self.rebase_response),
@@ -199,6 +204,12 @@ class Scenario(vedro.Scenario):
         assert self.result == ProcessingResult.SUCCESS
 
     async def and_merge_should_be_called_once(self):
+        """
+        Assert that the GitLab merge API was invoked exactly once during the scenario.
+        
+        Raises:
+            AssertionError: if the merge API was called a number of times other than one.
+        """
         assert len(self.merge_history) == 1
 
     async def and_running_pipeline_was_accepted_not_skipped(self):
@@ -206,9 +217,19 @@ class Scenario(vedro.Scenario):
         # This is verified by the fact that the MR was successfully merged.
         # If running was incorrectly skipped, the processor would have timed out.
         # The success mock should have been called during the testing phase.
+        """
+        Assert that a running pipeline was accepted rather than skipped.
+        
+        Checks that at least one pipeline fetch occurred during the test, which indicates the running pipeline was polled/handled (not ignored like a canceled/failed pipeline). Fails with a diagnostic message reporting the number of pipeline fetch calls if none were observed.
+        """
         assert len(self.pipeline_history) >= 1, (
             f"Pipeline should be fetched for testing phase (got {len(self.pipeline_history)} calls)"
         )
 
     async def do_cleanup(self):
+        """
+        Close the scenario's database connection.
+        
+        Performs asynchronous teardown of resources by closing the in-memory database used during the test.
+        """
         await self.db.close()

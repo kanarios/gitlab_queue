@@ -25,6 +25,15 @@ class Scenario(vedro.Scenario):
     subject = "process merge triggers timeout state on TimeoutError"
 
     def given_processor_with_merge_timeout(self):
+        """
+        Set up a mock processor, a queue item in "merging" state, a mock state machine, and a processing context.
+        
+        Creates:
+        - self.processor: mock processor with its queue_manager.get_queue_item returning the prepared queue item.
+        - self.queue_item: test queue item with mr_iid=42, state="merging", expected_sha="abc123".
+        - self.mock_sm: mock state machine.
+        - self.ctx: processing context for mr_iid=42 using the mock state machine.
+        """
         self.processor = create_mock_processor()
 
         self.queue_item = create_test_queue_item(mr_iid=42, state="merging", expected_sha="abc123")
@@ -42,7 +51,18 @@ class Scenario(vedro.Scenario):
             self.result = await self.processor._process_merge(self.ctx)
 
     def then_result_is_timeout(self):
+        """
+        Asserts that the processing result equals ProcessingResult.TIMEOUT.
+        
+        Raises:
+            AssertionError: If self.result is not ProcessingResult.TIMEOUT.
+        """
         assert self.result == ProcessingResult.TIMEOUT
 
     def and_timeout_is_triggered_on_state_machine(self):
+        """
+        Asserts that the mocked state machine's trigger_timeout coroutine was awaited exactly once.
+        
+        This verifies that a timeout during processing triggered the timeout transition on the state machine.
+        """
         self.mock_sm.trigger_timeout.assert_awaited_once()

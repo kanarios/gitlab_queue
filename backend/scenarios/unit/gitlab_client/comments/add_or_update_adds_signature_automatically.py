@@ -27,11 +27,24 @@ class Scenario(vedro.Scenario):
 
     async def when_add_or_update_is_called_without_signature(self):
         # Body doesn't contain signature - should be added automatically
+        """
+        Invoke add_or_update_pinned_comment with a message that lacks the bot signature and store the operation result on self.result.
+        """
         self.result = await self.client.add_or_update_pinned_comment(42, "Status without signature")
 
     def then_note_should_be_created(self):
+        """
+        Assert that the created merge request note includes the bot signature.
+        
+        Fetches the last JSON request payload from the mock transport and verifies that GitLabClient.BOT_COMMENT_SIGNATURE appears in the payload's "body" field.
+        """
         request_body = self.transport.get_request_json()
         assert GitLabClient.BOT_COMMENT_SIGNATURE in request_body["body"]
 
     async def do_cleanup(self):
+        """
+        Close the scenario's test client and release associated resources.
+        
+        Ensures the underlying client connection used by the scenario is closed.
+        """
         await self.client.close()

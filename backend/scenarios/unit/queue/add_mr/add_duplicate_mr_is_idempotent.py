@@ -31,12 +31,25 @@ class Scenario(vedro.Scenario):
         assert self.second_item.title == "Original Title"
 
     async def and_queue_should_still_have_one_item(self):
+        """
+        Assert that the queue contains exactly one item.
+        """
         length = await self.queue.get_queue_length()
         assert length == 1
 
     async def and_position_should_still_be_1(self):
+        """
+        Verifies that the queue position for merge request IID 42 remains 1.
+        
+        Checks the stored position for MR with IID 42 and asserts it equals 1.
+        """
         position = await self.queue.get_queue_position(42)
         assert position == 1
 
     async def do_cleanup(self):
+        """
+        Close the test database context and release associated resources.
+        
+        This method awaits the async context manager's exit to ensure the test database is properly closed.
+        """
         await self._db_context.__aexit__(None, None, None)

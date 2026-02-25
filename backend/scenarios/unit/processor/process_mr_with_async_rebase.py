@@ -138,17 +138,43 @@ class Scenario(vedro.Scenario):
             self.merge_history = await self.merge_mock.fetch_history()
 
     async def then_mr_should_be_successfully_processed(self):
+        """
+        Assert that the processed merge request completed successfully.
+        
+        Verifies that the processor produced ProcessingResult.SUCCESS for the merge request handled in the scenario.
+        """
         assert self.result == ProcessingResult.SUCCESS
 
     async def and_rebase_should_be_initiated(self):
+        """
+        Asserts that exactly one rebase operation was initiated during processing.
+        
+        This validates that the processor initiated a single rebase action by checking the recorded rebase history length equals one.
+        """
         assert len(self.rebase_history) == 1
 
     async def and_merge_should_be_called(self):
+        """
+        Asserts that exactly one merge operation was invoked during the scenario.
+        
+        This verification ensures the processor called the merge endpoint one time.
+        """
         assert len(self.merge_history) == 1
 
     async def and_final_state_should_be_merged(self):
+        """
+        Assert that the merge request with IID 43 is in the "merged" state.
+        
+        Raises:
+            AssertionError: If the MR's status is not "merged".
+        """
         mr_state = await self.queue.get_mr_state(43)
         assert mr_state["status"] == "merged"
 
     async def do_cleanup(self):
+        """
+        Close the scenario's database connection.
+        
+        Intended for test cleanup to release the in-memory database resources used by the scenario.
+        """
         await self.db.close()

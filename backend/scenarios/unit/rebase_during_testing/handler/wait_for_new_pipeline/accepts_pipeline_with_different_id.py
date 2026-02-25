@@ -47,4 +47,10 @@ class Scenario(vedro.Scenario):
         assert self.result.id == self.new_pipeline_id
 
     def then_pipeline_was_fetched_once(self):
+        """
+        Asserts the client's get_latest_mr_pipeline coroutine was awaited exactly once.
+        
+        Raises:
+            AssertionError: If get_latest_mr_pipeline was not awaited exactly once.
+        """
         self.client.get_latest_mr_pipeline.assert_awaited_once()

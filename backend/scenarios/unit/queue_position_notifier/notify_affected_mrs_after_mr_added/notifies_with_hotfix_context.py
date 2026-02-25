@@ -14,6 +14,19 @@ class Scenario(vedro.Scenario):
     subject = "notify_affected_mrs_after_mr_added notifies affected MRs when hotfix added"
 
     async def given_positions_before_hotfix_added(self):
+        """
+        Set up test context with two existing MRs and a newly added hotfix MR.
+        
+        Creates:
+        - self.hotfix_mr_iid: IID of the added hotfix MR (100).
+        - self.positions_before: mapping of existing MR IIDs to their positions.
+        - self.old_total: number of MRs before the hotfix was added.
+        - self.notifier: mock notifier instance.
+        - self.queue_manager: mock queue manager initialized with queued items including the hotfix.
+        - self.position_notifier: position notifier configured with the mock notifier and queue manager.
+        
+        The queue after addition contains the hotfix MR (marked `is_hotfix=True`) followed by the existing MRs.
+        """
         self.hotfix_mr_iid = 100
         self.positions_before = {101: 1, 102: 2}
         self.old_total = len(self.positions_before)
@@ -30,6 +43,11 @@ class Scenario(vedro.Scenario):
         )
 
     async def when_notify_after_hotfix_is_called(self):
+        """
+        Trigger notification of affected merge requests after a hotfix MR is added.
+        
+        Calls the position notifier with the hotfix MR IID, the positions before the addition, the previous total, and indicates a hotfix context.
+        """
         await self.position_notifier.notify_affected_mrs_after_mr_added(
             added_mr_iid=self.hotfix_mr_iid,
             positions_before=self.positions_before,
@@ -38,6 +56,12 @@ class Scenario(vedro.Scenario):
         )
 
     def then_affected_mrs_are_notified(self):
+        """
+        Assert that notifier.notify was called exactly two times.
+        
+        Raises:
+            AssertionError: if notifier.notify was called a number of times other than two.
+        """
         assert self.notifier.notify.call_count == 2
 
     def and_hotfix_mr_is_not_notified(self):
@@ -47,6 +71,11 @@ class Scenario(vedro.Scenario):
         assert self.hotfix_mr_iid not in notified_iids
 
     def and_positions_shifted_down_by_one(self):
+        """
+        Asserts that notified merge requests had their positions shifted down by one after a hotfix was added.
+        
+        Checks that notifier.notify was called with tuples of (mr_iid, position, old_position) matching the expected set {(101, 2, 1), (102, 3, 2)}.
+        """
         calls = self.notifier.notify.call_args_list
         # mr_iid is positional (args[0])
         # position and old_position are keyword-only
@@ -58,6 +87,11 @@ class Scenario(vedro.Scenario):
         assert set(notifications) == expected
 
     def and_notifications_use_position_changed_hotfix_template(self):
+        """
+        Asserts that every notification sent used the "position_changed_hotfix" template.
+        
+        Raises an AssertionError if any recorded notify call used a different template.
+        """
         calls = self.notifier.notify.call_args_list
         templates = [c.args[1] for c in calls]
         assert all(t == "position_changed_hotfix" for t in templates)

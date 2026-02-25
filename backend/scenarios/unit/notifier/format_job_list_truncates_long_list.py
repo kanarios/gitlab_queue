@@ -15,6 +15,11 @@ class Scenario(vedro.Scenario):
         self.jobs = [f"test:job-{i}" for i in range(1, 16)]
 
     def when_format_job_list_is_called_with_long_list(self):
+        """
+        Call the notifier's _format_job_list with the prepared long job list and store its output.
+        
+        The formatted string produced by _format_job_list is saved to self.result for subsequent assertions.
+        """
         self.result = self.notifier._format_job_list(self.jobs)
 
     def then_result_lists_exactly_ten_jobs(self):
@@ -22,10 +27,20 @@ class Scenario(vedro.Scenario):
         assert len(job_lines) == 10
 
     def and_result_contains_overflow_note_for_remaining_five(self):
+        """
+        Asserts the formatted job list indicates there are five additional (hidden) jobs.
+        
+        Checks that the string "...and 5 more" appears in the formatted result to confirm overflow notice for the remaining jobs.
+        """
         assert "...and 5 more" in self.result
 
     def and_first_job_appears_in_result(self):
         assert "test:job-1" in self.result
 
     def and_eleventh_job_does_not_appear_directly(self):
+        """
+        Asserts that the eleventh job is not present as a listed item in the formatter output.
+        
+        Raises an AssertionError if the string "- test:job-11" appears in self.result.
+        """
         assert "- test:job-11" not in self.result

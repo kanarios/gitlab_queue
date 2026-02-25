@@ -33,4 +33,9 @@ class Scenario(vedro.Scenario):
         await self.processor._recover_interrupted_state()
 
     def then_mr_is_marked_as_removed(self):
+        """
+        Assert that the queue marks merge request IID 42 as removed.
+        
+        Verifies that queue_manager.update_mr_state was awaited exactly once with arguments (42, "removed").
+        """
         self.processor.queue_manager.update_mr_state.assert_awaited_once_with(42, "removed")

@@ -23,12 +23,25 @@ class Scenario(vedro.Scenario):
         )
 
     async def when_rebase_failed_is_triggered(self):
+        """
+        Trigger a rebase-failed event on the scenario's state machine using a conflict template.
+        
+        Calls the state machine's rebase-failed transition with conflicted_files ["src/main.py", "tests/test_main.py"] and error_message "Merge conflict".
+        """
         await self.sm.trigger_rebase_failed(
             conflicted_files=["src/main.py", "tests/test_main.py"],
             error_message="Merge conflict",
         )
 
     def then_notifier_should_be_called_with_conflict_template(self):
+        """
+        Assert that the notifier was invoked with the conflict template for MR 123.
+        
+        Performs the following checks:
+        - `notify` was awaited on the notifier mock.
+        - The first positional argument (`mr_iid`) equals `123`.
+        - The second positional argument (`template`) equals `"conflict"`.
+        """
         self.notifier.notify.assert_awaited()
         call_args = self.notifier.notify.call_args
         assert call_args[0][0] == 123  # mr_iid

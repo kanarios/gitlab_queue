@@ -13,11 +13,21 @@ class Scenario(vedro.Scenario):
     subject = "save_hourly_snapshot creates analytics record"
 
     async def given_empty_database(self):
+        """
+        Prepare a fresh test database and create required tables for the scenario.
+        
+        This enters the initialized asynchronous test database context and assigns it to
+        self._db_ctx, stores the active database session in self.db, and ensures the
+        schema is created by invoking create_tables.
+        """
         self._db_ctx = initialized_test_database()
         self.db = await self._db_ctx.__aenter__()
         await create_tables(self.db)
 
     async def when_save_hourly_snapshot_is_called(self):
+        """
+        Calls AnalyticsRepository.save_hourly_snapshot with predefined metrics and stores the created snapshot on `self.snapshot` for later assertions.
+        """
         async with self.db.transaction() as session:
             repo = AnalyticsRepository(session)
             self.snapshot = await repo.save_hourly_snapshot(
@@ -38,6 +48,11 @@ class Scenario(vedro.Scenario):
         assert self.snapshot.avg_wait_time_seconds == 60
 
     def and_timestamp_should_be_truncated_to_hour(self):
+        """
+        Asserts that the snapshot timestamp is truncated to the start of its hour.
+        
+        Parses self.snapshot.timestamp as an ISO-formatted datetime and verifies minute, second, and microsecond are all zero.
+        """
         from datetime import datetime
 
         ts = datetime.fromisoformat(self.snapshot.timestamp)
@@ -46,4 +61,9 @@ class Scenario(vedro.Scenario):
         assert ts.microsecond == 0
 
     async def do_cleanup(self):
+        """
+        Close the test database context and release its resources.
+        
+        Used as the scenario teardown step to exit the database context created during setup.
+        """
         await self._db_ctx.__aexit__(None, None, None)
