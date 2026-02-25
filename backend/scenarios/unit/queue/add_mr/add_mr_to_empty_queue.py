@@ -24,10 +24,10 @@ class Scenario(vedro.Scenario):
 
     async def then_item_should_be_at_position_1(self):
         position = await self.queue.get_queue_position(42)
-        assert position == 1, f"Expected position 1, got {position}"
+        assert position == 1
 
     def and_state_should_be_queued(self):
-        assert self.item.state == QueueState.QUEUED, f"Expected 'queued', got {self.item.state}"
+        assert self.item.state == QueueState.QUEUED
 
     def and_mr_data_should_match(self):
         assert self.item.mr_iid == 42
@@ -36,5 +36,4 @@ class Scenario(vedro.Scenario):
         assert self.item.author_username == "testuser"
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_context"):
-            await self._db_context.__aexit__(None, None, None)
+        await self._db_context.__aexit__(None, None, None)

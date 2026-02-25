@@ -30,8 +30,7 @@ class Scenario(vedro.Scenario):
 
     def then_order_should_match_insertion_order(self):
         actual_order = [item.mr_iid for item in self.active_queue]
-        assert actual_order == self.iid_order, f"Expected {self.iid_order}, got {actual_order}"
+        assert actual_order == self.iid_order
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_context"):
-            await self._db_context.__aexit__(None, None, None)
+        await self._db_context.__aexit__(None, None, None)

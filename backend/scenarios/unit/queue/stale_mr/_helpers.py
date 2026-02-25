@@ -2,7 +2,19 @@
 
 from __future__ import annotations
 
+from sqlalchemy import text
+
+from gitlab_queue.core.database import DatabaseManager
 from gitlab_queue.models.mr import Author, MergeRequest
+
+
+async def backfill_queued_at_hours_ago(db: DatabaseManager, *, iid: int, hours: int) -> None:
+    """Set queued_at to N hours ago for a given MR (raw SQL backfill for tests)."""
+    async with db.transaction() as session:
+        await session.execute(
+            text("UPDATE merge_requests SET queued_at = datetime('now', :offset) WHERE iid = :iid"),
+            {"offset": f"-{hours} hours", "iid": iid},
+        )
 
 
 def create_test_mr(

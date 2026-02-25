@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import vedro
 from scenarios.contexts.sqlite_client import initialized_test_database
@@ -20,7 +20,7 @@ class Scenario(vedro.Scenario):
         await create_tables(self.db)
 
         now = datetime.now(UTC)
-        self.today = date.today()
+        self.today = now.date()
 
         async with self.db.transaction() as session:
             await seed_history(
@@ -54,7 +54,5 @@ class Scenario(vedro.Scenario):
         assert iids == {1, 2}
 
     async def do_cleanup(self):
-        if hasattr(self, "_session_ctx"):
-            await self._session_ctx.__aexit__(None, None, None)
-        if hasattr(self, "_db_ctx"):
-            await self._db_ctx.__aexit__(None, None, None)
+        await self._session_ctx.__aexit__(None, None, None)
+        await self._db_ctx.__aexit__(None, None, None)

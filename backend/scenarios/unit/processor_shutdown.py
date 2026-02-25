@@ -79,10 +79,12 @@ async def graceful_shutdown_with_no_processing():
                 await processor_task
 
     with then("processor shuts down cleanly"):
-        assert shutdown_complete, "Shutdown should complete within timeout"
-        assert processor.is_shutdown_requested, "Shutdown flag should be set"
-        assert not processor.is_processing, "No MR should be processing"
-        assert processor.current_mr_iid is None, "No current MR"
+        assert shutdown_complete
+        assert processor.is_shutdown_requested
+        assert not processor.is_processing
+        assert processor.current_mr_iid is None
+
+    await db.close()
 
 
 @scenario()
@@ -203,7 +205,7 @@ async def graceful_shutdown_during_rebase():
 
             # Verify rebase was started
             rebase_history = await rebase_mock.fetch_history()
-            assert len(rebase_history) == 1, "Rebase should have been initiated"
+            assert len(rebase_history) == 1
 
             # Check MR state - should be in rebasing state
             mr_state = await queue.get_mr_state(70)
@@ -215,6 +217,8 @@ async def graceful_shutdown_during_rebase():
 
             # Verify shutdown flag
             assert processor.is_shutdown_requested
+
+    await db.close()
 
 
 @scenario()
@@ -333,21 +337,23 @@ async def processor_state_recovery_after_shutdown():
         with then("intermediate states are reset to queued"):
             # Check states after recovery
             mr_71_state = await queue.get_mr_state(71)
-            assert mr_71_state["status"] == "queued", "Queued MR should remain queued"
+            assert mr_71_state["status"] == "queued"
 
             mr_72_state = await queue.get_mr_state(72)
-            assert mr_72_state["status"] == "queued", "Rebasing MR should be reset to queued"
+            assert mr_72_state["status"] == "queued"
 
             mr_73_state = await queue.get_mr_state(73)
-            assert mr_73_state["status"] == "queued", "Testing MR should be reset to queued"
+            assert mr_73_state["status"] == "queued"
 
             mr_74_state = await queue.get_mr_state(74)
-            assert mr_74_state["status"] == "queued", "Merging MR should be reset to queued"
+            assert mr_74_state["status"] == "queued"
 
             # Verify queue order is maintained
             next_mr = await queue.get_next_mr()
             assert next_mr is not None
-            assert next_mr.mr_iid == 71, "First MR should be next"
+            assert next_mr.mr_iid == 71
+
+    await db.close()
 
 
 @scenario()
@@ -404,7 +410,9 @@ async def shutdown_timeout_handling():
     with then("timeout is handled properly"):
         # Shutdown may complete quickly on fast machines, so we only verify
         # that the shutdown flag is properly set
-        assert processor.is_shutdown_requested, "Shutdown should be requested"
+        assert processor.is_shutdown_requested
+
+    await db.close()
 
 
 @scenario()
@@ -526,10 +534,12 @@ async def concurrent_processing_during_shutdown():
         with then("processing state is tracked correctly"):
             # During shutdown, processor may have finished early
             # We check that shutdown was properly requested and processed
-            assert processor.is_shutdown_requested, "Shutdown should be requested"
+            assert processor.is_shutdown_requested
             # Result should indicate error due to shutdown
-            assert result == ProcessingResult.ERROR, f"Should return error due to shutdown, got {result}"
-            assert not processor.is_processing, "Should not be processing after shutdown"
+            assert result == ProcessingResult.ERROR
+            assert not processor.is_processing
+
+    await db.close()
 
 
 __all__ = [

@@ -32,5 +32,4 @@ class Scenario(vedro.Scenario):
         assert self.result[0].state == "closed"
 
     async def do_cleanup(self):
-        if hasattr(self, "client"):
-            await self.client.close()
+        await self.client.close()

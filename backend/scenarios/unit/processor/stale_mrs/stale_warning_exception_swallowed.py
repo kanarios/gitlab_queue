@@ -41,4 +41,4 @@ class Scenario(vedro.Scenario):
                 self.raised = exc
 
     def then_no_error_is_raised(self):
-        assert self.raised is None, f"Expected no error, got {self.raised}"
+        assert self.raised is None

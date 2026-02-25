@@ -31,5 +31,4 @@ class Scenario(vedro.Scenario):
         assert self.count == 2, f"Expected 2 active MRs, got {self.count}"
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_ctx"):
-            await self._db_ctx.__aexit__(None, None, None)
+        await self._db_ctx.__aexit__(None, None, None)

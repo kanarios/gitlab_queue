@@ -15,6 +15,8 @@ from gitlab_queue.db.models import (
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from gitlab_queue.db.database import Database
+
 
 def create_test_mr_model(
     *,
@@ -157,7 +159,7 @@ async def seed_hourly(session: AsyncSession, **kwargs) -> AnalyticsHourlyModel:
     return hourly
 
 
-async def create_tables(db) -> None:
+async def create_tables(db: Database) -> None:
     """Create all ORM tables in the database."""
     async with db.engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

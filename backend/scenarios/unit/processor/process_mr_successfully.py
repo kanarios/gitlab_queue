@@ -146,7 +146,7 @@ class Scenario(vedro.Scenario):
 
             # Process the MR
             queue_item = await self.queue.get_next_mr()
-            assert queue_item is not None, "Queue should have an MR"
+            assert queue_item is not None
 
             self.result = await processor._process_mr(queue_item)
 
@@ -159,15 +159,15 @@ class Scenario(vedro.Scenario):
         assert self.result == ProcessingResult.SUCCESS
 
     async def and_merge_should_be_called_once(self):
-        assert len(self.merge_history) == 1, "Merge should have been called once"
+        assert len(self.merge_history) == 1
 
     async def and_queue_state_should_be_merged(self):
         mr_state = await self.queue.get_mr_state(42)
-        assert mr_state["status"] == "merged", f"MR should be merged, got {mr_state}"
+        assert mr_state["status"] == "merged"
 
     async def and_at_least_one_comment_should_be_posted(self):
-        assert len(self.comment_history) >= 1, "At least one comment should be posted"
+        assert len(self.comment_history) >= 1
 
     async def and_queue_should_be_empty_after_processing(self):
         next_item = await self.queue.get_next_mr()
-        assert next_item is None, "Queue should be empty after processing"
+        assert next_item is None

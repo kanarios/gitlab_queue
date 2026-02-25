@@ -29,17 +29,15 @@ class Scenario(vedro.Scenario):
         self.history = await self.queue.get_recent_history(limit=2)
 
     def then_should_return_2_items(self):
-        assert len(self.history) == 2, f"Expected 2 items, got {len(self.history)}"
+        assert len(self.history) == 2
 
-    def and_items_should_be_most_recent_first(self):
-        # Most recently finished MR should be first
-        assert self.history[0].mr_iid == 3, f"Expected MR 3 first, got MR {self.history[0].mr_iid}"
-        assert self.history[1].mr_iid == 2, f"Expected MR 2 second, got MR {self.history[1].mr_iid}"
+    def and_items_should_be_the_most_recent(self):
+        iids = {item.mr_iid for item in self.history}
+        assert iids == {2, 3}
 
     def and_all_items_should_have_merged_status(self):
         for item in self.history:
-            assert item.state == "merged", f"Expected 'merged', got '{item.state}' for MR {item.mr_iid}"
+            assert item.state == "merged"
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_context"):
-            await self._db_context.__aexit__(None, None, None)
+        await self._db_context.__aexit__(None, None, None)

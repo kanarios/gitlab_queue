@@ -55,12 +55,11 @@ class Scenario(vedro.Scenario):
         self.deleted_count = await self.queue.cleanup_old_entries(days=1)
 
     def then_should_delete_1_entry(self):
-        assert self.deleted_count == 1, f"Expected 1 deleted, got {self.deleted_count}"
+        assert self.deleted_count == 1
 
     async def and_mr_should_not_exist_in_active_queue(self):
         item = await self.queue.get_queue_item(42)
-        assert item is None, f"Expected None after cleanup, got {item}"
+        assert item is None
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_context"):
-            await self._db_context.__aexit__(None, None, None)
+        await self._db_context.__aexit__(None, None, None)

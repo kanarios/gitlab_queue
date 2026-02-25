@@ -6,27 +6,8 @@ import vedro
 from scenarios.contexts.sqlite_client import initialized_test_database
 
 from gitlab_queue.core.queue import QueueManager
-from gitlab_queue.models.mr import Author, MergeRequest
 
-
-def create_test_mr(
-    iid: int,
-    title: str = "Test MR",
-    author_name: str = "Test User",
-    author_username: str = "testuser",
-) -> MergeRequest:
-    """Create a test MergeRequest with minimal required fields."""
-    return MergeRequest(
-        iid=iid,
-        title=title,
-        state="opened",
-        labels=["feature"],
-        sha=f"sha{iid}",
-        source_branch=f"feature-{iid}",
-        target_branch="master",
-        merge_status="can_be_merged",
-        author=Author(id=iid, name=author_name, username=author_username),
-    )
+from ._helpers import create_test_mr
 
 
 class Scenario(vedro.Scenario):
@@ -45,22 +26,17 @@ class Scenario(vedro.Scenario):
 
     async def when_mr_is_readded_to_queue(self):
         mr = create_test_mr(iid=42, title="Reopened MR")
-        self.result = await self.queue.add_to_queue(mr)
+        await self.queue.add_to_queue(mr)
 
     async def then_mr_should_exist_in_queue(self):
-        item = await self.queue.get_queue_item(42)
-        assert item is not None, "Expected MR to be in queue after re-add"
+        self.item = await self.queue.get_queue_item(42)
+        assert self.item is not None
 
-    async def and_mr_should_be_in_queued_state(self):
-        item = await self.queue.get_queue_item(42)
-        assert item is not None, "Expected MR in queue"
-        assert item.state == "queued", f"Expected 'queued' state after re-add, got '{item.state}'"
+    def and_mr_should_be_in_queued_state(self):
+        assert self.item.state == "queued"
 
-    async def and_mr_title_should_be_updated(self):
-        item = await self.queue.get_queue_item(42)
-        assert item is not None, "Expected MR in queue"
-        assert item.title == "Reopened MR", f"Expected 'Reopened MR', got '{item.title}'"
+    def and_mr_title_should_be_updated(self):
+        assert self.item.title == "Reopened MR"
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_context"):
-            await self._db_context.__aexit__(None, None, None)
+        await self._db_context.__aexit__(None, None, None)

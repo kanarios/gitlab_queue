@@ -45,5 +45,4 @@ class Scenario(vedro.Scenario):
         assert request_body["ref"] == self.ref
 
     async def do_cleanup(self):
-        if hasattr(self, "client"):
-            await self.client.close()
+        await self.client.close()

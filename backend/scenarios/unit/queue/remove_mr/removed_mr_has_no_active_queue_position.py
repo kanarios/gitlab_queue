@@ -24,17 +24,16 @@ class Scenario(vedro.Scenario):
         self.position = await self.queue.get_queue_position(42)
 
     def then_position_should_be_none(self):
-        assert self.position is None, f"Expected None, got {self.position}"
+        assert self.position is None
 
     async def and_active_queue_should_be_empty(self):
         active = await self.queue.get_active_queue()
-        assert len(active) == 0, f"Expected empty active queue, got {len(active)} items"
+        assert len(active) == 0
 
     async def and_mr_should_still_exist_in_db(self):
         item = await self.queue.get_queue_item(42)
-        assert item is not None, "MR should still exist in database"
+        assert item is not None
         assert item.state == "removed"
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_context"):
-            await self._db_context.__aexit__(None, None, None)
+        await self._db_context.__aexit__(None, None, None)

@@ -168,7 +168,7 @@ class Scenario(vedro.Scenario):
 
             # Process the MR
             queue_item = await self.queue.get_next_mr()
-            assert queue_item is not None, "Queue should have an MR"
+            assert queue_item is not None
 
             self.result = await processor._process_mr(queue_item)
 
@@ -181,7 +181,7 @@ class Scenario(vedro.Scenario):
         assert self.result == ProcessingResult.SUCCESS
 
     async def and_merge_should_be_called_once(self):
-        assert len(self.merge_history) == 1, "Merge should have been called once"
+        assert len(self.merge_history) == 1
 
     async def and_canceled_pipeline_was_fetched_first(self):
         # Verify canceled pipeline mock was called (the skip happened)
@@ -194,3 +194,6 @@ class Scenario(vedro.Scenario):
         assert len(self.pipeline_success_history) >= 1, (
             f"Success pipeline mock should be called after canceled was skipped (got {len(self.pipeline_success_history)})"
         )
+
+    async def do_cleanup(self):
+        await self.db.close()

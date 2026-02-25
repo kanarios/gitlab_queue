@@ -25,7 +25,7 @@ class Scenario(vedro.Scenario):
         self.result = await self.queue.remove_from_queue(42)
 
     def then_result_should_be_false(self):
-        assert self.result is False, f"Expected False, got {self.result}"
+        assert self.result is False
 
     async def and_mr_state_should_still_be_removed(self):
         state = await self.queue.get_mr_state(42)
@@ -33,5 +33,4 @@ class Scenario(vedro.Scenario):
         assert state["status"] == "removed"
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_context"):
-            await self._db_context.__aexit__(None, None, None)
+        await self._db_context.__aexit__(None, None, None)

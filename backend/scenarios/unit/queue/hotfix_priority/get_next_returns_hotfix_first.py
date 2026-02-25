@@ -31,9 +31,8 @@ class Scenario(vedro.Scenario):
 
     def then_hotfix_should_be_returned(self):
         assert self.next_item is not None
-        assert self.next_item.mr_iid == 2, f"Expected hotfix (iid=2), got iid={self.next_item.mr_iid}"
+        assert self.next_item.mr_iid == 2
         assert self.next_item.is_hotfix is True
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_context"):
-            await self._db_context.__aexit__(None, None, None)
+        await self._db_context.__aexit__(None, None, None)

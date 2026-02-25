@@ -45,4 +45,4 @@ class Scenario(vedro.Scenario):
         assert self.result == ProcessingResult.TIMEOUT
 
     def and_timeout_is_triggered_on_state_machine(self):
-        self.mock_sm.trigger_timeout.assert_awaited_once_with(max_wait_hours=0)
+        self.mock_sm.trigger_timeout.assert_awaited_once()

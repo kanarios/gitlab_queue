@@ -52,6 +52,9 @@ class Scenario2(vedro.Scenario):
     def and_repr_should_contain_event_type(self):
         assert "event_type='merge_request'" in self.result
 
+    def and_repr_should_start_with_class_name(self):
+        assert self.result.startswith("<WebhookRetry(")
+
 
 class Scenario3(vedro.Scenario):
     subject = "WebhookDLQModel repr shows id and event_type"

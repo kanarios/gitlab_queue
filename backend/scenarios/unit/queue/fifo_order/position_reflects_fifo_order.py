@@ -30,17 +30,16 @@ class Scenario(vedro.Scenario):
             self.positions[iid] = await self.queue.get_queue_position(iid)
 
     def then_positions_should_reflect_insertion_order(self):
-        assert self.positions[5] == 1, f"First MR expected at 1, got {self.positions[5]}"
-        assert self.positions[15] == 2, f"Second MR expected at 2, got {self.positions[15]}"
-        assert self.positions[25] == 3, f"Third MR expected at 3, got {self.positions[25]}"
+        assert self.positions[5] == 1
+        assert self.positions[15] == 2
+        assert self.positions[25] == 3
 
     async def and_removing_first_should_shift_positions(self):
         await self.queue.remove_from_queue(5)
         pos_15 = await self.queue.get_queue_position(15)
         pos_25 = await self.queue.get_queue_position(25)
-        assert pos_15 == 1, f"After removal, MR 15 expected at 1, got {pos_15}"
-        assert pos_25 == 2, f"After removal, MR 25 expected at 2, got {pos_25}"
+        assert pos_15 == 1
+        assert pos_25 == 2
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_context"):
-            await self._db_context.__aexit__(None, None, None)
+        await self._db_context.__aexit__(None, None, None)

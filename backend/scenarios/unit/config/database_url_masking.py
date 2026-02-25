@@ -24,7 +24,7 @@ class Scenario(vedro.Scenario):
         self.result = _mask_database_url(self.settings)
 
     def then_password_is_not_in_result(self):
-        assert "secret123" not in self.result, f"Expected password to be masked, got: {self.result}"
+        assert "secret123" not in self.result
 
     def and_mask_placeholder_is_in_result(self):
-        assert "***" in self.result, f"Expected '***' in masked URL, got: {self.result}"
+        assert "***" in self.result

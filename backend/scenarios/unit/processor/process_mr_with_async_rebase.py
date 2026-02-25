@@ -141,11 +141,14 @@ class Scenario(vedro.Scenario):
         assert self.result == ProcessingResult.SUCCESS
 
     async def and_rebase_should_be_initiated(self):
-        assert len(self.rebase_history) == 1, "Rebase should have been initiated"
+        assert len(self.rebase_history) == 1
 
     async def and_merge_should_be_called(self):
-        assert len(self.merge_history) == 1, "Merge should have been called"
+        assert len(self.merge_history) == 1
 
     async def and_final_state_should_be_merged(self):
         mr_state = await self.queue.get_mr_state(43)
         assert mr_state["status"] == "merged"
+
+    async def do_cleanup(self):
+        await self.db.close()

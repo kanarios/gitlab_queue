@@ -30,14 +30,13 @@ class Scenario(vedro.Scenario):
 
     async def then_hotfix_should_be_at_position_1(self):
         position = await self.queue.get_queue_position(99)
-        assert position == 1, f"Expected hotfix at position 1, got {position}"
+        assert position == 1
 
     async def and_regular_mrs_should_shift_positions(self):
         for iid in [1, 2, 3]:
             position = await self.queue.get_queue_position(iid)
             expected = iid + 1  # Shifted by 1 due to hotfix
-            assert position == expected, f"MR {iid} expected at position {expected}, got {position}"
+            assert position == expected
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_context"):
-            await self._db_context.__aexit__(None, None, None)
+        await self._db_context.__aexit__(None, None, None)

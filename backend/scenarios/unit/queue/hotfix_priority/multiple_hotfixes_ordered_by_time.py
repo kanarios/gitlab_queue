@@ -30,10 +30,9 @@ class Scenario(vedro.Scenario):
             self.positions[iid] = await self.queue.get_queue_position(iid)
 
     def then_hotfixes_should_be_in_fifo_order(self):
-        assert self.positions[10] == 1, f"First hotfix expected at 1, got {self.positions[10]}"
-        assert self.positions[20] == 2, f"Second hotfix expected at 2, got {self.positions[20]}"
-        assert self.positions[30] == 3, f"Third hotfix expected at 3, got {self.positions[30]}"
+        assert self.positions[10] == 1
+        assert self.positions[20] == 2
+        assert self.positions[30] == 3
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_context"):
-            await self._db_context.__aexit__(None, None, None)
+        await self._db_context.__aexit__(None, None, None)

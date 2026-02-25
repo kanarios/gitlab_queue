@@ -19,7 +19,7 @@ class Scenario(vedro.Scenario):
         self.status = await self.db.health_check()
 
     def then_status_should_be_database_status_instance(self):
-        assert isinstance(self.status, DatabaseStatus), f"Expected DatabaseStatus, got {type(self.status)}"
+        assert isinstance(self.status, DatabaseStatus)
 
     def and_connected_should_be_true(self):
         assert self.status.connected is True
@@ -35,8 +35,7 @@ class Scenario(vedro.Scenario):
         assert len(self.status.database_path) > 0
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_ctx"):
-            await self._db_ctx.__aexit__(None, None, None)
+        await self._db_ctx.__aexit__(None, None, None)
 
 
 class Scenario2(vedro.Scenario):
@@ -56,5 +55,4 @@ class Scenario2(vedro.Scenario):
         assert "not initialized" in self.status.error.lower()
 
     async def do_cleanup(self):
-        if hasattr(self, "db"):
-            await self.db.close()
+        await self.db.close()

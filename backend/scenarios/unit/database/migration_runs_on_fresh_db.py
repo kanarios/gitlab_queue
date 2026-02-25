@@ -22,16 +22,15 @@ class Scenario(vedro.Scenario):
         self.result = await run_migrations(self._db_url)
 
     async def then_migrations_should_be_applied(self):
-        assert self.result is True, "Expected migrations to be applied on fresh DB"
+        assert self.result is True
 
     async def and_current_revision_should_not_be_none(self):
         revision = await get_current_revision(self._db_url)
-        assert revision is not None, "Expected a revision after migrations"
+        assert revision is not None
 
     async def and_running_again_should_return_false(self):
         result = await run_migrations(self._db_url)
-        assert result is False, "Expected no migrations on second run (already up-to-date)"
+        assert result is False
 
     def do_cleanup(self):
-        if hasattr(self, "_tmp_dir"):
-            self._tmp_dir.cleanup()
+        self._tmp_dir.cleanup()

@@ -16,7 +16,7 @@ class Scenario(vedro.Scenario):
     async def given_event_in_retry_queue(self):
         self._db_ctx = initialized_test_database()
         self.db = await self._db_ctx.__aenter__()
-        self.manager = create_test_retry_manager(self.db, base_delay_seconds=0)
+        self.manager = create_test_retry_manager(self.db, base_delay_seconds=0, max_attempts=3)
         await self.manager.ensure_schema()
         self.payload = create_test_payload()
         self.retry_id = await self.manager.add_to_retry_queue(
@@ -29,7 +29,7 @@ class Scenario(vedro.Scenario):
         self.ready_events = await self.manager.get_events_ready_for_retry()
 
     def then_one_item_should_be_returned(self):
-        assert len(self.ready_events) == 1, f"Expected 1 ready event, got {len(self.ready_events)}"
+        assert len(self.ready_events) == 1
 
     def and_item_should_be_a_retry_queue_item(self):
         assert isinstance(self.ready_events[0], RetryQueueItem)
@@ -46,5 +46,4 @@ class Scenario(vedro.Scenario):
         assert item.created_at is not None
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_ctx"):
-            await self._db_ctx.__aexit__(None, None, None)
+        await self._db_ctx.__aexit__(None, None, None)

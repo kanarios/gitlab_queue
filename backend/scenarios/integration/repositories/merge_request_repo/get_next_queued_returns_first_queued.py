@@ -42,10 +42,8 @@ class Scenario(vedro.Scenario):
 
     def then_result_should_be_the_oldest_queued_mr(self):
         assert self.result is not None
-        assert self.result.iid == 20, "Should return the MR with earliest queued_at"
+        assert self.result.iid == 20
 
     async def do_cleanup(self):
-        if hasattr(self, "_session_ctx"):
-            await self._session_ctx.__aexit__(None, None, None)
-        if hasattr(self, "_db_ctx"):
-            await self._db_ctx.__aexit__(None, None, None)
+        await self._session_ctx.__aexit__(None, None, None)
+        await self._db_ctx.__aexit__(None, None, None)

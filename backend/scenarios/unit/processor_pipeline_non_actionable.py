@@ -142,11 +142,13 @@ async def process_mr_with_non_actionable_pipeline_status(status: str):
 
         with then("failure comment was posted"):
             comment_history = await comment_mock.fetch_history()
-            assert len(comment_history) >= 1, "Failure comment should be posted"
+            assert len(comment_history) >= 1
 
         with then("MR state is failed in database"):
             mr_state = await queue.get_mr_state(mr_iid)
-            assert mr_state["status"] == "failed", f"MR should be failed, got {mr_state['status']}"
+            assert mr_state["status"] == "failed"
+
+    await db.close()
 
 
 @scenario()
@@ -254,7 +256,7 @@ async def non_actionable_status_does_not_retry():
 
         with then("rebase was only called once (initial rebase, no retry)"):
             rebase_history = await rebase_mock.fetch_history()
-            assert len(rebase_history) == 1, f"Rebase should be called only once, called {len(rebase_history)} times"
+            assert len(rebase_history) == 1
 
         with then("pipeline was checked minimal times (no retry loop)"):
             # Pipeline is checked once in _wait_for_rebase (to get pipeline id)
@@ -264,6 +266,8 @@ async def non_actionable_status_does_not_retry():
             assert len(pipelines_history) == 2, (
                 f"Pipeline should be checked exactly twice (rebase + wait), checked {len(pipelines_history)} times"
             )
+
+    await db.close()
 
 
 __all__ = [

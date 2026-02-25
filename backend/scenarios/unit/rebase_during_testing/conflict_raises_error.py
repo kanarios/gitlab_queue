@@ -57,7 +57,7 @@ class Scenario(vedro.Scenario):
             self.raised_error = e
 
     def then_conflict_error_should_be_raised(self):
-        assert self.raised_error is not None, "Expected GitLabConflictError to be raised"
+        assert self.raised_error is not None
         assert isinstance(self.raised_error, GitLabConflictError), (
             f"Expected GitLabConflictError, got {type(self.raised_error)}"
         )

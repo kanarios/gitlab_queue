@@ -131,7 +131,7 @@ class Scenario(vedro.Scenario):
 
             # Process the MR
             queue_item = await self.queue.get_next_mr()
-            assert queue_item is not None, "Queue should have an MR"
+            assert queue_item is not None
 
             self.result = await processor._process_mr(queue_item)
 
@@ -144,14 +144,14 @@ class Scenario(vedro.Scenario):
         assert self.result == ProcessingResult.SUCCESS
 
         # Verify merge was called
-        assert len(self.merge_history) == 1, "Merge should have been called once"
+        assert len(self.merge_history) == 1
 
         # Verify queue state
         mr_state = await self.queue.get_mr_state(42)
-        assert mr_state["status"] == "merged", f"MR should be merged, got {mr_state}"
+        assert mr_state["status"] == "merged"
 
         # Verify at least one comment was posted
-        assert len(self.comment_history) >= 1, "At least one comment should be posted"
+        assert len(self.comment_history) >= 1
 
     async def cleanup(self):
         if self.db:

@@ -97,4 +97,4 @@ class ScenarioMalformedAuth(vedro.Scenario):
 
     def and_detail_mentions_invalid_format(self):
         data = self.response.json()
-        assert "invalid" in data["detail"].lower() or "format" in data["detail"].lower()
+        assert "format" in data["detail"].lower()

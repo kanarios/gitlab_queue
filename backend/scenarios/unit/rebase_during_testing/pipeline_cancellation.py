@@ -87,8 +87,8 @@ class Scenario(vedro.Scenario):
         self.gitlab_client.rebase_mr.assert_awaited_once_with(42)
 
     def and_new_pipeline_should_be_returned(self):
-        assert self.new_pipeline is not None, "Expected new pipeline after rebase"
-        assert self.new_pipeline.id == 200, f"Expected new pipeline id=200, got {self.new_pipeline.id}"
+        assert self.new_pipeline is not None
+        assert self.new_pipeline.id == 200
 
     def and_rebase_count_should_be_incremented(self):
-        assert self.new_ctx.rebase_count == 1, f"Expected rebase_count=1, got {self.new_ctx.rebase_count}"
+        assert self.new_ctx.rebase_count == 1

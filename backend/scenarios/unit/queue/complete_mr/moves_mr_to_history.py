@@ -27,17 +27,16 @@ class Scenario(vedro.Scenario):
         self.result = await self.queue.complete_mr(42, "merged")
 
     def then_result_should_be_true(self):
-        assert self.result is True, f"Expected True, got {self.result}"
+        assert self.result is True
 
     async def and_mr_should_be_removed_from_active_queue(self):
         item = await self.queue.get_queue_item(42)
-        assert item is None, f"Expected None, got {item}"
+        assert item is None
 
     async def and_mr_should_exist_in_history(self):
         state = await self.queue.get_mr_state(42)
-        assert state is not None, "Expected MR in history, got None"
-        assert state["status"] == "merged", f"Expected 'merged', got {state['status']}"
+        assert state is not None
+        assert state["status"] == "merged"
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_context"):
-            await self._db_context.__aexit__(None, None, None)
+        await self._db_context.__aexit__(None, None, None)

@@ -35,7 +35,7 @@ class Scenario(vedro.Scenario):
         self.result = await self.queue.complete_mr(42, "merged")
 
     def then_result_should_be_true(self):
-        assert self.result is True, f"Expected True, got {self.result}"
+        assert self.result is True
 
     async def and_history_should_have_wait_time(self):
         async with self.db.session() as session:
@@ -46,30 +46,19 @@ class Scenario(vedro.Scenario):
             self.history = result.mappings().one_or_none()
             await session.commit()
 
-        assert self.history is not None, "Expected MR in history, got None"
-        assert self.history["wait_time_seconds"] is not None, "Expected wait_time_seconds to be set in history"
-        assert isinstance(self.history["wait_time_seconds"], int), (
-            f"Expected int, got {type(self.history['wait_time_seconds'])}"
-        )
+        assert self.history is not None
+        assert self.history["wait_time_seconds"] is not None
+        assert isinstance(self.history["wait_time_seconds"], int)
 
     def and_history_should_have_processing_time(self):
-        assert self.history["processing_time_seconds"] is not None, (
-            "Expected processing_time_seconds to be set in history"
-        )
-        assert isinstance(self.history["processing_time_seconds"], int), (
-            f"Expected int, got {type(self.history['processing_time_seconds'])}"
-        )
+        assert self.history["processing_time_seconds"] is not None
+        assert isinstance(self.history["processing_time_seconds"], int)
 
     def and_wait_time_should_be_non_negative(self):
-        assert self.history["wait_time_seconds"] >= 0, (
-            f"Expected non-negative wait_time_seconds, got {self.history['wait_time_seconds']}"
-        )
+        assert self.history["wait_time_seconds"] >= 0
 
     def and_processing_time_should_be_non_negative(self):
-        assert self.history["processing_time_seconds"] >= 0, (
-            f"Expected non-negative processing_time_seconds, got {self.history['processing_time_seconds']}"
-        )
+        assert self.history["processing_time_seconds"] >= 0
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_context"):
-            await self._db_context.__aexit__(None, None, None)
+        await self._db_context.__aexit__(None, None, None)

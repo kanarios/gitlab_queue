@@ -26,15 +26,17 @@ class Scenario(vedro.Scenario):
                 mr = create_test_mr_model(iid=42, title="Should Not Persist")
                 await uow.merge_requests.add(mr)
                 raise ValueError("Simulated failure")
-        except ValueError:
-            pass
+        except ValueError as exc:
+            self.caught_exc = exc
 
-    async def then_mr_should_not_be_persisted(self):
+    def then_caught_exception_is_simulated_failure(self):
+        assert str(self.caught_exc) == "Simulated failure"
+
+    async def and_mr_should_not_be_persisted(self):
         async with self.db.session() as session:
             repo = MergeRequestRepository(session)
             result = await repo.get_by_iid(42)
             assert result is None
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_ctx"):
-            await self._db_ctx.__aexit__(None, None, None)
+        await self._db_ctx.__aexit__(None, None, None)

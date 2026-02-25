@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import vedro
 
@@ -17,9 +17,6 @@ class Scenario(vedro.Scenario):
         gitlab_client.remove_mr_label = AsyncMock(
             side_effect=RuntimeError("GitLab API unavailable"),
         )
-        note = MagicMock()
-        note.id = 1
-        gitlab_client.add_or_update_pinned_comment.return_value = note
 
         self.notifier = create_test_notifier(gitlab_client=gitlab_client)
         self.mr_iid = 42

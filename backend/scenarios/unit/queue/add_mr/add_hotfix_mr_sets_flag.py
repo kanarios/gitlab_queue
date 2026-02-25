@@ -22,7 +22,7 @@ class Scenario(vedro.Scenario):
         self.item = await self.queue.add_to_queue(mr, is_hotfix=True)
 
     def then_item_should_have_hotfix_flag(self):
-        assert self.item.is_hotfix is True, f"Expected is_hotfix=True, got {self.item.is_hotfix}"
+        assert self.item.is_hotfix is True
 
     async def and_item_should_be_retrievable_with_flag(self):
         retrieved = await self.queue.get_queue_item(42)
@@ -30,5 +30,4 @@ class Scenario(vedro.Scenario):
         assert retrieved.is_hotfix is True
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_context"):
-            await self._db_context.__aexit__(None, None, None)
+        await self._db_context.__aexit__(None, None, None)

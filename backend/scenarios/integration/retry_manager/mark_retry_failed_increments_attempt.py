@@ -33,18 +33,17 @@ class Scenario(vedro.Scenario):
         )
 
     def then_should_not_be_moved_to_dlq(self):
-        assert self.moved_to_dlq is False, "Expected False (not moved to DLQ), got True"
+        assert self.moved_to_dlq is False
 
     async def and_item_should_still_be_in_queue_with_incremented_attempt(self):
         # Use a new manager with base_delay_seconds=0 to read the updated item
         # because the backoff may have pushed next_attempt_at into the future
         reader = create_test_retry_manager(self.db, base_delay_seconds=0)
         ready_events = await reader.get_events_ready_for_retry()
-        assert len(ready_events) == 1, f"Expected 1 event still in queue, got {len(ready_events)}"
+        assert len(ready_events) == 1
         item = ready_events[0]
-        assert item.attempt_count == 1, f"Expected attempt_count=1, got {item.attempt_count}"
+        assert item.attempt_count == 1
         assert item.last_error == "error on attempt 1"
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_ctx"):
-            await self._db_ctx.__aexit__(None, None, None)
+        await self._db_ctx.__aexit__(None, None, None)

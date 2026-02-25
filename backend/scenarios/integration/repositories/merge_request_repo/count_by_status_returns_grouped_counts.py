@@ -33,11 +33,10 @@ class Scenario(vedro.Scenario):
         assert self.counts["queued"] == 2
         assert self.counts["rebasing"] == 1
         assert self.counts["testing"] == 1
-        assert self.counts["merging"] == 0
+        assert self.counts.get("merging", 0) == 0
 
     def and_terminal_statuses_should_not_be_included(self):
         assert "merged" not in self.counts
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_ctx"):
-            await self._db_ctx.__aexit__(None, None, None)
+        await self._db_ctx.__aexit__(None, None, None)

@@ -28,14 +28,13 @@ class Scenario(vedro.Scenario):
             self.error_caught = True
 
     async def then_error_should_be_propagated(self):
-        assert self.error_caught, "ValueError should have been caught"
+        assert self.error_caught
 
     async def and_inserted_row_should_not_exist(self):
         async with self.db.session() as session:
             result = await session.execute(text("SELECT COUNT(*) FROM test_rollback WHERE value = 'should_rollback'"))
             count = result.scalar()
-            assert count == 0, f"Expected 0 rows after rollback, got {count}"
+            assert count == 0
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_ctx"):
-            await self._db_ctx.__aexit__(None, None, None)
+        await self._db_ctx.__aexit__(None, None, None)

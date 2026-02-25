@@ -94,12 +94,10 @@ class Scenario(vedro.Scenario):
         self.stats = await self.scheduler.sync_queue()
 
     def then_added_count_should_be_two(self):
-        assert self.stats.added == 2, f"Expected 2 MRs added, got {self.stats.added}"
+        assert self.stats.added == 2
 
     def and_queue_manager_should_have_added_both_mrs(self):
-        assert self.queue_manager.add_to_queue.call_count == 2, (
-            f"Expected 2 add_to_queue calls, got {self.queue_manager.add_to_queue.call_count}"
-        )
+        assert self.queue_manager.add_to_queue.call_count == 2
 
     def and_mrs_in_gitlab_should_be_two(self):
-        assert self.stats.mrs_in_gitlab == 2, f"Expected 2 MRs in GitLab, got {self.stats.mrs_in_gitlab}"
+        assert self.stats.mrs_in_gitlab == 2

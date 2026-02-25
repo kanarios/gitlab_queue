@@ -49,7 +49,5 @@ class Scenario(vedro.Scenario):
         assert self.result[0].stale_warning_sent == 0
 
     async def do_cleanup(self):
-        if hasattr(self, "_session_ctx"):
-            await self._session_ctx.__aexit__(None, None, None)
-        if hasattr(self, "_db_ctx"):
-            await self._db_ctx.__aexit__(None, None, None)
+        await self._session_ctx.__aexit__(None, None, None)
+        await self._db_ctx.__aexit__(None, None, None)

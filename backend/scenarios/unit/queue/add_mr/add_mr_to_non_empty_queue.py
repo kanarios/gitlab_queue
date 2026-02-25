@@ -26,16 +26,15 @@ class Scenario(vedro.Scenario):
 
     async def then_item_should_be_at_position_2(self):
         position = await self.queue.get_queue_position(2)
-        assert position == 2, f"Expected position 2, got {position}"
+        assert position == 2
 
     async def and_first_mr_should_still_be_at_position_1(self):
         position = await self.queue.get_queue_position(1)
-        assert position == 1, f"Expected position 1, got {position}"
+        assert position == 1
 
     async def and_queue_length_should_be_2(self):
         length = await self.queue.get_queue_length()
-        assert length == 2, f"Expected length 2, got {length}"
+        assert length == 2
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_context"):
-            await self._db_context.__aexit__(None, None, None)
+        await self._db_context.__aexit__(None, None, None)

@@ -22,13 +22,11 @@ class Scenario(vedro.Scenario):
 
     def then_root_logger_should_have_handler(self):
         root_logger = logging.getLogger()
-        assert len(root_logger.handlers) > 0, "Root logger should have at least one handler"
+        assert len(root_logger.handlers) > 0
 
     def and_root_logger_level_should_match(self):
         root_logger = logging.getLogger()
-        assert root_logger.getEffectiveLevel() == logging.DEBUG, (
-            f"Expected DEBUG level, got {logging.getLevelName(root_logger.getEffectiveLevel())}"
-        )
+        assert root_logger.getEffectiveLevel() == logging.DEBUG
 
     def and_structlog_should_be_configured(self):
         # Verify structlog can create loggers without error
@@ -59,9 +57,7 @@ class Scenario2(vedro.Scenario):
 
     def then_root_logger_should_have_exactly_one_handler(self):
         root_logger = logging.getLogger()
-        assert len(root_logger.handlers) == 1, (
-            f"Expected 1 handler after two configure calls, got {len(root_logger.handlers)}"
-        )
+        assert len(root_logger.handlers) == 1
 
     def do_cleanup(self):
         reset_logging()

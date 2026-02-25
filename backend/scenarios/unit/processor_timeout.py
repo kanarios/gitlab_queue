@@ -123,15 +123,17 @@ async def process_mr_with_rebase_timeout():
 
             # Verify rebase was started
             rebase_history = await rebase_mock.fetch_history()
-            assert len(rebase_history) == 1, "Rebase should be initiated"
+            assert len(rebase_history) == 1
 
             # Verify timeout notification was sent
             comment_history = await comment_mock.fetch_history()
-            assert len(comment_history) >= 1, "Timeout comment should be posted"
+            assert len(comment_history) >= 1
 
             # Verify state
             mr_state = await queue.get_mr_state(60)
-            assert mr_state["status"] == "timeout", f"MR should be timeout after rebase timeout, got {mr_state}"
+            assert mr_state["status"] == "timeout"
+
+    await db.close()
 
 
 @scenario()
@@ -240,15 +242,17 @@ async def process_mr_with_pipeline_timeout():
 
             # Verify pipeline status was checked multiple times
             pipelines_history = await pipelines_mock.fetch_history()
-            assert len(pipelines_history) >= 1, "Pipeline status should be checked"
+            assert len(pipelines_history) >= 1
 
             # Verify timeout notification
             comment_history = await comment_mock.fetch_history()
-            assert len(comment_history) >= 1, "Timeout comment should be posted"
+            assert len(comment_history) >= 1
 
             # Verify state
             mr_state = await queue.get_mr_state(61)
             assert mr_state["status"] == "timeout"
+
+    await db.close()
 
 
 @scenario()
@@ -377,7 +381,7 @@ async def process_mr_with_merge_timeout():
             # Verify timeout/error notification was sent
             comment_history = await comment_mock.fetch_history()
             # At least some comments should be posted during the process
-            assert len(comment_history) >= 0, "Comments may be posted during processing"
+            assert len(comment_history) >= 0
 
             # Verify state
             mr_state = await queue.get_mr_state(62)
@@ -387,6 +391,8 @@ async def process_mr_with_merge_timeout():
                 "testing",
                 "merging",
             ), f"MR should be in failed or intermediate state, got {mr_state}"
+
+    await db.close()
 
 
 @scenario()
@@ -515,15 +521,17 @@ async def process_mr_with_label_removed_during_timeout():
 
             # Verify MR status was checked
             get_mr_history = await get_mr_mock_2.fetch_history()
-            assert len(get_mr_history) >= 1, "MR status should be checked during processing"
+            assert len(get_mr_history) >= 1
 
             # Verify removal notification
             comment_history = await comment_mock.fetch_history()
-            assert len(comment_history) >= 1, "Removal comment should be posted"
+            assert len(comment_history) >= 1
 
             # Verify state
             mr_state = await queue.get_mr_state(63)
             assert mr_state["status"] == "removed"
+
+    await db.close()
 
 
 __all__ = [

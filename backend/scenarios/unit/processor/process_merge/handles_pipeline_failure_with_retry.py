@@ -17,7 +17,6 @@ from .._helpers import (
     create_mock_processor,
     create_mock_state_machine,
     create_processing_context,
-    create_test_queue_item,
 )
 
 
@@ -26,9 +25,6 @@ class Scenario(vedro.Scenario):
 
     def given_processor_with_failed_pipeline_and_no_retries_left(self):
         self.processor = create_mock_processor()
-
-        self.queue_item = create_test_queue_item(mr_iid=42, state="testing", expected_sha="abc123")
-        self.processor.queue_manager.get_queue_item.return_value = self.queue_item
 
         self.pipeline = create_mock_pipeline(pipeline_id=100, sha="abc123", status="failed")
 

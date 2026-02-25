@@ -32,12 +32,11 @@ class Scenario(vedro.Scenario):
 
     async def and_queue_should_still_have_one_item(self):
         length = await self.queue.get_queue_length()
-        assert length == 1, f"Expected length 1, got {length}"
+        assert length == 1
 
     async def and_position_should_still_be_1(self):
         position = await self.queue.get_queue_position(42)
-        assert position == 1, f"Expected position 1, got {position}"
+        assert position == 1
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_context"):
-            await self._db_context.__aexit__(None, None, None)
+        await self._db_context.__aexit__(None, None, None)

@@ -36,5 +36,4 @@ class Scenario(vedro.Scenario):
         assert "new/file.py" in self.result
 
     async def do_cleanup(self):
-        if hasattr(self, "client"):
-            await self.client.close()
+        await self.client.close()

@@ -35,19 +35,15 @@ class Scenario(vedro.Scenario):
 
     def then_log_output_should_contain_started_message(self):
         output = self.log_stream.getvalue()
-        assert "test_operation started" in output, (
-            f"Expected 'test_operation started' in log output, got: {output[:500]}"
-        )
+        assert "test_operation started" in output
 
     def and_log_output_should_contain_completed_message(self):
         output = self.log_stream.getvalue()
-        assert "test_operation completed" in output, (
-            f"Expected 'test_operation completed' in log output, got: {output[:500]}"
-        )
+        assert "test_operation completed" in output
 
     def and_log_output_should_contain_duration(self):
         output = self.log_stream.getvalue()
-        assert "duration_seconds" in output, f"Expected 'duration_seconds' in log output, got: {output[:500]}"
+        assert "duration_seconds" in output
 
     def do_cleanup(self):
         reset_logging()
@@ -78,11 +74,11 @@ class Scenario2(vedro.Scenario):
 
     def and_log_output_should_contain_failed_message(self):
         output = self.log_stream.getvalue()
-        assert "failing_op failed" in output, f"Expected 'failing_op failed' in log output, got: {output[:500]}"
+        assert "failing_op failed" in output
 
     def and_log_output_should_contain_duration(self):
         output = self.log_stream.getvalue()
-        assert "duration_seconds" in output, f"Expected 'duration_seconds' in log output, got: {output[:500]}"
+        assert "duration_seconds" in output
 
     def do_cleanup(self):
         reset_logging()

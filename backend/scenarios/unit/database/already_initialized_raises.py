@@ -1,4 +1,4 @@
-"""Test that calling initialize() twice raises RuntimeError."""
+"""Test that calling initialize() twice raises DatabaseAlreadyInitializedError."""
 
 from __future__ import annotations
 
@@ -28,5 +28,4 @@ class Scenario(vedro.Scenario):
         assert "already initialized" in str(self.exc_info.value).lower()
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_ctx"):
-            await self._db_ctx.__aexit__(None, None, None)
+        await self._db_ctx.__aexit__(None, None, None)

@@ -37,5 +37,4 @@ class Scenario(vedro.Scenario):
             assert result.title == "New MR"
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_ctx"):
-            await self._db_ctx.__aexit__(None, None, None)
+        await self._db_ctx.__aexit__(None, None, None)

@@ -33,5 +33,4 @@ class Scenario(vedro.Scenario):
         assert "outside allowed directory" in str(self.exc_info.value)
 
     def do_cleanup(self):
-        if hasattr(self, "_tmp_dir"):
-            self._tmp_dir.cleanup()
+        self._tmp_dir.cleanup()

@@ -27,19 +27,18 @@ class Scenario(vedro.Scenario):
         self.current_revision = await get_current_revision(self._db_url)
 
     def then_pending_migrations_should_not_be_empty(self):
-        assert len(self.pending) > 0, "Expected pending migrations on a fresh database"
+        assert len(self.pending) > 0
 
     def and_current_revision_should_be_none(self):
-        assert self.current_revision is None, f"Expected no current revision on fresh DB, got {self.current_revision}"
+        assert self.current_revision is None
 
     def and_pending_should_be_a_list_of_strings(self):
         assert isinstance(self.pending, list)
         for rev in self.pending:
-            assert isinstance(rev, str), f"Expected string revision, got {type(rev)}"
+            assert isinstance(rev, str)
 
     def do_cleanup(self):
-        if hasattr(self, "_tmp_dir"):
-            self._tmp_dir.cleanup()
+        self._tmp_dir.cleanup()
 
 
 class ScenarioFullyMigrated(vedro.Scenario):
@@ -55,8 +54,7 @@ class ScenarioFullyMigrated(vedro.Scenario):
         self.pending = await get_pending_migrations(self._db_url)
 
     def then_pending_should_be_empty(self):
-        assert len(self.pending) == 0, f"Expected no pending migrations after full run, got {self.pending}"
+        assert len(self.pending) == 0
 
     def do_cleanup(self):
-        if hasattr(self, "_tmp_dir"):
-            self._tmp_dir.cleanup()
+        self._tmp_dir.cleanup()

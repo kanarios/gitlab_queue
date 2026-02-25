@@ -22,14 +22,14 @@ class Scenario(vedro.Scenario):
         await self.sm.trigger_start_processing()
 
     def then_state_should_be_rebasing(self):
-        assert self.sm.current_state.id == "rebasing", f"Expected 'rebasing', got '{self.sm.current_state.id}'"
+        assert self.sm.current_state.id == "rebasing"
 
     def and_queue_manager_should_update_state(self):
         self.queue_manager.update_mr_state.assert_awaited_once_with(42, "rebasing")
 
     def and_notifier_should_be_called_with_rebasing(self):
         calls = self.notifier.notify.call_args_list
-        assert len(calls) >= 1, "Expected at least one notification"
+        assert len(calls) >= 1
         # The most recent call should be for 'rebasing'
         last_call = calls[-1]
-        assert last_call.args[1] == "rebasing", f"Expected 'rebasing' template, got '{last_call.args[1]}'"
+        assert last_call.args[1] == "rebasing"

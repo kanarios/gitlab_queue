@@ -30,12 +30,10 @@ class Scenario(vedro.Scenario):
         self.value_outside = request_id_ctx.get()
 
     def then_request_id_should_be_set_inside_context(self):
-        assert self.value_inside == self.request_id, (
-            f"Expected '{self.request_id}' inside context, got '{self.value_inside}'"
-        )
+        assert self.value_inside == self.request_id
 
     def and_request_id_should_be_reset_outside_context(self):
-        assert self.value_outside is None, f"Expected None outside context, got '{self.value_outside}'"
+        assert self.value_outside is None
 
 
 class Scenario2(vedro.Scenario):
@@ -50,10 +48,10 @@ class Scenario2(vedro.Scenario):
         self.value_outside = mr_iid_ctx.get()
 
     def then_mr_iid_should_be_set_inside_context(self):
-        assert self.value_inside == self.mr_iid, f"Expected {self.mr_iid} inside context, got {self.value_inside}"
+        assert self.value_inside == self.mr_iid
 
     def and_mr_iid_should_be_reset_outside_context(self):
-        assert self.value_outside is None, f"Expected None outside context, got {self.value_outside}"
+        assert self.value_outside is None
 
 
 class Scenario3(vedro.Scenario):
@@ -68,12 +66,10 @@ class Scenario3(vedro.Scenario):
         self.value_outside = operation_ctx.get()
 
     def then_operation_should_be_set_inside_context(self):
-        assert self.value_inside == self.operation, (
-            f"Expected '{self.operation}' inside context, got '{self.value_inside}'"
-        )
+        assert self.value_inside == self.operation
 
     def and_operation_should_be_reset_outside_context(self):
-        assert self.value_outside is None, f"Expected None outside context, got {self.value_outside}"
+        assert self.value_outside is None
 
 
 class Scenario4(vedro.Scenario):

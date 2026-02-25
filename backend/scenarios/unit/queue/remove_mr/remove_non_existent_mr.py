@@ -19,12 +19,11 @@ class Scenario(vedro.Scenario):
         self.result = await self.queue.remove_from_queue(999)
 
     def then_result_should_be_false(self):
-        assert self.result is False, f"Expected False, got {self.result}"
+        assert self.result is False
 
     async def and_queue_should_still_be_empty(self):
         length = await self.queue.get_queue_length()
-        assert length == 0, f"Expected 0, got {length}"
+        assert length == 0
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_context"):
-            await self._db_context.__aexit__(None, None, None)
+        await self._db_context.__aexit__(None, None, None)

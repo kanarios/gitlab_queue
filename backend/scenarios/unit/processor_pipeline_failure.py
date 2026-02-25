@@ -168,11 +168,13 @@ async def process_mr_with_pipeline_failure_and_retry():
 
             # Verify merge was eventually called
             merge_history = await merge_mock.fetch_history()
-            assert len(merge_history) == 1, "Merge should be called after retry"
+            assert len(merge_history) == 1
 
             # Verify final state
             mr_state = await queue.get_mr_state(50)
             assert mr_state["status"] == "merged"
+
+    await db.close()
 
 
 @scenario()
@@ -315,7 +317,7 @@ async def process_mr_with_pipeline_failure_max_retries():
 
             # Verify failure comment was posted
             comment_history = await comment_mock.fetch_history()
-            assert len(comment_history) >= 1, "Failure comment should be posted"
+            assert len(comment_history) >= 1
 
             # Final state depends on mock response ordering (see NOTE above)
             mr_state = await queue.get_mr_state(51)
@@ -324,6 +326,8 @@ async def process_mr_with_pipeline_failure_max_retries():
                 "testing",
                 "timeout",
             ), f"MR should be failed, testing, or timeout, got {mr_state['status']}"
+
+    await db.close()
 
 
 @scenario()
@@ -443,7 +447,7 @@ async def process_mr_with_canceled_pipeline():
 
             # Verify canceled jobs were fetched
             jobs_history = await jobs_mock.fetch_history()
-            assert len(jobs_history) >= 1, "Canceled jobs should be fetched"
+            assert len(jobs_history) >= 1
 
             # Check final state
             mr_state = await queue.get_mr_state(52)
@@ -453,6 +457,8 @@ async def process_mr_with_canceled_pipeline():
                 "merged",
                 "testing",
             ), f"MR should be failed, merged, or testing after retry, got {mr_state['status']}"
+
+    await db.close()
 
 
 __all__ = [

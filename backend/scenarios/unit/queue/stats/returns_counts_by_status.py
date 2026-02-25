@@ -30,17 +30,16 @@ class Scenario(vedro.Scenario):
         self.stats = await self.queue.get_queue_stats()
 
     def then_queued_count_should_be_1(self):
-        assert self.stats["queued"] == 1, f"Expected 1 queued, got {self.stats['queued']}"
+        assert self.stats["queued"] == 1
 
     def and_testing_count_should_be_1(self):
-        assert self.stats["testing"] == 1, f"Expected 1 testing, got {self.stats['testing']}"
+        assert self.stats["testing"] == 1
 
     def and_rebasing_count_should_be_0(self):
-        assert self.stats["rebasing"] == 0, f"Expected 0 rebasing, got {self.stats['rebasing']}"
+        assert self.stats["rebasing"] == 0
 
     def and_merging_count_should_be_0(self):
-        assert self.stats["merging"] == 0, f"Expected 0 merging, got {self.stats['merging']}"
+        assert self.stats["merging"] == 0
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_context"):
-            await self._db_context.__aexit__(None, None, None)
+        await self._db_context.__aexit__(None, None, None)

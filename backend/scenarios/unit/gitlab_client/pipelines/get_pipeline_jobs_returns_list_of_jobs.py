@@ -43,5 +43,4 @@ class Scenario(vedro.Scenario):
         assert failed_job.name == "build"
 
     async def do_cleanup(self):
-        if hasattr(self, "client"):
-            await self.client.close()
+        await self.client.close()

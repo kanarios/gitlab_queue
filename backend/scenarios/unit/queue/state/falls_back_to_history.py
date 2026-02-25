@@ -6,27 +6,8 @@ import vedro
 from scenarios.contexts.sqlite_client import initialized_test_database
 
 from gitlab_queue.core.queue import QueueManager
-from gitlab_queue.models.mr import Author, MergeRequest
 
-
-def create_test_mr(
-    iid: int,
-    title: str = "Test MR",
-    author_name: str = "Test User",
-    author_username: str = "testuser",
-) -> MergeRequest:
-    """Create a test MergeRequest with minimal required fields."""
-    return MergeRequest(
-        iid=iid,
-        title=title,
-        state="opened",
-        labels=["feature"],
-        sha=f"sha{iid}",
-        source_branch=f"feature-{iid}",
-        target_branch="master",
-        merge_status="can_be_merged",
-        author=Author(id=iid, name=author_name, username=author_username),
-    )
+from ._helpers import create_test_mr
 
 
 class Scenario(vedro.Scenario):
@@ -49,14 +30,13 @@ class Scenario(vedro.Scenario):
         self.state = await self.queue.get_mr_state(42)
 
     def then_state_should_not_be_none(self):
-        assert self.state is not None, "Expected state from history, got None"
+        assert self.state is not None
 
     def and_status_should_be_merged(self):
-        assert self.state["status"] == "merged", f"Expected 'merged', got '{self.state['status']}'"
+        assert self.state["status"] == "merged"
 
     def and_finished_at_should_be_set(self):
-        assert self.state["finished_at"] is not None, "Expected finished_at to be set in history"
+        assert self.state["finished_at"] is not None
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_context"):
-            await self._db_context.__aexit__(None, None, None)
+        await self._db_context.__aexit__(None, None, None)

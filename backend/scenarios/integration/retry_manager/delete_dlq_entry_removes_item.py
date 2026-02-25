@@ -35,12 +35,11 @@ class Scenario(vedro.Scenario):
         self.deleted = await self.manager.delete_dlq_entry(self.dlq_id)
 
     def then_delete_should_return_true(self):
-        assert self.deleted is True, "Expected delete to return True"
+        assert self.deleted is True
 
     async def and_dlq_should_be_empty(self):
         entries = await self.manager.get_dlq_entries()
-        assert len(entries) == 0, f"Expected 0 DLQ entries after deletion, got {len(entries)}"
+        assert len(entries) == 0
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_ctx"):
-            await self._db_ctx.__aexit__(None, None, None)
+        await self._db_ctx.__aexit__(None, None, None)

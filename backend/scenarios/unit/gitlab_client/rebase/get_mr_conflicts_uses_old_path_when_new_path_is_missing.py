@@ -28,5 +28,4 @@ class Scenario(vedro.Scenario):
         assert self.result == ["legacy.py"]
 
     async def do_cleanup(self):
-        if hasattr(self, "client"):
-            await self.client.close()
+        await self.client.close()

@@ -29,7 +29,7 @@ class Scenario(vedro.Scenario):
             self.raised = exc
 
     def then_configuration_error_is_raised(self):
-        assert self.raised is not None, "Expected ConfigurationError to be raised"
+        assert self.raised is not None
 
     def and_message_mentions_webhook_retry(self):
         assert "webhook_retry_max_delay_seconds" in str(self.raised), (

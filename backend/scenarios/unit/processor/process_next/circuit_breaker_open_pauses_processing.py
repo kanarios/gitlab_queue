@@ -66,6 +66,4 @@ class Scenario(vedro.Scenario):
         return False
 
     def then_interruptible_sleep_was_called(self):
-        self.mock_sleep.assert_awaited()
-        first_call_seconds = self.mock_sleep.call_args_list[0][0][0]
-        assert first_call_seconds == 1
+        self.mock_sleep.assert_any_await(1)

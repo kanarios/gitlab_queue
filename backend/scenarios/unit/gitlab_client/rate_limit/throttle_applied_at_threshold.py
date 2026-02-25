@@ -26,12 +26,11 @@ class Scenario(vedro.Scenario):
             await self.client._apply_rate_limit_throttle()
 
     def then_sleep_should_be_called(self):
-        assert self.mock_sleep.called
+        self.mock_sleep.assert_awaited_once()
 
     def and_delay_should_be_positive(self):
-        delay = self.mock_sleep.call_args[0][0]
-        assert delay > 0
+        args, _ = self.mock_sleep.await_args
+        assert args[0] > 0
 
     async def do_cleanup(self):
-        if hasattr(self, "client"):
-            await self.client.close()
+        await self.client.close()

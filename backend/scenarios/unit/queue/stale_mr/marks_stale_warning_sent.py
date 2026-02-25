@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import vedro
 from scenarios.contexts.sqlite_client import initialized_test_database
-from sqlalchemy import text
 
 from gitlab_queue.core.queue import QueueManager
 
-from ._helpers import create_test_mr
+from ._helpers import backfill_queued_at_hours_ago, create_test_mr
 
 
 class Scenario(vedro.Scenario):
@@ -23,23 +22,17 @@ class Scenario(vedro.Scenario):
         mr = create_test_mr(iid=42)
         await self.queue.add_to_queue(mr)
 
-        # Make MR stale by setting queued_at to 2 hours ago
-        async with self.db.transaction() as session:
-            await session.execute(
-                text("UPDATE merge_requests SET queued_at = datetime('now', '-2 hours') WHERE iid = :iid"),
-                {"iid": 42},
-            )
+        await backfill_queued_at_hours_ago(self.db, iid=42, hours=2)
 
     async def when_stale_warning_is_marked(self):
         self.mark_result = await self.queue.mark_stale_warning_sent(42)
 
     def then_mark_result_should_be_true(self):
-        assert self.mark_result is True, f"Expected True, got {self.mark_result}"
+        assert self.mark_result is True
 
     async def and_stale_mrs_should_be_empty(self):
         stale = await self.queue.get_stale_mrs(hours=1)
-        assert len(stale) == 0, f"Expected 0 stale MRs after marking, got {len(stale)}"
+        assert len(stale) == 0
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_context"):
-            await self._db_context.__aexit__(None, None, None)
+        await self._db_context.__aexit__(None, None, None)

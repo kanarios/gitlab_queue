@@ -46,11 +46,7 @@ class Scenario(vedro.Scenario):
         self.scheduler.request_shutdown()
 
     def then_shutdown_should_be_requested(self):
-        assert self.scheduler.is_shutdown_requested is True, (
-            "Expected is_shutdown_requested to be True after request_shutdown()"
-        )
+        assert self.scheduler.is_shutdown_requested is True
 
     def and_shutdown_event_should_be_set(self):
-        assert self.scheduler._shutdown_event.is_set() is True, (
-            "Expected _shutdown_event to be set after request_shutdown()"
-        )
+        assert self.scheduler._shutdown_event.is_set() is True

@@ -55,23 +55,15 @@ class Scenario(vedro.Scenario):
     def and_notifier_should_be_called_with_rebase_during_testing_template(self):
         self.notifier.notify.assert_awaited_once()
         call_args = self.notifier.notify.call_args
-        assert call_args.args[1] == "rebase_during_testing", (
-            f"Expected 'rebase_during_testing' template, got '{call_args.args[1]}'"
-        )
+        assert call_args.args[1] == "rebase_during_testing"
 
     def and_notification_should_include_pipeline_ids(self):
         call_kwargs = self.notifier.notify.call_args.kwargs
-        assert call_kwargs["old_pipeline_id"] == 100, (
-            f"Expected old_pipeline_id=100, got {call_kwargs['old_pipeline_id']}"
-        )
-        assert call_kwargs["pipeline_id"] == 200, f"Expected pipeline_id=200, got {call_kwargs['pipeline_id']}"
-        assert call_kwargs["rebase_count"] == 1, f"Expected rebase_count=1, got {call_kwargs['rebase_count']}"
-        assert call_kwargs["max_attempts"] == 3, f"Expected max_attempts=3, got {call_kwargs['max_attempts']}"
+        assert call_kwargs["old_pipeline_id"] == 100
+        assert call_kwargs["pipeline_id"] == 200
+        assert call_kwargs["rebase_count"] == 1
+        assert call_kwargs["max_attempts"] == 3
 
     def and_context_should_be_updated_with_new_pipeline(self):
-        assert self.sm._context["pipeline_id"] == 200, (
-            f"Expected context pipeline_id=200, got {self.sm._context['pipeline_id']}"
-        )
-        assert self.sm._context["pipeline_url"] == "https://gitlab.com/pipeline/200", (
-            f"Expected updated pipeline_url, got {self.sm._context['pipeline_url']}"
-        )
+        assert self.sm._context["pipeline_id"] == 200
+        assert self.sm._context["pipeline_url"] == "https://gitlab.com/pipeline/200"

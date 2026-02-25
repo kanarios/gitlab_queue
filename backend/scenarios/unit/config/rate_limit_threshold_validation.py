@@ -29,9 +29,7 @@ class Scenario(vedro.Scenario):
             self.raised = exc
 
     def then_configuration_error_is_raised(self):
-        assert self.raised is not None, "Expected ConfigurationError to be raised"
+        assert self.raised is not None
 
     def and_message_mentions_threshold(self):
-        assert "rate_limit_critical_threshold" in str(self.raised), (
-            f"Expected threshold mentioned in error, got: {self.raised}"
-        )
+        assert "rate_limit_critical_threshold" in str(self.raised)

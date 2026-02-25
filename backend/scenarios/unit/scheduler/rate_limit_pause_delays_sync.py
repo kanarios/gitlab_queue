@@ -62,12 +62,10 @@ class Scenario(vedro.Scenario):
         self.should_pause, self.pause_seconds = self.scheduler._should_pause_for_rate_limit()
 
     def then_should_pause_should_be_true(self):
-        assert self.should_pause is True, (
-            f"Expected should_pause=True when rate limit is critical, got {self.should_pause}"
-        )
+        assert self.should_pause is True
 
     def and_pause_seconds_should_be_positive(self):
-        assert self.pause_seconds > 0, f"Expected positive pause_seconds, got {self.pause_seconds}"
+        assert self.pause_seconds > 0
 
     def and_pause_seconds_should_match_reset_time(self):
-        assert self.pause_seconds == 30.0, f"Expected 30.0 seconds until reset, got {self.pause_seconds}"
+        assert self.pause_seconds == 30.0

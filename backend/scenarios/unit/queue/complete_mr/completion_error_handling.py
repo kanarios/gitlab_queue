@@ -24,20 +24,19 @@ class Scenario(vedro.Scenario):
         await self.queue.update_mr_state(42, "merged")
         # First completion moves MR to history
         first_result = await self.queue.complete_mr(42, "merged")
-        assert first_result is True, "First completion should succeed"
+        assert first_result is True
 
     async def when_mr_is_completed_again(self):
         # Second completion should return False since MR is no longer in active queue
         self.result = await self.queue.complete_mr(42, "merged")
 
     def then_result_should_be_false(self):
-        assert self.result is False, f"Expected False for duplicate completion, got {self.result}"
+        assert self.result is False
 
     async def and_history_record_should_still_exist(self):
         state = await self.queue.get_mr_state(42)
-        assert state is not None, "Expected MR to remain in history"
-        assert state["status"] == "merged", f"Expected 'merged', got {state['status']}"
+        assert state is not None
+        assert state["status"] == "merged"
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_context"):
-            await self._db_context.__aexit__(None, None, None)
+        await self._db_context.__aexit__(None, None, None)

@@ -29,7 +29,7 @@ class Scenario(vedro.Scenario):
 
     def then_oldest_mr_should_be_returned(self):
         assert self.next_item is not None
-        assert self.next_item.mr_iid == 100, f"Expected oldest MR (100), got {self.next_item.mr_iid}"
+        assert self.next_item.mr_iid == 100
 
     async def and_subsequent_calls_return_same_until_state_change(self):
         # get_next_mr returns status='queued' only, so calling again returns same
@@ -38,5 +38,4 @@ class Scenario(vedro.Scenario):
         assert second_next.mr_iid == 100
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_context"):
-            await self._db_context.__aexit__(None, None, None)
+        await self._db_context.__aexit__(None, None, None)

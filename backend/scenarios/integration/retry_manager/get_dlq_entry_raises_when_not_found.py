@@ -30,5 +30,4 @@ class Scenario(vedro.Scenario):
         assert "999" in str(self.exc_info.value)
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_ctx"):
-            await self._db_ctx.__aexit__(None, None, None)
+        await self._db_ctx.__aexit__(None, None, None)

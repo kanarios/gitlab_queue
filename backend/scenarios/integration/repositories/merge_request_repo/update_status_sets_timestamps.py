@@ -37,5 +37,4 @@ class Scenario(vedro.Scenario):
             assert mr.started_at is not None
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_ctx"):
-            await self._db_ctx.__aexit__(None, None, None)
+        await self._db_ctx.__aexit__(None, None, None)

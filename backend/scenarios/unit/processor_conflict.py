@@ -139,19 +139,21 @@ async def process_mr_with_immediate_conflict():
 
             # Verify rebase was attempted
             rebase_history = await rebase_mock.fetch_history()
-            assert len(rebase_history) == 1, "Rebase should have been attempted"
+            assert len(rebase_history) == 1
 
             # Verify conflicts were fetched
             conflicts_history = await conflicts_mock.fetch_history()
-            assert len(conflicts_history) >= 1, "Conflicts should have been fetched"
+            assert len(conflicts_history) >= 1
 
             # Verify conflict comment was posted
             comment_history = await comment_mock.fetch_history()
-            assert len(comment_history) >= 1, "Conflict comment should be posted"
+            assert len(comment_history) >= 1
 
             # Verify queue state
             mr_state = await queue.get_mr_state(44)
-            assert mr_state["status"] == "conflict", f"MR should be conflict, got {mr_state}"
+            assert mr_state["status"] == "conflict"
+
+    await db.close()
 
 
 @scenario()
@@ -281,6 +283,8 @@ async def process_mr_with_conflict_during_rebase():
             mr_state = await queue.get_mr_state(45)
             assert mr_state["status"] == "conflict"
 
+    await db.close()
+
 
 @scenario()
 async def process_mr_with_conflict_after_multiple_mrs():
@@ -408,6 +412,8 @@ async def process_mr_with_conflict_after_multiple_mrs():
             # Verify rebase was attempted
             rebase_history = await rebase_mock.fetch_history()
             assert len(rebase_history) == 1
+
+    await db.close()
 
 
 __all__ = [

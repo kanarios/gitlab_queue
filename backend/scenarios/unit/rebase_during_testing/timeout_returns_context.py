@@ -75,17 +75,13 @@ class Scenario(vedro.Scenario):
         self.new_ctx, self.new_pipeline = await self.handler.handle_rebase_if_needed(42, self.ctx)
 
     def then_new_pipeline_should_be_none(self):
-        assert self.new_pipeline is None, f"Expected None pipeline on timeout, got {self.new_pipeline}"
+        assert self.new_pipeline is None
 
     def and_rebase_count_should_be_incremented(self):
-        assert self.new_ctx.rebase_count == 1, (
-            f"Expected rebase_count=1 even on timeout, got {self.new_ctx.rebase_count}"
-        )
+        assert self.new_ctx.rebase_count == 1
 
     def and_current_pipeline_id_should_be_none(self):
-        assert self.new_ctx.current_pipeline_id is None, (
-            f"Expected current_pipeline_id=None on timeout, got {self.new_ctx.current_pipeline_id}"
-        )
+        assert self.new_ctx.current_pipeline_id is None
 
     def and_rebase_should_have_been_attempted(self):
         self.gitlab_client.rebase_mr.assert_awaited_once_with(42)

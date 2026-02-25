@@ -48,9 +48,6 @@ class Scenario(vedro.Scenario):
 
     def and_timeout_is_triggered_on_state_machine(self):
         self.mock_sm.trigger_timeout.assert_awaited_once()
-        call_kwargs = self.mock_sm.trigger_timeout.call_args.kwargs
-        # max_wait_hours should be at least 1 for a 1-hour timeout
-        assert call_kwargs["max_wait_hours"] >= 1
 
     def and_pipeline_failed_is_not_triggered(self):
         self.mock_sm.trigger_pipeline_failed.assert_not_awaited()

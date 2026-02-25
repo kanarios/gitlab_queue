@@ -17,11 +17,10 @@ class Scenario(vedro.Scenario):
         self.status = await self.db.health_check()
 
     def then_foreign_keys_should_be_enabled(self):
-        assert self.status.foreign_keys_enabled, "Expected foreign_keys to be enabled after initialization"
+        assert self.status.foreign_keys_enabled is True
 
     def and_database_should_be_connected(self):
-        assert self.status.connected, "Database should be connected"
+        assert self.status.connected is True
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_ctx"):
-            await self._db_ctx.__aexit__(None, None, None)
+        await self._db_ctx.__aexit__(None, None, None)

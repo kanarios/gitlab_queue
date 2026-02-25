@@ -21,8 +21,7 @@ class Scenario(vedro.Scenario):
         self.result = await self.queue.complete_mr(999, "merged")
 
     def then_result_should_be_false(self):
-        assert self.result is False, f"Expected False, got {self.result}"
+        assert self.result is False
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_context"):
-            await self._db_context.__aexit__(None, None, None)
+        await self._db_context.__aexit__(None, None, None)

@@ -21,7 +21,7 @@ class Scenario(vedro.Scenario):
             self.raised = exc
 
     def then_value_error_is_raised(self):
-        assert self.raised is not None, "Expected ValueError to be raised"
+        assert self.raised is not None
 
     def and_message_contains_invalid_log_level(self):
-        assert "Invalid log level" in str(self.raised), f"Expected 'Invalid log level' in message, got: {self.raised}"
+        assert "Invalid log level" in str(self.raised)

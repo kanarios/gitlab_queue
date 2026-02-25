@@ -45,20 +45,19 @@ class Scenario(vedro.Scenario):
         # MR 1 is "merged" (terminal) and MR 2 is "failed" (terminal),
         # but both are still in the active table. get_active_queue filters
         # to only active states, so only MR 3 (queued) counts.
-        assert self.stats.total_in_queue == 1, f"Expected 1 active, got {self.stats.total_in_queue}"
+        assert self.stats.total_in_queue == 1
 
     def and_merged_count_should_be_1(self):
-        assert self.stats.merged_count == 1, f"Expected 1 merged, got {self.stats.merged_count}"
+        assert self.stats.merged_count == 1
 
     def and_failed_count_should_be_1(self):
-        assert self.stats.failed_count == 1, f"Expected 1 failed, got {self.stats.failed_count}"
+        assert self.stats.failed_count == 1
 
     def and_success_rate_should_be_50(self):
-        assert self.stats.success_rate == 50.0, f"Expected 50.0% success rate, got {self.stats.success_rate}"
+        assert self.stats.success_rate == 50.0
 
     def and_stats_window_should_be_7_days(self):
-        assert self.stats.stats_window_days == 7, f"Expected 7 day window, got {self.stats.stats_window_days}"
+        assert self.stats.stats_window_days == 7
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_context"):
-            await self._db_context.__aexit__(None, None, None)
+        await self._db_context.__aexit__(None, None, None)

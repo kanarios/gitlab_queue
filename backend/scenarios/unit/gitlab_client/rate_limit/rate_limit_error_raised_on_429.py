@@ -46,5 +46,4 @@ class Scenario(vedro.Scenario):
         assert self.error.retry_after == 60
 
     async def do_cleanup(self):
-        if hasattr(self, "client"):
-            await self.client.close()
+        await self.client.close()

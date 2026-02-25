@@ -47,19 +47,14 @@ class Scenario(vedro.Scenario):
         assert isinstance(self.stats, DLQStats)
 
     def and_total_count_should_be_3(self):
-        assert self.stats.total_count == 3, f"Expected total_count=3, got {self.stats.total_count}"
+        assert self.stats.total_count == 3
 
     def and_by_event_type_should_have_correct_counts(self):
-        assert self.stats.by_event_type.get("merge_request") == 2, (
-            f"Expected 2 merge_request entries, got {self.stats.by_event_type.get('merge_request')}"
-        )
-        assert self.stats.by_event_type.get("pipeline") == 1, (
-            f"Expected 1 pipeline entry, got {self.stats.by_event_type.get('pipeline')}"
-        )
+        assert self.stats.by_event_type.get("merge_request") == 2
+        assert self.stats.by_event_type.get("pipeline") == 1
 
     def and_oldest_entry_should_be_set(self):
-        assert self.stats.oldest_entry is not None, "Expected oldest_entry to be set"
+        assert self.stats.oldest_entry is not None
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_ctx"):
-            await self._db_ctx.__aexit__(None, None, None)
+        await self._db_ctx.__aexit__(None, None, None)

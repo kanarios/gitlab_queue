@@ -24,15 +24,11 @@ class Scenario(vedro.Scenario):
         self.status = await self.db.health_check()
 
     def then_wal_mode_should_be_enabled(self):
-        assert self.status.wal_mode_enabled, (
-            f"Expected WAL mode to be enabled, got journal_mode check: {self.status.wal_mode_enabled}"
-        )
+        assert self.status.wal_mode_enabled
 
     def and_database_should_be_connected(self):
-        assert self.status.connected, "Database should be connected after initialization"
+        assert self.status.connected
 
     async def do_cleanup(self):
-        if hasattr(self, "db"):
-            await self.db.close()
-        if hasattr(self, "_tmp_dir"):
-            self._tmp_dir.cleanup()
+        await self.db.close()
+        self._tmp_dir.cleanup()

@@ -12,8 +12,10 @@ from __future__ import annotations
 import secrets
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import vedro
 from scenarios.contexts.api_helpers import created_test_app
+from scenarios.unit.auth.routes._helpers import create_mock_httpx_client
 from starlette.testclient import TestClient
 
 
@@ -51,13 +53,10 @@ class ScenarioMissingAccessToken(vedro.Scenario):
         self.oauth_state = secrets.token_urlsafe(32)
 
         # Mock httpx client: token response has no access_token
-        self.mock_client = AsyncMock()
         token_response = MagicMock()
         token_response.status_code = 200
         token_response.json.return_value = {"token_type": "bearer"}  # no access_token
-        self.mock_client.post = AsyncMock(return_value=token_response)
-        self.mock_client.__aenter__ = AsyncMock(return_value=self.mock_client)
-        self.mock_client.__aexit__ = AsyncMock(return_value=None)
+        self.mock_client = create_mock_httpx_client(token_response=token_response)
 
     def when_token_exchange_is_requested(self):
         with patch(
@@ -90,18 +89,9 @@ class ScenarioUserInfoFetchFails(vedro.Scenario):
         self.oauth_state = secrets.token_urlsafe(32)
 
         # Token exchange succeeds, but user info returns 500
-        self.mock_client = AsyncMock()
-        token_response = MagicMock()
-        token_response.status_code = 200
-        token_response.json.return_value = {"access_token": "valid-token"}
-        self.mock_client.post = AsyncMock(return_value=token_response)
-
         userinfo_response = MagicMock()
         userinfo_response.status_code = 500
-        self.mock_client.get = AsyncMock(return_value=userinfo_response)
-
-        self.mock_client.__aenter__ = AsyncMock(return_value=self.mock_client)
-        self.mock_client.__aexit__ = AsyncMock(return_value=None)
+        self.mock_client = create_mock_httpx_client(userinfo_response=userinfo_response)
 
     def when_token_exchange_is_requested(self):
         with patch(
@@ -129,23 +119,15 @@ class ScenarioNetworkError(vedro.Scenario):
     subject = "exchange_token returns 502 when network error during userinfo fetch"
 
     def given_app_with_network_error_on_userinfo(self):
-        import httpx
-
         self.app, self.state = created_test_app()
         self.client = TestClient(self.app, raise_server_exceptions=False)
         self.oauth_state = secrets.token_urlsafe(32)
 
         # Token exchange succeeds, but user info raises network error
-        self.mock_client = AsyncMock()
-        token_response = MagicMock()
-        token_response.status_code = 200
-        token_response.json.return_value = {"access_token": "valid-token"}
-        self.mock_client.post = AsyncMock(return_value=token_response)
+        self.mock_client = create_mock_httpx_client()
         self.mock_client.get = AsyncMock(
             side_effect=httpx.ConnectError("Connection refused"),
         )
-        self.mock_client.__aenter__ = AsyncMock(return_value=self.mock_client)
-        self.mock_client.__aexit__ = AsyncMock(return_value=None)
 
     def when_token_exchange_is_requested(self):
         with patch(

@@ -42,5 +42,5 @@ class Scenario(vedro.Scenario):
     def and_get_mr_called_ten_times(self):
         assert self.mock_get_mr.call_count == 10
 
-    def and_put_never_called(self):
+    def and_put_never_awaited(self):
         self.mock_put.assert_not_awaited()

@@ -46,3 +46,6 @@ class Scenario(vedro.Scenario):
 
     def and_pipeline_success_is_not_triggered(self):
         self.mock_sm.trigger_pipeline_success.assert_not_awaited()
+
+    def and_pipeline_failed_is_not_triggered(self):
+        self.mock_sm.trigger_pipeline_failed.assert_not_awaited()

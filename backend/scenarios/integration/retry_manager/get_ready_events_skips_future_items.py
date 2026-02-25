@@ -30,10 +30,7 @@ class Scenario(vedro.Scenario):
         self.ready_events = await self.manager.get_events_ready_for_retry()
 
     def then_no_events_should_be_returned(self):
-        assert len(self.ready_events) == 0, (
-            f"Expected 0 ready events for future-scheduled items, got {len(self.ready_events)}"
-        )
+        assert len(self.ready_events) == 0
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_ctx"):
-            await self._db_ctx.__aexit__(None, None, None)
+        await self._db_ctx.__aexit__(None, None, None)

@@ -7,6 +7,8 @@ from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, created_te
 from scenarios.transports import GitLabMockTransport
 from scenarios.transports.responses import note_response
 
+from gitlab_queue.clients.gitlab import GitLabClient
+
 
 class Scenario(vedro.Scenario):
     subject = "add_or_update_pinned_comment adds signature if missing"
@@ -28,8 +30,8 @@ class Scenario(vedro.Scenario):
         self.result = await self.client.add_or_update_pinned_comment(42, "Status without signature")
 
     def then_note_should_be_created(self):
-        assert self.result is not None
+        request_body = self.transport.get_request_json()
+        assert GitLabClient.BOT_COMMENT_SIGNATURE in request_body["body"]
 
     async def do_cleanup(self):
-        if hasattr(self, "client"):
-            await self.client.close()
+        await self.client.close()

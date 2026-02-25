@@ -54,5 +54,4 @@ class Scenario(vedro.Scenario):
             assert history.processing_time_seconds > 0
 
     async def do_cleanup(self):
-        if hasattr(self, "_db_ctx"):
-            await self._db_ctx.__aexit__(None, None, None)
+        await self._db_ctx.__aexit__(None, None, None)

@@ -56,4 +56,4 @@ class Scenario(vedro.Scenario):
         assert self.result == ProcessingResult.ERROR
 
     def and_interruptible_sleep_was_called(self):
-        self.mock_sleep.assert_awaited()
+        self.mock_sleep.assert_awaited_once()
