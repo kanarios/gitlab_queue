@@ -28,6 +28,17 @@ class Scenario(vedro.Scenario):
     subject = "handle pipeline failure retry returns retry signal when new pipeline found"
 
     def given_processor_with_failed_pipeline_and_retry_available(self):
+        """
+        Prepare a test scenario with a mock processor where a failed pipeline is eligible for a retry and a new pipeline is started after a successful rebase.
+        
+        Sets up:
+        - a mock processor and queue item (MR IID 42) carrying the pre-rebase expected SHA,
+        - an old failed pipeline and a new running pipeline with an updated SHA,
+        - GitLab client mocks: rebase status returns (not in progress, no conflicts), `get_mr` yields pre- and post-rebase MR states, and `get_latest_mr_pipeline` returns the new pipeline,
+        - notifier to build pipeline URLs,
+        - a mock state machine and processing context,
+        - test variables `failed_jobs`, `retry_count` (0), and `max_retries` (1).
+        """
         self.processor = create_mock_processor()
 
         # Queue item carries the expected SHA for the MR
@@ -70,6 +81,13 @@ class Scenario(vedro.Scenario):
         self.max_retries = 1
 
     async def when_handle_pipeline_failure_retry_is_called(self):
+        """
+        Call processor._handle_pipeline_failure_retry and store its results on the scenario.
+        
+        Awaits the processor's retry handler with the scenario's context, pipeline, failed jobs,
+        retry_count, and max_retries, then assigns the returned tuple to self.should_continue
+        and self.new_start_time.
+        """
         self.should_continue, self.new_start_time = await self.processor._handle_pipeline_failure_retry(
             ctx=self.ctx,
             pipeline=self.old_pipeline,
@@ -82,10 +100,19 @@ class Scenario(vedro.Scenario):
         assert self.should_continue is True
 
     def and_new_start_time_is_set(self):
+        """
+        Assert that self.new_start_time is set and is a datetime instance.
+        
+        Raises:
+            AssertionError: If new_start_time is None or not a datetime instance.
+        """
         assert self.new_start_time is not None
         assert isinstance(self.new_start_time, datetime)
 
     def and_pipeline_retry_is_notified_on_state_machine(self):
+        """
+        Assert that the state machine was notified exactly once about a pipeline retry and that the notification contained the expected old_pipeline_id (100), new_pipeline_id (200), retry_count (1), and max_retries (1).
+        """
         self.mock_sm.notify_pipeline_retry.assert_awaited_once()
         call_kwargs = self.mock_sm.notify_pipeline_retry.call_args.kwargs
         assert call_kwargs["old_pipeline_id"] == 100
@@ -94,4 +121,9 @@ class Scenario(vedro.Scenario):
         assert call_kwargs["max_retries"] == 1
 
     def and_pipeline_failed_is_not_triggered(self):
+        """
+        Asserts that the state machine's trigger_pipeline_failed coroutine was not awaited.
+        
+        Verifies the pipeline-failed transition was not triggered in this scenario.
+        """
         self.mock_sm.trigger_pipeline_failed.assert_not_awaited()

@@ -92,6 +92,11 @@ class Scenario(vedro.Scenario):
 
     async def when_processor_processes_mr(self):
         # Setup mocks
+        """
+        Sets up HTTP mocks for GitLab API endpoints, runs the merge processor against the queued merge request, and records the outcome.
+        
+        This method configures mock responses for fetching the MR, triggering a rebase, listing pipelines, performing the merge, reading notes, and posting a comment. It constructs the GitLab client, notifier, and MergeProcessor, retrieves the next MR from the queue, asserts an item was retrieved, invokes the processor on that item, and stores the processing result along with the recorded merge and comment mock histories on the test instance (self.result, self.merge_history, self.comment_history).
+        """
         get_mr_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/42")
         get_mr_response = jj.Response(status=200, json=self.mr_data)
 
@@ -141,6 +146,12 @@ class Scenario(vedro.Scenario):
 
     async def then_mr_is_successfully_merged(self):
         # Check processing result
+        """
+        Assert that the merge request was processed and merged successfully.
+        
+        Checks that processing result is SUCCESS, exactly one merge operation was invoked,
+        the MR's queue state is "merged" for IID 42, and at least one comment was posted.
+        """
         assert self.result == ProcessingResult.SUCCESS
 
         # Verify merge was called
@@ -154,5 +165,10 @@ class Scenario(vedro.Scenario):
         assert len(self.comment_history) >= 1
 
     async def cleanup(self):
+        """
+        Close the database connection if it has been initialized.
+        
+        If the Scenario instance holds an open database in `self.db`, close it; otherwise do nothing.
+        """
         if self.db:
             await self.db.close()

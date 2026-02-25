@@ -33,6 +33,9 @@ class Scenario(vedro.Scenario):
         self.pipeline = create_mock_pipeline(pipeline_id=100, sha="def456", status="success")
 
     async def when_should_skip_stale_pipeline_is_called(self):
+        """
+        Call processor._should_skip_stale_pipeline with MR IID 42 and the scenario pipeline, and store the call's outcome on self.result.
+        """
         self.result = await self.processor._should_skip_stale_pipeline(42, self.pipeline)
 
     def then_pipeline_should_be_skipped(self):

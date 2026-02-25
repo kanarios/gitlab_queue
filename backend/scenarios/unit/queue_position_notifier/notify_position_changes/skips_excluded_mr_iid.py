@@ -34,6 +34,11 @@ class Scenario(vedro.Scenario):
         )
 
     async def when_notify_position_changes_is_called_with_excluded_mr(self):
+        """
+        Invoke the position notifier's _notify_position_changes with the configured excluded MR and record the result.
+        
+        Sets self.notified_count to the number of notifications reported by the notifier call.
+        """
         self.notified_count = await self.position_notifier._notify_position_changes(
             excluded_mr_iid=self.excluded_mr_iid,
             positions_before=self.positions_before,

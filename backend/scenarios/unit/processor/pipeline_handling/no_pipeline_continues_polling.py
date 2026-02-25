@@ -25,6 +25,15 @@ class Scenario(vedro.Scenario):
     subject = "wait for pipeline continues polling when no pipeline found"
 
     def given_processor_with_no_pipeline(self):
+        """
+        Prepare the scenario with a mock processor and processing context where no pipeline exists for the merge request.
+        
+        Configures:
+        - a mock processor,
+        - a mock state machine with current state id "testing",
+        - a processing context with mr_iid 42 using that state machine,
+        and sets the processor's GitLab client's get_latest_mr_pipeline to return None to simulate "no pipeline found".
+        """
         self.processor = create_mock_processor()
 
         self.mock_sm = create_mock_state_machine()
@@ -36,6 +45,11 @@ class Scenario(vedro.Scenario):
 
     async def when_wait_for_pipeline_is_called(self):
         # First call: return None (continue), second call: return ERROR (stop loop)
+        """
+        Invokes the processor's _wait_for_pipeline while simulating a "no pipeline found" poll followed by a termination.
+        
+        Patches _check_pipeline_termination_conditions to first yield None (continue polling) and then ProcessingResult.ERROR (stop), patches _interruptible_sleep to be awaitable, awaits _wait_for_pipeline, and stores the outcome on self.result.
+        """
         with (
             patch.object(
                 self.processor,
@@ -53,7 +67,18 @@ class Scenario(vedro.Scenario):
             self.result = await self.processor._wait_for_pipeline(self.ctx)
 
     def then_result_is_error(self):
+        """
+        Asserts that the processor's wait result indicates an error.
+        
+        Checks that `self.result` is equal to `ProcessingResult.ERROR`.
+        """
         assert self.result == ProcessingResult.ERROR
 
     def and_interruptible_sleep_was_called(self):
+        """
+        Asserts that the processor's interruptible sleep was awaited exactly once.
+        
+        Raises:
+            AssertionError: If the interruptible sleep was not awaited exactly one time.
+        """
         self.mock_sleep.assert_awaited_once()

@@ -28,6 +28,18 @@ class Scenario(vedro.Scenario):
     subject = "pipeline failure retry fails when force create pipeline raises api error"
 
     def given_processor_with_create_pipeline_failing(self):
+        """
+        Prepare a mock processor and context where forcing a pipeline creation fails with a GitLabAPIError.
+        
+        Configures:
+        - a test queue item (mr_iid=42) and an old failed pipeline (id=100, sha="sha_old");
+        - gitlab client to report rebase complete and to return an MR with sha "sha_new";
+        - get_latest_mr_pipeline to return the old pipeline (no new auto-created pipeline);
+        - create_pipeline to raise GitLabAPIError("Pipeline creation failed");
+        - notifier.build_pipeline_url to format pipeline URLs;
+        - a mock state machine and processing context for mr_iid=42;
+        - retry parameters: retry_count=0, max_retries=1, and failed_jobs=["test_job"].
+        """
         self.processor = create_mock_processor()
 
         self.queue_item = create_test_queue_item(mr_iid=42, state="testing", expected_sha="sha_old")

@@ -23,7 +23,19 @@ def create_mock_settings() -> MagicMock:
 
 
 def create_mock_gitlab_client_timeout() -> MagicMock:
-    """Create mock GitLabClient that simulates pipeline wait timeout."""
+    """
+    Create a MagicMock GitLab client configured to simulate a timeout waiting for a new pipeline after a rebase.
+    
+    The mock simulates an MR that initially needs a rebase and then appears updated after a rebase, while pipeline polling always returns a stale/canceled pipeline with the old commit SHA to emulate a timeout scenario.
+    
+    Returns:
+        MagicMock: A mock GitLab client with configured async methods:
+            - get_mr: returns MR states in sequence (needs rebase -> needs rebase -> after rebase -> after rebase)
+            - cancel_pipeline: AsyncMock
+            - rebase_mr: AsyncMock
+            - check_rebase_status: AsyncMock returning (False, False)
+            - get_latest_mr_pipeline: AsyncMock returning a stale pipeline with the old SHA
+    """
     client = MagicMock()
 
     # check_needs_rebase: needs rebase
@@ -59,6 +71,11 @@ class Scenario(vedro.Scenario):
     subject = "timeout waiting for new pipeline returns none and updated context"
 
     def given_handler_that_will_timeout_on_pipeline_wait(self):
+        """
+        Set up a rebase handler, mocked GitLab client, settings, and an initial context configured to simulate a pipeline wait timeout.
+        
+        The created context has rebase_count=0, max_attempts=3, and current_pipeline_id=100. The mocked client and settings are configured to force a timeout while waiting for a new pipeline so the handler will attempt a rebase during the test.
+        """
         self.gitlab_client = create_mock_gitlab_client_timeout()
         self.settings = create_mock_settings()
         self.handler = RebaseDuringTestingHandler(
@@ -72,6 +89,11 @@ class Scenario(vedro.Scenario):
         )
 
     async def when_handle_rebase_if_needed_is_called(self):
+        """
+        Call the rebase handler for MR id 42 using the current test context and store the results on the scenario instance.
+        
+        This step invokes handler.handle_rebase_if_needed(42, self.ctx) and assigns the returned context to `self.new_ctx` and the returned pipeline (or None) to `self.new_pipeline`.
+        """
         self.new_ctx, self.new_pipeline = await self.handler.handle_rebase_if_needed(42, self.ctx)
 
     def then_new_pipeline_should_be_none(self):

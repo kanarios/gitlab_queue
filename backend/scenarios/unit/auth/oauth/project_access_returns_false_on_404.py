@@ -13,6 +13,13 @@ class Scenario(vedro.Scenario):
     subject = "validate_project_access returns False on 404"
 
     def given_gitlab_returns_404(self):
+        """
+        Prepare test attributes that simulate a GitLab HTTP 404 response.
+        
+        Creates:
+        - self.mock_response: a MagicMock with status_code set to 404.
+        - self.mock_client: an AsyncMock whose .get() returns self.mock_response and which implements async context manager methods (__aenter__/__aexit__).
+        """
         self.mock_response = MagicMock()
         self.mock_response.status_code = 404
         self.mock_client = AsyncMock()

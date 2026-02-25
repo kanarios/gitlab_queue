@@ -29,14 +29,30 @@ class Scenario(vedro.Scenario):
         self.hotfix_item = await self.queue.add_to_queue(hotfix, is_hotfix=True)
 
     async def then_hotfix_should_be_at_position_1(self):
+        """
+        Assert that the hotfix merge request with IID 99 occupies queue position 1.
+        
+        Raises:
+            AssertionError: If the MR's queue position is not 1.
+        """
         position = await self.queue.get_queue_position(99)
         assert position == 1
 
     async def and_regular_mrs_should_shift_positions(self):
+        """
+        Asserts that regular merge requests were shifted one position back after a hotfix was added.
+        
+        Checks queue positions for MRs with IIDs 1, 2, and 3 and verifies each equals its IID plus 1, confirming they were moved down by one slot.
+        """
         for iid in [1, 2, 3]:
             position = await self.queue.get_queue_position(iid)
             expected = iid + 1  # Shifted by 1 due to hotfix
             assert position == expected
 
     async def do_cleanup(self):
+        """
+        Close the test database context and release its resources.
+        
+        This exits the asynchronous database context manager used by the scenario to ensure connections and temporary state are cleaned up.
+        """
         await self._db_context.__aexit__(None, None, None)

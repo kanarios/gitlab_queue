@@ -23,9 +23,23 @@ class Scenario(vedro.Scenario):
         self.manager._connections.add(self.mock_ws)
 
     async def when_mr_status_changed_is_broadcast(self):
+        """
+        Trigger broadcasting an mr:status_changed event for IID 42 with a queued→rebasing status transition.
+        
+        This awaits the WebSocketManager to broadcast an event indicating merge request 42 changed from QueueState.QUEUED to QueueState.REBASING.
+        """
         await self.manager.broadcast_mr_status_changed(42, QueueState.QUEUED, QueueState.REBASING)
 
     def then_broadcast_should_contain_status_change(self):
+        """
+        Assert that the mocked WebSocket received an mr:status_changed broadcast with the expected payload.
+        
+        Verifies that send_json was awaited exactly once and that the sent JSON has:
+        - type "mr:status_changed"
+        - data.iid equals 42
+        - data.oldStatus equals "queued"
+        - data.newStatus equals "rebasing"
+        """
         self.mock_ws.send_json.assert_awaited_once()
         call_args = self.mock_ws.send_json.call_args[0][0]
         assert call_args["type"] == "mr:status_changed"

@@ -16,6 +16,11 @@ class Scenario(vedro.Scenario):
     subject = "recover interrupted state handles database error gracefully"
 
     def given_processor_with_database_error(self):
+        """
+        Configure a mock processor that simulates a database error when retrieving the active queue.
+        
+        Sets self.processor to a mock processor and configures its queue_manager.get_active_queue to raise Exception("DB error") when invoked.
+        """
         self.processor = create_mock_processor()
         self.processor.queue_manager.get_active_queue.side_effect = Exception("DB error")
 
@@ -27,4 +32,10 @@ class Scenario(vedro.Scenario):
             self.raised = exc
 
     def then_no_error_is_raised(self):
+        """
+        Asserts that the recovery operation did not raise an exception.
+        
+        Raises:
+            AssertionError: If an exception was captured during recovery.
+        """
         assert self.raised is None

@@ -25,6 +25,9 @@ class Scenario(vedro.Scenario):
         self.finished_at = datetime.now(UTC)
 
     async def when_mr_completed_is_broadcast(self):
+        """
+        Trigger broadcasting of a merge request completion event with IID 42, merged status, and the scenario's finished_at timestamp.
+        """
         await self.manager.broadcast_mr_completed(
             mr_iid=42,
             status=QueueState.MERGED,
@@ -32,6 +35,15 @@ class Scenario(vedro.Scenario):
         )
 
     def then_broadcast_should_contain_completion_info(self):
+        """
+        Assert that the last broadcast contains Merge Request completion information.
+        
+        Verifies that send_json was awaited exactly once and that the payload has:
+        - "type" equal to "mr:completed"
+        - "data.iid" equal to 42
+        - "data.status" equal to "merged"
+        - "data.finishedAt" present (not None)
+        """
         self.mock_ws.send_json.assert_awaited_once()
         call_args = self.mock_ws.send_json.call_args[0][0]
         assert call_args["type"] == "mr:completed"

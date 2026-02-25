@@ -35,7 +35,14 @@ from gitlab_queue.models.mr import Author, MergeRequest
     ]
 )
 async def process_mr_with_non_actionable_pipeline_status(status: str):
-    """Test MR processing when pipeline is in non-actionable state."""
+    """
+    Exercise processing of a merge request whose pipeline is in a non-actionable status.
+    
+    Simulates an MR with the given pipeline status and verifies that processing immediately marks the MR as failed, posts a failure comment, and updates the MR state to "failed" in the database.
+    
+    Parameters:
+        status (str): Pipeline status to simulate (e.g., "manual", "skipped", "blocked", "waiting_for_resource").
+    """
 
     with given(f"MR with pipeline in '{status}' status"):
         db = Database(database_url="sqlite+aiosqlite:///:memory:")
@@ -153,7 +160,11 @@ async def process_mr_with_non_actionable_pipeline_status(status: str):
 
 @scenario()
 async def non_actionable_status_does_not_retry():
-    """Test that non-actionable status fails immediately without retry attempts."""
+    """
+    Verifies that a merge request with a non-actionable pipeline status (manual) fails immediately and is not retried.
+    
+    Asserts that the processor returns ProcessingResult.PIPELINE_FAILED, the rebase endpoint is invoked only once, and pipeline checks occur exactly twice (no retry polling).
+    """
 
     with given("MR with manual pipeline and retry count configured"):
         db = Database(database_url="sqlite+aiosqlite:///:memory:")

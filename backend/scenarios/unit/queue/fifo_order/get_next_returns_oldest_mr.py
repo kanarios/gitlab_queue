@@ -28,11 +28,21 @@ class Scenario(vedro.Scenario):
         self.next_item = await self.queue.get_next_mr()
 
     def then_oldest_mr_should_be_returned(self):
+        """
+        Assert that the previously requested next MR is present and is the oldest queued MR (IID 100).
+        
+        Checks that self.next_item is not None and that its `mr_iid` equals 100.
+        """
         assert self.next_item is not None
         assert self.next_item.mr_iid == 100
 
     async def and_subsequent_calls_return_same_until_state_change(self):
         # get_next_mr returns status='queued' only, so calling again returns same
+        """
+        Verify repeated calls to get_next_mr return the same queued merge request.
+        
+        Asserts that calling get_next_mr a second time yields a non-None MR whose IID remains 100 while the MR's state is 'queued'.
+        """
         second_next = await self.queue.get_next_mr()
         assert second_next is not None
         assert second_next.mr_iid == 100

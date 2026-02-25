@@ -358,7 +358,11 @@ async def processor_state_recovery_after_shutdown():
 
 @scenario()
 async def shutdown_timeout_handling():
-    """Test handling of shutdown timeout when processor doesn't stop quickly."""
+    """
+    Test processor behavior when the shutdown wait times out.
+    
+    Sets up an in-memory database, queue manager, GitLab client, notifier, and MergeProcessor, starts the processor, requests shutdown with a very short wait timeout, and asserts that the processor's shutdown flag is set.
+    """
 
     with given("processor that takes time to shutdown"):
         db = Database(database_url="sqlite+aiosqlite:///:memory:")

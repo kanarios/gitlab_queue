@@ -15,6 +15,15 @@ class Scenario(vedro.Scenario):
     subject = "get_stale_mrs returns only unwarned stale merge requests"
 
     async def given_database_with_stale_mrs(self):
+        """
+        Prepare a test database containing two stale merge requests: one with stale_warning_sent = 0 and one with stale_warning_sent = 1.
+        
+        Creates a test database context and session, ensures database tables exist, computes a queued_at timestamp two hours in the past (ISO format), and inserts two merge requests:
+        - iid=1, status "queued", queued_at=<old_time>, stale_warning_sent=0
+        - iid=2, status "queued", queued_at=<old_time>, stale_warning_sent=1
+        
+        Sets self._db_ctx to the test database context and self.db to the opened database session for later use.
+        """
         self._db_ctx = initialized_test_database()
         self.db = await self._db_ctx.__aenter__()
         await create_tables(self.db)
@@ -38,16 +47,34 @@ class Scenario(vedro.Scenario):
             )
 
     async def when_get_stale_mrs_is_called(self):
+        """
+        Calls the merge request repository to retrieve stale merge requests for MR id 1 and stores the returned list on self.result.
+        
+        This opens a database session, constructs a MergeRequestRepository with that session, invokes get_stale_mrs(1), and assigns the result to self.result.
+        """
         self._session_ctx = self.db.session()
         session = await self._session_ctx.__aenter__()
         repo = MergeRequestRepository(session)
         self.result = await repo.get_stale_mrs(1)
 
     def then_only_unwarned_stale_mr_should_be_returned(self):
+        """
+        Assert that the repository returned exactly one stale merge request and that it is the unwarned MR.
+        
+        Verifies that:
+        - exactly one merge request is present in self.result,
+        - that merge request has iid equal to 1,
+        - and its stale_warning_sent flag equals 0.
+        """
         assert len(self.result) == 1
         assert self.result[0].iid == 1
         assert self.result[0].stale_warning_sent == 0
 
     async def do_cleanup(self):
+        """
+        Close the database session and test database context.
+        
+        Asynchronously exit the scenario's session and database context managers to release resources opened during setup.
+        """
         await self._session_ctx.__aexit__(None, None, None)
         await self._db_ctx.__aexit__(None, None, None)

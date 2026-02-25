@@ -13,6 +13,11 @@ class Scenario(vedro.Scenario):
     subject = "model converter converts mr model to queue item"
 
     def given_mr_model(self):
+        """
+        Prepare a Merge Request model on self.mr populated with test data.
+        
+        Creates and assigns to self.mr a test MR model with preset fields used by the scenario, including iid 42, title "Test MR", author information ("Test User", "testuser", avatar URL), status "rebasing", hotfix flag set, labels ["merge_queue", "urgent"], target_branch "main", pipeline_id 1234 with status "running", retry_count 2, last_error "timeout", and stale_warning_sent flag set.
+        """
         self.mr = create_test_mr_model(
             iid=42,
             title="Test MR",
@@ -31,9 +36,24 @@ class Scenario(vedro.Scenario):
         )
 
     def when_mr_model_is_converted(self):
+        """
+        Convert the stored Merge Request model to a QueueItem and save it on self.item.
+        
+        This invokes ModelConverter.mr_model_to_queue_item with the MR model previously assigned to self.mr and stores the resulting QueueItem instance in self.item.
+        """
         self.item = ModelConverter.mr_model_to_queue_item(self.mr)
 
     def then_queue_item_fields_should_match(self):
+        """
+        Assert that the converted QueueItem matches the expected Merge Request values.
+        
+        Checks that self.item is a QueueItem and that its fields equal the expected test values:
+        mr_iid 42, title "Test MR", author_name "Test User", author_username "testuser",
+        author_avatar "https://avatar.url/test.png", state "rebasing", is_hotfix True,
+        labels ["merge_queue", "urgent"], target_branch "main", pipeline_id 1234,
+        pipeline_status "running", retry_count 2, last_error "timeout", and
+        stale_warning_sent True.
+        """
         assert isinstance(self.item, QueueItem)
         assert self.item.mr_iid == 42
         assert self.item.title == "Test MR"
@@ -51,4 +71,7 @@ class Scenario(vedro.Scenario):
         assert self.item.stale_warning_sent is True
 
     async def do_cleanup(self):
+        """
+        Asynchronous cleanup hook invoked after the scenario; this implementation performs no action.
+        """
         pass

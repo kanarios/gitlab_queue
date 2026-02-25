@@ -23,6 +23,13 @@ class Scenario(vedro.Scenario):
     subject = "process mr returns error on unexpected exception"
 
     def given_processor_with_create_state_machine_raising_runtime_error(self):
+        """
+        Set up a mock processor and a queued merge-request queue item on self.
+        
+        Creates:
+        - self.processor: a mock processor for the test.
+        - self.queue_item: a queue item representing MR with iid 42 and state "queued".
+        """
         self.processor = create_mock_processor()
         self.queue_item = create_test_queue_item(mr_iid=42, state="queued")
 
@@ -35,4 +42,10 @@ class Scenario(vedro.Scenario):
             self.result = await self.processor._process_mr(self.queue_item)
 
     def then_result_is_error(self):
+        """
+        Asserts that processing the merge request produced an error result.
+        
+        Raises:
+            AssertionError: If the stored result is not ProcessingResult.ERROR.
+        """
         assert self.result == ProcessingResult.ERROR
