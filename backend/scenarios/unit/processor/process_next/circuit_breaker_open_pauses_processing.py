@@ -41,7 +41,7 @@ class Scenario(vedro.Scenario):
             self.call_count += 1
             if self.call_count == 1:
                 raise GitLabCircuitOpenError(retry_after=1)
-            # Second call: let it pass, shutdown will stop the loop
+            # Defensive fallback: stop the loop if _interruptible_sleep is never invoked
             self.processor._shutdown_event.set()
 
         self.process_iteration_side_effect = process_iteration_side_effect

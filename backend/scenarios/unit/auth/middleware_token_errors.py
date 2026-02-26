@@ -1,6 +1,6 @@
 """Test error handling for invalid/expired tokens in auth middleware.
 
-Covers middleware.py lines 167-172:
+Covers auth middleware error handling:
 - TokenExpiredError returns 'Token has expired'
 - InvalidTokenError returns 'Invalid token'
 - Invalid Authorization header format returns error

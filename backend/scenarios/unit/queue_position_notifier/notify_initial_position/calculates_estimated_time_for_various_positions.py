@@ -38,6 +38,6 @@ class Scenario(vedro.Scenario):
         await self.position_notifier.notify_initial_position(self.mr_iid)
 
     def then_estimated_minutes_equals_position_times_15(self):
-        assert self.notifier.notify.called
+        self.notifier.notify.assert_awaited_once()
         call_kwargs = self.notifier.notify.call_args.kwargs
         assert call_kwargs["estimated_minutes"] == self.expected_minutes

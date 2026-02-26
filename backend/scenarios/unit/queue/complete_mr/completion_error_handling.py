@@ -1,4 +1,4 @@
-"""Test scenario: complete_mr handles duplicate history insertion gracefully."""
+"""Test scenario: complete_mr returns false when MR already moved to history."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from ._helpers import create_test_mr
 
 
 class Scenario(vedro.Scenario):
-    subject = "complete mr returns false on duplicate history race condition"
+    subject = "complete mr returns false when MR already moved to history"
 
     async def given_mr_already_in_history(self):
         """

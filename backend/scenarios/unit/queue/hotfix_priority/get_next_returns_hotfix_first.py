@@ -35,9 +35,5 @@ class Scenario(vedro.Scenario):
         assert self.next_item.is_hotfix is True
 
     async def do_cleanup(self):
-        """
-        Exit and clean up the test database context used by the scenario.
-
-        Invokes the scenario's database context manager async exit to release connections and other resources associated with the test database.
-        """
+        """Clean up the test DB context."""
         await self._db_context.__aexit__(None, None, None)

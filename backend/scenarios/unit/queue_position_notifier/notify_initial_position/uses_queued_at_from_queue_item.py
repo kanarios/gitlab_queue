@@ -29,11 +29,6 @@ class Scenario(vedro.Scenario):
         )
 
     async def when_notify_initial_position_is_called(self):
-        """
-        Calls the position notifier to send the initial position for the configured merge request id.
-
-        Awaits position_notifier.notify_initial_position using self.mr_iid.
-        """
         await self.position_notifier.notify_initial_position(self.mr_iid)
 
     def then_queued_at_matches_queue_item_value(self):

@@ -40,12 +40,7 @@ class Scenario(vedro.Scenario):
         assert self.result.state == "merged"
 
     def and_get_mr_called_three_times(self):
-        """
-        Asserts that the GitLab client's get_mr method was invoked three times.
-
-        This verification checks the test's mock_get_mr call count equals 3.
-        """
-        assert self.mock_get_mr.call_count == 3
+        assert self.mock_get_mr.await_count == 3
 
     def and_put_called_once(self):
         """

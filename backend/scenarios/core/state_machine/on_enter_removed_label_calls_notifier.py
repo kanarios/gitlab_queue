@@ -32,7 +32,7 @@ class Scenario(vedro.Scenario):
 
         Verifies that notifier.notify was awaited and that the first positional argument (mr_iid) is 123 and the second positional argument (template) is "removed_label".
         """
-        self.notifier.notify.assert_awaited()
+        self.notifier.notify.assert_awaited_once()
         call_args = self.notifier.notify.call_args
         assert call_args[0][0] == 123  # mr_iid
         assert call_args[0][1] == "removed_label"  # template

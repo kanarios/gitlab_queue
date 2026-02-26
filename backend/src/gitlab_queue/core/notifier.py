@@ -201,6 +201,36 @@ Re-add `{queue_label}` label to rejoin queue.
 ---
 _MR has been removed from queue._
 """,
+    "merge_failed": """## 🤖 Merge Queue Bot
+
+**Status:** ❌ Merge failed
+**Failed at:** {failed_at}
+
+Merge operation failed: {error_message}
+
+**Action required:**
+1. Check merge conflicts or branch protection rules
+2. Push updated branch
+3. Re-add `{queue_label}` label to rejoin queue
+
+---
+_MR has been removed from queue._
+""",
+    "generic_failure": """## 🤖 Merge Queue Bot
+
+**Status:** ❌ Processing failed
+**Failed at:** {failed_at}
+
+{error_message}
+
+**Action required:**
+1. Check the error above
+2. Push updated branch
+3. Re-add `{queue_label}` label to rejoin queue
+
+---
+_MR has been removed from queue._
+""",
     # === WARNING EVENTS ===
     "stale_warning": """## 🤖 Merge Queue Bot
 

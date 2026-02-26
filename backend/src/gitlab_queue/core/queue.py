@@ -338,23 +338,31 @@ class QueueManager:
             for index_sql in _CREATE_HISTORY_INDEXES_SQL:
                 await session.execute(text(index_sql))
 
-            # Migrate: add stale_warning_sent column if not exists
-            try:
-                await session.execute(text(_ALTER_TABLE_STALE_WARNING_SQL))
-                log.info("Added stale_warning_sent column to merge_requests table")
-            except OperationalError as e:
-                if "duplicate column" not in str(e).lower():
-                    raise
-
-            # Migrate: add expected_sha column if not exists
-            try:
-                await session.execute(text(_ALTER_TABLE_EXPECTED_SHA_SQL))
-                log.info("Added expected_sha column to merge_requests table")
-            except OperationalError as e:
-                if "duplicate column" not in str(e).lower():
-                    raise
+            # Run migrations for new columns
+            migrations = [
+                (_ALTER_TABLE_STALE_WARNING_SQL, "stale_warning_sent"),
+                (_ALTER_TABLE_EXPECTED_SHA_SQL, "expected_sha"),
+            ]
+            for alter_sql, column_name in migrations:
+                await self._safe_add_column(session, alter_sql, column_name)
 
         log.info("Database schema ensured")
+
+    @staticmethod
+    async def _safe_add_column(session: Any, alter_sql: str, column_name: str) -> None:
+        """Execute ALTER TABLE, ignoring 'duplicate column' errors.
+
+        Args:
+            session: Active database session.
+            alter_sql: ALTER TABLE SQL statement.
+            column_name: Column name for logging.
+        """
+        try:
+            await session.execute(text(alter_sql))
+            log.info("Added column to merge_requests table", column=column_name)
+        except OperationalError as e:
+            if "duplicate column" not in str(e).lower():
+                raise
 
     async def add_to_queue(
         self,
@@ -546,16 +554,28 @@ class QueueManager:
         if cached is not None:
             return cached
 
-        version_before = self._cache.version
+        # If cache is invalidated during refresh, avoid returning stale results.
+        # We'll retry once if we detect version churn and cache remains empty.
+        for _ in range(2):
+            version_before = self._cache.version
 
-        # Fetch from database and cache
-        async with self.db.session() as session:
-            result = await session.execute(text(_SELECT_ACTIVE_QUEUE_SQL))
-            rows = result.mappings().all()
-            await session.commit()
+            # Fetch from database and attempt to cache
+            async with self.db.session() as session:
+                result = await session.execute(text(_SELECT_ACTIVE_QUEUE_SQL))
+                rows = result.mappings().all()
+                await session.commit()
 
-        items = [self._row_to_queue_item(row) for row in rows]
-        self._cache.set_active_queue(items, version=version_before)
+            items = [self._row_to_queue_item(row) for row in rows]
+            self._cache.set_active_queue(items, version=version_before)
+
+            cached_after = self._cache.get_active_queue()
+            if cached_after is not None:
+                return cached_after
+
+            # Cache still empty means version changed mid-refresh and someone invalidated it.
+            # Loop and re-fetch once to align with current version.
+
+        # Best effort fallback: return latest fetched items.
         return items
 
     async def get_queue_length(self) -> int:
@@ -643,7 +663,11 @@ class QueueManager:
         params: dict[str, Any] = {"iid": mr_iid, "status": state}
 
         # Auto-set started_at if transitioning from queued
-        set_clauses.append("started_at = COALESCE(started_at, :started_at)")
+        set_clauses.append(
+            "started_at = CASE "
+            "WHEN started_at IS NULL AND status = 'queued' AND :status != 'queued' "
+            "THEN :started_at ELSE started_at END"
+        )
         params["started_at"] = now.isoformat()
 
         # Auto-set finished_at for terminal states
@@ -773,24 +797,7 @@ class QueueManager:
         now = datetime.now(UTC)
         finished_at = now.isoformat()
 
-        # Calculate timing metrics
-        wait_time_seconds: int | None = None
-        processing_time_seconds: int | None = None
-
-        # Normalize naive datetimes to UTC-aware
-        queued_at = mr.queued_at
-        if queued_at is not None and queued_at.tzinfo is None:
-            queued_at = queued_at.replace(tzinfo=UTC)
-        started_at = mr.started_at
-        if started_at is not None and started_at.tzinfo is None:
-            started_at = started_at.replace(tzinfo=UTC)
-
-        if queued_at and started_at:
-            wait_time_seconds = int((started_at - queued_at).total_seconds())
-            processing_time_seconds = int((now - started_at).total_seconds())
-        elif queued_at:
-            # MR never started processing (e.g., removed while queued)
-            wait_time_seconds = int((now - queued_at).total_seconds())
+        wait_time_seconds, processing_time_seconds = self._compute_timing(mr, now)
 
         # Prepare history record params
         history_params = {
@@ -837,11 +844,8 @@ class QueueManager:
                 status=status,
             )
             # Explicitly delete from active table in a separate transaction
-            try:
-                async with self.db.transaction() as session:
-                    await session.execute(text(_DELETE_MR_SQL), {"iid": mr_iid})
-            except IntegrityError as exc:
-                log.debug("Active queue entry already cleaned up", mr_iid=mr_iid, error=str(exc))
+            async with self.db.transaction() as session:
+                await session.execute(text(_DELETE_MR_SQL), {"iid": mr_iid})
             self._cache.invalidate()
             return False
 
@@ -1034,6 +1038,36 @@ class QueueManager:
             log.warning("MR not found for stale warning update", mr_iid=mr_iid)
 
         return changed
+
+    @staticmethod
+    def _ensure_utc(dt: datetime | None) -> datetime | None:
+        """Normalize a possibly naive datetime to UTC-aware."""
+        if dt is not None and dt.tzinfo is None:
+            return dt.replace(tzinfo=UTC)
+        return dt
+
+    @staticmethod
+    def _compute_timing(mr: QueueItem, now: datetime) -> tuple[int | None, int | None]:
+        """Compute wait and processing time for a completed MR.
+
+        Args:
+            mr: Queue item with timing info.
+            now: Current UTC timestamp.
+
+        Returns:
+            Tuple of (wait_time_seconds, processing_time_seconds).
+        """
+        queued_at = QueueManager._ensure_utc(mr.queued_at)
+        started_at = QueueManager._ensure_utc(mr.started_at)
+
+        if queued_at and started_at:
+            return (
+                int((started_at - queued_at).total_seconds()),
+                int((now - started_at).total_seconds()),
+            )
+        if queued_at:
+            return int((now - queued_at).total_seconds()), None
+        return None, None
 
     def _row_to_queue_item(self, row: RowMapping | dict[str, Any]) -> QueueItem:
         """Convert a database row to a QueueItem.

@@ -1,6 +1,5 @@
 """Test that missing OAuth config returns None or disables OAuth.
 
-Covers oauth.py lines 93, 95, 122, 182-187:
 - get_oauth_config returns None when client_id is missing
 - get_oauth_config returns None when client_secret is missing
 - get_oauth_config returns None when redirect_uri is missing

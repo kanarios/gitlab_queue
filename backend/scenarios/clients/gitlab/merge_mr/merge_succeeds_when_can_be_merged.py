@@ -33,13 +33,7 @@ class Scenario(vedro.Scenario):
         assert self.result.state == "merged"
 
     def and_get_mr_called_once(self):
-        """
-        Asserts that the mocked GitLabClient.get_mr method was invoked exactly once during the scenario.
-
-        Raises:
-            AssertionError: If the mock's call count is not 1.
-        """
-        assert self.mock_get_mr.call_count == 1
+        self.mock_get_mr.assert_awaited_once()
 
     def and_put_called_with_merge_endpoint(self):
         """

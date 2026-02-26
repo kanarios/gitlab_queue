@@ -26,9 +26,11 @@ class Scenario(vedro.Scenario):
 
     async def when_positions_are_queried(self):
         """
-        Query and store queue positions for merge requests with iids 5, 15, and 25.
+        Query and store queue positions for merge requests with iids 5, 15, and
+        25.
 
-        Populates or replaces self.positions with a dict mapping each iid to its current position in the queue (e.g. {5: pos5, 15: pos15, 25: pos25}).
+        Populates or replaces self.positions with a dict mapping each iid to its
+        current position in the queue (e.g. {5: 1, 15: 2, 25: 3}).
         """
         self.positions = {}
         for iid in [5, 15, 25]:
@@ -38,7 +40,8 @@ class Scenario(vedro.Scenario):
         """
         Assert that stored positions reflect FIFO insertion order.
 
-        Checks that merge requests with iids 5, 15, and 25 have queue positions 1, 2, and 3 respectively.
+        Checks that merge requests with iids 5, 15, and 25 have queue positions
+        1, 2, and 3 respectively.
         """
         assert self.positions[5] == 1
         assert self.positions[15] == 2
@@ -46,9 +49,11 @@ class Scenario(vedro.Scenario):
 
     async def and_removing_first_should_shift_positions(self):
         """
-        Verify that removing the first merge request shifts queue positions of the remaining items.
+        Verify that removing the first merge request shifts queue positions of
+        the remaining items.
 
-        Removes the MR with iid 5 from the queue and asserts that the MR with iid 15 is at position 1 and the MR with iid 25 is at position 2.
+        Removes the MR with iid 5 from the queue and asserts that the MR with
+        iid 15 is at position 1 and the MR with iid 25 is at position 2.
         """
         await self.queue.remove_from_queue(5)
         pos_15 = await self.queue.get_queue_position(15)
@@ -60,7 +65,7 @@ class Scenario(vedro.Scenario):
         """
         Exit and clean up the test database context used by the scenario.
 
-        This asynchronously finalizes and closes the underlying database context manager held in
-        self._db_context.
+        This asynchronously finalizes and closes the underlying database
+        context manager held in self._db_context.
         """
         await self._db_context.__aexit__(None, None, None)

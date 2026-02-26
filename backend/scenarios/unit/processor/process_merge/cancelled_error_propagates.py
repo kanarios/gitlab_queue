@@ -21,7 +21,7 @@ from .._helpers import (
 class Scenario(vedro.Scenario):
     subject = "process mr propagates CancelledError"
 
-    def given_processor_with_create_state_machine_raising_cancelled(self):
+    def given_processor_with_queued_mr(self):
         """
         Prepare test fixtures: set self.processor to a mock processor and self.queue_item to a queued merge request item.
 

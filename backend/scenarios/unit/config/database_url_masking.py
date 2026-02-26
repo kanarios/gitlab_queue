@@ -33,20 +33,5 @@ class Scenario(vedro.Scenario):
         """
         self.result = _mask_database_url(self.settings)
 
-    def then_password_is_not_in_result(self):
-        """
-        Verify that the plaintext password 'secret123' is not present in the masked database URL.
-
-        Raises:
-            AssertionError: if 'secret123' is found in self.result.
-        """
-        assert "secret123" not in self.result
-
-    def and_mask_placeholder_is_in_result(self):
-        """
-        Asserts that the masked placeholder '***' appears in the masked database URL result.
-
-        Raises:
-            AssertionError: If '***' is not found in self.result.
-        """
-        assert "***" in self.result
+    def then_result_is_masked_url(self):
+        assert self.result == "postgresql://user:***@host/db"

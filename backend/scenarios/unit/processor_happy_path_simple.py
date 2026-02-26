@@ -164,7 +164,8 @@ class Scenario(vedro.Scenario):
 
         # Verify queue state
         mr_state = await self.queue.get_mr_state(42)
-        assert mr_state["status"] == "merged"
+        assert mr_state is not None, "Expected MR IID=42 to have a saved state, but get_mr_state returned None"
+        assert mr_state.get("status") == "merged"
 
         # Verify at least one comment was posted
         assert len(self.comment_history) >= 1

@@ -322,7 +322,7 @@ class MRStateMachine(StateMachine):
                 retry_count=self._context.get("retry_count", 0),
                 failed_jobs=self._context.get("failed_jobs", []),
             )
-        elif failure_reason in ("timeout", "merge_failed"):
+        elif failure_reason == "timeout":
             queue_item = await self.queue_manager.get_queue_item(self.mr_iid)
             max_wait_hours = self._context.get("max_wait_hours", 2)
             await self.notifier.notify(
@@ -332,16 +332,19 @@ class MRStateMachine(StateMachine):
                 duration=self._calculate_duration(queue_item),
                 max_wait=max_wait_hours,
             )
-        else:
-            # Generic failure - use pipeline_failed template
+        elif failure_reason == "merge_failed":
             await self.notifier.notify(
                 self.mr_iid,
-                "pipeline_failed",
-                pipeline_id=self._context.get("pipeline_id", 0),
-                pipeline_url=self._context.get("pipeline_url", "#"),
+                "merge_failed",
                 failed_at=datetime.now(UTC),
-                retry_count=0,
-                failed_jobs=[error_message] if error_message else [],
+                error_message=error_message or "Unknown merge error",
+            )
+        else:
+            await self.notifier.notify(
+                self.mr_iid,
+                "generic_failure",
+                failed_at=datetime.now(UTC),
+                error_message=error_message or "Unknown error",
             )
 
         # Broadcast WebSocket completion
@@ -368,8 +371,10 @@ class MRStateMachine(StateMachine):
         history_status = "failed"
         if failure_reason == "conflict":
             history_status = "conflict"
-        elif failure_reason in ("timeout", "merge_failed"):
+        elif failure_reason == "timeout":
             history_status = "timeout"
+        elif failure_reason == "merge_failed":
+            history_status = "merge_failed"
 
         await self.queue_manager.complete_mr(
             self.mr_iid,
@@ -396,7 +401,17 @@ class MRStateMachine(StateMachine):
         removal_reason = self._context.get("removal_reason", "label_removed")
         position = await self.queue_manager.get_queue_position(self.mr_iid)
 
-        if removal_reason == "closed":
+        if removal_reason == "timeout":
+            queue_item = await self.queue_manager.get_queue_item(self.mr_iid)
+            max_wait_hours = self._context.get("max_wait_hours", 2)
+            await self.notifier.notify(
+                self.mr_iid,
+                "timeout",
+                failed_at=datetime.now(UTC),
+                duration=self._calculate_duration(queue_item),
+                max_wait=max_wait_hours,
+            )
+        elif removal_reason == "closed":
             await self.notifier.notify(
                 self.mr_iid,
                 "removed_closed",
@@ -419,7 +434,7 @@ class MRStateMachine(StateMachine):
             )
 
         # Remove queue label if still present (e.g., MR was closed but label not removed)
-        if removal_reason == "closed":
+        if removal_reason in ("closed", "timeout"):
             await self.notifier.remove_queue_label(self.mr_iid)
 
         # Capture positions before completion for notification
@@ -430,9 +445,10 @@ class MRStateMachine(StateMachine):
             old_total = await self.queue_manager.get_queue_length()
 
         # Move MR to history table
+        history_status = "timeout" if removal_reason == "timeout" else "removed"
         await self.queue_manager.complete_mr(
             self.mr_iid,
-            status="removed",
+            status=history_status,
             failure_reason=f"Removed: {removal_reason}",
         )
 
@@ -496,10 +512,39 @@ class MRStateMachine(StateMachine):
             mr_iid=self.mr_iid,
             conflicted_files=conflicted_files,
         )
-        self._context["failure_reason"] = "conflict"
-        self._context["conflicted_files"] = conflicted_files
-        self._context["error_message"] = error_message
+        self._context = {
+            "failure_reason": "conflict",
+            "conflicted_files": conflicted_files,
+            "error_message": error_message,
+        }
         await self.rebase_failed()
+
+    async def trigger_conflict_during_testing(
+        self,
+        *,
+        conflicted_files: list[str],
+        error_message: str,
+    ) -> None:
+        """Conflict detected during testing (rebase failed while pipeline running).
+
+        Uses pipeline_failed transition (testing→failed) since rebase_failed
+        only works from rebasing state.
+
+        Args:
+            conflicted_files: List of files with conflicts.
+            error_message: Error message for logging.
+        """
+        log.info(
+            "Triggering conflict during testing",
+            mr_iid=self.mr_iid,
+            conflicted_files=conflicted_files,
+        )
+        self._context = {
+            "failure_reason": "conflict",
+            "conflicted_files": conflicted_files,
+            "error_message": error_message,
+        }
+        await self.pipeline_failed()
 
     async def trigger_pipeline_success(self) -> None:
         """Pipeline passed, proceed to merge."""
@@ -544,8 +589,10 @@ class MRStateMachine(StateMachine):
             error_message: Error message describing the failure.
         """
         log.info("Triggering merge_failed", mr_iid=self.mr_iid, error=error_message)
-        self._context["failure_reason"] = "merge_failed"
-        self._context["error_message"] = error_message
+        self._context = {
+            "failure_reason": "merge_failed",
+            "error_message": error_message,
+        }
         await self.merge_failed()
 
     async def trigger_mark_removed(self, *, reason: str = "label_removed") -> None:
@@ -555,7 +602,7 @@ class MRStateMachine(StateMachine):
             reason: Reason for removal - "label_removed" or "closed".
         """
         log.info("Triggering mark_removed", mr_iid=self.mr_iid, reason=reason)
-        self._context["removal_reason"] = reason
+        self._context = {"removal_reason": reason}
         await self.mark_removed()
 
     async def trigger_timeout(self, *, max_wait_hours: int = 2) -> None:
@@ -565,8 +612,11 @@ class MRStateMachine(StateMachine):
             max_wait_hours: Maximum wait time that was exceeded.
         """
         log.info("Triggering timeout", mr_iid=self.mr_iid, max_wait_hours=max_wait_hours)
-        self._context["failure_reason"] = "timeout"
-        self._context["max_wait_hours"] = max_wait_hours
+        self._context = {
+            "failure_reason": "timeout",
+            "max_wait_hours": max_wait_hours,
+            "error_message": f"Timed out after {max_wait_hours} hours in {self.current_state.id} state",
+        }
         # Use appropriate transition based on current state
         current = self.current_state.id
         if current == "rebasing":

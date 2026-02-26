@@ -1,6 +1,6 @@
 """Test that daily aggregation computes summary stats.
 
-Covers _aggregate_daily_stats (lines 175-189):
+Covers _aggregate_daily_stats:
 - Computes yesterday's date
 - Calls analytics.aggregate_daily(yesterday)
 - Logs result or 'already exists'
@@ -54,11 +54,7 @@ class Scenario(vedro.Scenario):
         )
 
     async def when_aggregate_daily_stats_is_called(self):
-        """
-        Invoke AnalyticsJobProcessor._aggregate_daily_stats using the scenario's mocked UnitOfWork.
-
-        Patches gitlab_queue.jobs.analytics.UnitOfWork to return self.mock_uow and awaits self.processor._aggregate_daily_stats().
-        """
+        self.yesterday = date.today() - timedelta(days=1)
         with patch(
             "gitlab_queue.jobs.analytics.UnitOfWork",
             return_value=self.mock_uow,
@@ -66,13 +62,7 @@ class Scenario(vedro.Scenario):
             await self.processor._aggregate_daily_stats()
 
     def then_aggregate_daily_was_called_with_yesterday(self):
-        """
-        Assert that analytics.aggregate_daily was awaited once with yesterday's date.
-
-        This verifies the test mock recorded a single await call to aggregate_daily using date.today() - 1 day.
-        """
-        yesterday = date.today() - timedelta(days=1)
-        self.mock_uow.analytics.aggregate_daily.assert_awaited_once_with(yesterday)
+        self.mock_uow.analytics.aggregate_daily.assert_awaited_once_with(self.yesterday)
 
 
 class Scenario2(vedro.Scenario):

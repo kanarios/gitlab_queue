@@ -36,7 +36,7 @@ class Scenario(vedro.Scenario):
             AssertionError: If the notifier was not awaited or if the last call's first positional
             argument is not 123 (mr_iid) or the second positional argument is not "removed_closed" (template).
         """
-        self.notifier.notify.assert_awaited()
+        self.notifier.notify.assert_awaited_once()
         call_args = self.notifier.notify.call_args
         assert call_args[0][0] == 123  # mr_iid
         assert call_args[0][1] == "removed_closed"  # template

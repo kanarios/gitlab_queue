@@ -41,11 +41,31 @@ def _extract_labels(labels: list[Any]) -> list[str]:
     """
     if not labels:
         return []
-    first = labels[0]
-    if isinstance(first, dict):
-        # Handle both API format (name) and webhook format (title)
-        return [str(label.get("name") or label.get("title", "")) for label in labels]
-    return [str(label) for label in labels]
+
+    extracted: list[str] = []
+    for label in labels:
+        if label is None:
+            continue
+
+        value: str | None = None
+        if isinstance(label, dict):
+            raw = label.get("name") or label.get("title")
+            if raw is not None:
+                value = str(raw)
+        elif isinstance(label, str):
+            value = label
+        else:
+            # Unknown label format: ignore instead of raising.
+            continue
+
+        if value is None:
+            continue
+        value = value.strip()
+        if not value:
+            continue
+        extracted.append(value)
+
+    return extracted
 
 
 # Retort for parsing GitLab API responses into dataclass models

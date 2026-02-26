@@ -51,9 +51,7 @@ class Scenario(vedro.Scenario):
                 self.raised = exc
 
     def then_no_error_is_raised(self):
-        """
-        Asserts that no exception was raised during the stale MR check.
-
-        Raises an AssertionError if self.raised is not None.
-        """
         assert self.raised is None
+
+    def and_mark_stale_warning_sent_is_not_called(self):
+        self.processor.queue_manager.mark_stale_warning_sent.assert_not_awaited()

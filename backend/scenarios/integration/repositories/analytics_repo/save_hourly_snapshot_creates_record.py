@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import vedro
 from scenarios.contexts.sqlite_client import initialized_test_database
 from scenarios.integration.repositories._helpers import create_tables
@@ -53,8 +55,6 @@ class Scenario(vedro.Scenario):
 
         Parses self.snapshot.timestamp as an ISO-formatted datetime and verifies minute, second, and microsecond are all zero.
         """
-        from datetime import datetime
-
         ts = datetime.fromisoformat(self.snapshot.timestamp)
         assert ts.minute == 0
         assert ts.second == 0

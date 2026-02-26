@@ -12,7 +12,7 @@ from ._helpers import MockQueueItem, create_mock_notifier, create_mock_queue_man
 
 
 class Scenario(vedro.Scenario):
-    subject = "trigger_merge_failed sends timeout notification not pipeline_failed"
+    subject = "trigger_merge_failed sends merge_failed notification not pipeline_failed"
 
     def given_state_machine_in_merging_state(self):
         self.notifier = create_mock_notifier()
@@ -33,9 +33,9 @@ class Scenario(vedro.Scenario):
         await self.sm.activate_initial_state()
         await self.sm.trigger_merge_failed(error_message="Merge timed out after 120s")
 
-    def then_notifier_should_use_timeout_template(self):
+    def then_notifier_should_use_merge_failed_template(self):
         template = self.notifier.notify.call_args.args[1]
-        assert template == "timeout", f"Expected 'timeout' template, got '{template}'"
+        assert template == "merge_failed", f"Expected 'merge_failed' template, got '{template}'"
 
     def and_notifier_should_not_use_pipeline_failed_template(self):
         template = self.notifier.notify.call_args.args[1]

@@ -20,6 +20,8 @@ async def backfill_queued_at_hours_ago(db: Database, *, iid: int, hours: int) ->
         iid (int): Internal ID of the merge request to update.
         hours (int): Number of hours to subtract from the current time when setting `queued_at`.
     """
+    if hours <= 0:
+        raise ValueError(f"hours must be positive, got {hours}")
     async with db.transaction() as session:
         await session.execute(
             text("UPDATE merge_requests SET queued_at = datetime('now', :offset) WHERE iid = :iid"),

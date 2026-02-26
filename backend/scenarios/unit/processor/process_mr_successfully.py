@@ -191,6 +191,7 @@ class Scenario(vedro.Scenario):
             AssertionError: If the MR status is not "merged" or the MR is not present in the queue.
         """
         mr_state = await self.queue.get_mr_state(42)
+        assert mr_state is not None, "MR not present in queue"
         assert mr_state["status"] == "merged"
 
     async def and_at_least_one_comment_should_be_posted(self):

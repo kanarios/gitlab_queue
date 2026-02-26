@@ -35,7 +35,7 @@ class Scenario(vedro.Scenario):
         assert "...and 5 more" in self.result
 
     def and_first_job_appears_in_result(self):
-        assert "test:job-1" in self.result
+        assert "- test:job-1\n" in self.result
 
     def and_eleventh_job_does_not_appear_directly(self):
         """

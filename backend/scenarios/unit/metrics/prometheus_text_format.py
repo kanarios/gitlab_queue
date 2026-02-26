@@ -59,9 +59,10 @@ class Scenario2(vedro.Scenario):
         await update_queue_metrics(self.queue_manager)
 
     def then_queue_length_gauges_should_be_set(self):
-        # Verify the gauge was set for each status
         output = get_metrics_output().decode("utf-8")
-        assert "merge_queue_length" in output
+        assert 'merge_queue_length{status="queued"} 3.0' in output
+        assert 'merge_queue_length{status="processing"} 1.0' in output
+        assert 'merge_queue_length{status="merged"} 5.0' in output
 
 
 class Scenario3(vedro.Scenario):

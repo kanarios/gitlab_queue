@@ -390,14 +390,14 @@ async def process_mr_with_merge_timeout():
 
             # Verify timeout/error notification was sent
             comment_history = await comment_mock.fetch_history()
-            # At least some comments should be posted during the process
-            assert len(comment_history) >= 0
+            assert len(comment_history) > 0
 
             # Verify state
             mr_state = await queue.get_mr_state(62)
             # State should indicate failure
             assert mr_state["status"] in (
                 "failed",
+                "merge_failed",
                 "timeout",
                 "testing",
                 "merging",

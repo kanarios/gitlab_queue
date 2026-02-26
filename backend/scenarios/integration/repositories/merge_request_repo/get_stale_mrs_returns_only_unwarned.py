@@ -48,9 +48,7 @@ class Scenario(vedro.Scenario):
 
     async def when_get_stale_mrs_is_called(self):
         """
-        Calls the merge request repository to retrieve stale merge requests for MR id 1 and stores the returned list on self.result.
-
-        This opens a database session, constructs a MergeRequestRepository with that session, invokes get_stale_mrs(1), and assigns the result to self.result.
+        Retrieve merge requests queued longer than 1 hour via get_stale_mrs(1).
         """
         self._session_ctx = self.db.session()
         session = await self._session_ctx.__aenter__()

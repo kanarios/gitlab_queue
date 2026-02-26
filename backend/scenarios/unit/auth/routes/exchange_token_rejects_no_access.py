@@ -69,4 +69,4 @@ class Scenario(vedro.Scenario):
         Asserts that the response JSON's "detail" field contains either "access denied" or "access" (case-insensitive), raising an AssertionError if the check fails.
         """
         data = self.response.json()
-        assert "access denied" in data["detail"].lower() or "access" in data["detail"].lower()
+        assert "access denied" in data["detail"].lower()

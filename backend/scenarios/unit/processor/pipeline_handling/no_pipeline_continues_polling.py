@@ -44,7 +44,6 @@ class Scenario(vedro.Scenario):
         self.processor.gitlab_client.get_latest_mr_pipeline = AsyncMock(return_value=None)
 
     async def when_wait_for_pipeline_is_called(self):
-        # First call: return None (continue), second call: return ERROR (stop loop)
         """
         Invokes the processor's _wait_for_pipeline while simulating a "no pipeline found" poll followed by a termination.
 

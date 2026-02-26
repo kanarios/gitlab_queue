@@ -139,18 +139,9 @@ class Scenario4(vedro.Scenario):
     subject = "build_pipeline_url constructs correct URL"
 
     def given_notifier_with_gitlab_url(self):
-        """
-        Create a test notifier configured with a specific GitLab base URL and queue label.
-
-        Sets self.notifier to a test notifier whose settings have queue_label="merge_queue"
-        and gitlab_url="https://gitlab.example.com/group/project".
-        """
-        settings = MagicMock()
-        settings.queue_label = "merge_queue"
-        settings.gitlab_url = "https://gitlab.example.com/group/project"
         gitlab_client = MagicMock()
         gitlab_client.get_project_web_url = AsyncMock(return_value="https://gitlab.example.com/group/project")
-        self.notifier = create_test_notifier(gitlab_client=gitlab_client, settings=settings)
+        self.notifier = create_test_notifier(gitlab_client=gitlab_client)
 
     async def when_build_pipeline_url_is_called(self):
         self.url = await self.notifier.build_pipeline_url(12345)

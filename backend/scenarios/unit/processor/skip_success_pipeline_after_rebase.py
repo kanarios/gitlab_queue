@@ -246,7 +246,7 @@ class Scenario(vedro.Scenario):
         """
         assert len(self.merge_history) == 1
 
-    async def and_stale_success_pipeline_was_fetched_first(self):
+    async def and_stale_success_pipeline_was_fetched_once(self):
         # Verify stale success pipeline mock was called (the skip happened)
         """
         Assert that the stale success pipeline was fetched exactly once.
@@ -258,7 +258,7 @@ class Scenario(vedro.Scenario):
             f"Stale success pipeline mock should be called exactly once (got {len(self.pipeline_stale_history)})"
         )
 
-    async def and_running_pipeline_was_used_after_skip(self):
+    async def and_running_pipeline_was_used_once(self):
         # Verify running pipeline mock was called after stale was skipped
         """
         Asserts that the running pipeline mock was invoked exactly once after the stale pipeline was skipped.

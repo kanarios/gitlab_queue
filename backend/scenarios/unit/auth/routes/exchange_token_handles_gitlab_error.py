@@ -47,7 +47,6 @@ class Scenario(vedro.Scenario):
             )
 
     def then_it_should_return_error_status(self):
-        # 502 Bad Gateway when GitLab returns non-200
         """
         Assert that the HTTP response status code is 502 Bad Gateway.
 

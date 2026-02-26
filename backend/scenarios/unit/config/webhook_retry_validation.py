@@ -47,11 +47,6 @@ class Scenario(vedro.Scenario):
         assert self.raised is not None
 
     def and_message_mentions_webhook_retry(self):
-        """
-        Asserts that the caught ConfigurationError message mentions the webhook retry max-delay setting.
-
-        Raises an AssertionError if "webhook_retry_max_delay_seconds" is not present in the string representation of the stored exception.
-        """
-        assert "webhook_retry_max_delay_seconds" in str(self.raised), (
-            f"Expected webhook retry mentioned in error, got: {self.raised}"
-        )
+        error_msg = str(self.raised)
+        assert "webhook_retry_max_delay_seconds" in error_msg
+        assert "webhook_retry_base_delay_seconds" in error_msg

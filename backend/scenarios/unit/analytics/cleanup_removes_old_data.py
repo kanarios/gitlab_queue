@@ -1,6 +1,6 @@
 """Test that cleanup removes data older than retention period.
 
-Covers _cleanup_hourly_analytics (lines 205-238):
+Covers _cleanup_hourly_analytics:
 - Calls analytics.cleanup_hourly(retention_days)
 - Runs VACUUM when records are deleted
 - No VACUUM when nothing to clean up

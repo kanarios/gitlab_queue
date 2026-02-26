@@ -8,7 +8,7 @@ Covers:
 
 from __future__ import annotations
 
-from datetime import UTC
+from datetime import UTC, datetime
 
 import vedro
 
@@ -39,20 +39,11 @@ class Scenario(vedro.Scenario):
     def when_load_queue_item_is_called(self):
         self.item = load_queue_item(self.data)
 
-    def then_queued_at_is_parsed_as_datetime(self):
-        """
-        Verify queued_at was parsed as a date-time value.
+    def then_queued_at_is_parsed_correctly(self):
+        assert self.item.queued_at == datetime(2025, 1, 15, 10, 0, 0, tzinfo=UTC)
 
-        Asserts that self.item.queued_at is an instance of datetime.
-        """
-        from datetime import datetime
-
-        assert isinstance(self.item.queued_at, datetime)
-
-    def and_started_at_is_parsed_as_datetime(self):
-        from datetime import datetime
-
-        assert isinstance(self.item.started_at, datetime)
+    def and_started_at_is_parsed_correctly(self):
+        assert self.item.started_at == datetime(2025, 1, 15, 10, 5, 0, tzinfo=UTC)
 
     def and_labels_are_parsed_from_json_string(self):
         assert self.item.labels == ["merge_queue", "hotfix"]
@@ -110,10 +101,7 @@ class Scenario3(vedro.Scenario):
         self.event = parse_pipeline_event(self.payload)
 
     def then_created_at_is_parsed_correctly(self):
-        from datetime import datetime
-
-        assert isinstance(self.event.object_attributes.created_at, datetime)
-        assert self.event.object_attributes.created_at.tzinfo == UTC
+        assert self.event.object_attributes.created_at == datetime(2025, 6, 1, 12, 0, 0, tzinfo=UTC)
 
     def and_pipeline_id_is_correct(self):
         assert self.event.object_attributes.id == 200

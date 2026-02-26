@@ -39,20 +39,16 @@ class Scenario(vedro.Scenario):
         assert "***" in self.result
 
     def and_token_value_is_not_in_result(self):
-        """
-        Asserts that the original GitLab token value does not appear in the stored repr result.
-
-        This verifies that the sensitive gitlab token is masked in the Settings string representation.
-        """
         assert self.token_value not in self.result
 
-    def and_jwt_value_is_not_in_result(self):
-        """
-        Asserts that the JWT secret value does not appear in the stored representation result.
+    def and_gitlab_token_is_masked(self):
+        assert "gitlab_token=Secret('***')" in self.result
 
-        This verifies that sensitive JWT content is masked or omitted from repr(self.settings).
-        """
+    def and_jwt_value_is_not_in_result(self):
         assert self.jwt_value not in self.result
+
+    def and_jwt_secret_is_masked(self):
+        assert "jwt_secret=Secret('***')" in self.result
 
     def and_webhook_value_is_not_in_result(self):
         assert self.webhook_value not in self.result

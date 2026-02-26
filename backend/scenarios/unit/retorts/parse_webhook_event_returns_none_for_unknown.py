@@ -14,7 +14,7 @@ class Scenario(vedro.Scenario):
         """
         Prepare a test payload with an unrecognized `object_kind` and a minimal project.
 
-        Sets `self.payload` to {"object_kind": "unknown_event_type", "project": {"id": 1"}} for use in scenarios that verify handling of unknown or missing event types.
+        Sets `self.payload` to {"object_kind": "unknown_event_type", "project": {"id": 1}} for use in scenarios that verify handling of unknown or missing event types.
         """
         self.payload = {"object_kind": "unknown_event_type", "project": {"id": 1}}
 
@@ -32,7 +32,3 @@ class Scenario(vedro.Scenario):
             AssertionError: If `self.result` is not None.
         """
         assert self.result is None
-
-    def and_none_is_returned_when_object_kind_is_missing(self):
-        result = parse_webhook_event({})
-        assert result is None

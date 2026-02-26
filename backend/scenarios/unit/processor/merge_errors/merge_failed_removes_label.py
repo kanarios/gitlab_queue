@@ -25,7 +25,7 @@ from .._helpers import (
 class Scenario(vedro.Scenario):
     subject = "merge failed triggers state machine which removes queue label"
 
-    def given_processor_with_merge_conflict_and_notifier(self):
+    def given_processor_with_merge_conflict(self):
         """
         Prepare a mock processor that simulates a merge conflict and create a processing context with a mock state machine.
 
@@ -72,7 +72,7 @@ class Scenario(vedro.Scenario):
 
         Checks that the mocked state's `trigger_merge_failed` call included an `error_message` keyword argument and that the message contains the substring "Merge conflict".
         """
-        call_kwargs = self.mock_sm.trigger_merge_failed.call_args.kwargs
+        call_kwargs = self.mock_sm.trigger_merge_failed.await_args.kwargs
         assert "error_message" in call_kwargs
         assert "Merge conflict" in call_kwargs["error_message"]
 

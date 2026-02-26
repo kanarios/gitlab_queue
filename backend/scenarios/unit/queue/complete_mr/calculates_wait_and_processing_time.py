@@ -1,4 +1,4 @@
-"""Test scenario: complete_mr calculates wait and processing time."""
+"""Test scenario: complete_mr updates status and finished_at."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from ._helpers import create_test_mr
 
 
 class Scenario(vedro.Scenario):
-    subject = "complete mr calculates wait and processing time"
+    subject = "complete mr updates status and finished_at"
 
     async def given_queue_with_tested_mr(self):
         """

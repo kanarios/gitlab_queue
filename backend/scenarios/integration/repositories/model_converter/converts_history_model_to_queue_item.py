@@ -84,15 +84,10 @@ class Scenario(vedro.Scenario):
         assert self.item.retry_count == 0
         assert self.item.stale_warning_sent is False
 
-    def and_timestamps_should_be_parsed(self):
-        """
-        Verify that the converted QueueItem has parsed timestamp fields.
-
-        Asserts that `queued_at`, `started_at`, and `finished_at` on the converted item are not None.
-        """
-        assert self.item.queued_at is not None
-        assert self.item.started_at is not None
-        assert self.item.finished_at is not None
+    def and_timestamps_should_match_source(self):
+        assert self.item.queued_at == datetime.fromisoformat(self.history.queued_at)
+        assert self.item.started_at == datetime.fromisoformat(self.history.started_at)
+        assert self.item.finished_at == datetime.fromisoformat(self.history.finished_at)
 
     async def do_cleanup(self):
         """

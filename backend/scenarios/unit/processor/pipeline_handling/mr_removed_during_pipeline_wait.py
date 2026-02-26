@@ -1,4 +1,5 @@
-"""Test _check_pipeline_termination_conditions returns REMOVED when label removed.
+"""Test _check_pipeline_termination_conditions returns REMOVED when label
+removed.
 
 When _verify_mr_in_queue returns False during pipeline wait (because the
 queue label was removed from the MR), the method should trigger
@@ -26,21 +27,27 @@ class Scenario(vedro.Scenario):
 
     def given_processor_with_mr_removed_from_queue(self):
         """
-        Set up a mock processor, state machine, and processing context for a test where the MR is removed from the queue.
+        Set up a mock processor, state machine, and processing context for a test
+        where the MR is removed from the queue.
 
         Initializes:
         - self.processor: a mock processor instance.
         - self.mock_sm: a mock state machine.
-        - self.ctx: a processing context with mr_iid=42 and the mock state machine.
+        - self.ctx: a processing context with mr_iid=42 and the mock state
+          machine.
         - self.timeout: a timedelta of 3600 seconds (not expired).
         - self.start_time: the current UTC time.
 
-        Leaves shutdown unset to simulate that the time limit has not been reached.
+        Leaves shutdown unset to simulate that the time limit has not been
+        reached.
         """
         self.processor = create_mock_processor()
 
         self.mock_sm = create_mock_state_machine()
-        self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
+        self.ctx = create_processing_context(
+            mr_iid=42,
+            state_machine=self.mock_sm,
+        )
 
         # Shutdown not set, time not exceeded
         self.timeout = timedelta(seconds=3600)
@@ -70,6 +77,7 @@ class Scenario(vedro.Scenario):
 
     def and_trigger_mark_removed_was_called(self):
         """
-        Asserts that the state's machine trigger_mark_removed was awaited exactly once with reason "label_removed".
+        Asserts that the state machine's trigger_mark_removed was awaited
+        exactly once with reason "label_removed".
         """
         self.mock_sm.trigger_mark_removed.assert_awaited_once_with(reason="label_removed")

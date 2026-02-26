@@ -92,4 +92,4 @@ class Scenario(vedro.Scenario):
         """
         calls = self.notifier.notify.call_args_list
         old_totals = [c.kwargs["old_total"] for c in calls]
-        assert all(t == 2 for t in old_totals)
+        assert all(t == self.old_total for t in old_totals)

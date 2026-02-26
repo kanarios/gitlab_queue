@@ -1043,7 +1043,7 @@ class MergeProcessor:
         except GitLabConflictError as e:
             log.warning("Rebase conflict during testing", mr_iid=mr_iid)
             conflicted_files = await self.gitlab_client.get_mr_conflicts(mr_iid)
-            await sm.trigger_rebase_failed(
+            await sm.trigger_conflict_during_testing(
                 conflicted_files=conflicted_files,
                 error_message=str(e),
             )
@@ -1381,6 +1381,23 @@ class MergeProcessor:
 
         log.info("State recovery complete")
 
+    async def _fetch_mrs_by_label(self, label: str) -> list[MergeRequest]:
+        """Fetch open MRs with a given label, gracefully handling GitLab errors.
+
+        Args:
+            label: GitLab label to filter by.
+
+        Returns:
+            List of MRs, empty if GitLab is unavailable.
+        """
+        try:
+            return await self.gitlab_client.list_mrs_with_label(label, state="opened")
+        except GitLabCircuitOpenError:
+            log.warning("GitLab circuit open, skipping label sync", label=label)
+        except GitLabAPIError as e:
+            log.warning("Failed to fetch MRs from GitLab during sync", label=label, error=str(e))
+        return []
+
     async def _sync_missing_mrs_from_gitlab(self) -> None:
         """Add MRs that have the queue label in GitLab but aren't in the queue.
 
@@ -1391,29 +1408,8 @@ class MergeProcessor:
         """
         log.info("Syncing missing MRs from GitLab")
 
-        # Get all open MRs with queue label from GitLab
-        queue_mrs: list[MergeRequest] = []
-        try:
-            queue_mrs = await self.gitlab_client.list_mrs_with_label(
-                self.settings.queue_label,
-                state="opened",
-            )
-        except GitLabCircuitOpenError:
-            log.warning("GitLab circuit open, skipping queue label sync")
-        except GitLabAPIError as e:
-            log.warning("Failed to fetch queue-label MRs from GitLab during sync", error=str(e))
-
-        # Get all open MRs with hotfix label from GitLab
-        hotfix_mrs: list[MergeRequest] = []
-        try:
-            hotfix_mrs = await self.gitlab_client.list_mrs_with_label(
-                self.settings.hotfix_label,
-                state="opened",
-            )
-        except GitLabCircuitOpenError:
-            log.warning("GitLab circuit open, skipping hotfix label sync")
-        except GitLabAPIError as e:
-            log.warning("Failed to fetch hotfix-label MRs from GitLab during sync", error=str(e))
+        queue_mrs = await self._fetch_mrs_by_label(self.settings.queue_label)
+        hotfix_mrs = await self._fetch_mrs_by_label(self.settings.hotfix_label)
 
         # Merge without duplicates
         mrs_dict = {mr.iid: mr for mr in queue_mrs}

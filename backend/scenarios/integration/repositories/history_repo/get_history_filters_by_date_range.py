@@ -52,30 +52,25 @@ class Scenario(vedro.Scenario):
         Fetch history records for the date range from self.today - 5 days to self.today and store the fetched result on self.result.
 
         Opens a database session, constructs a HistoryRepository, and assigns the repository's get_history result to self.result.
+        Extracts iids within the session to avoid DetachedInstanceError.
         """
-        self._session_ctx = self.db.session()
-        session = await self._session_ctx.__aenter__()
-        repo = HistoryRepository(session)
-        self.result = await repo.get_history(
-            date_from=self.today - timedelta(days=5),
-            date_to=self.today,
-        )
+        async with self.db.session() as session:
+            repo = HistoryRepository(session)
+            result = await repo.get_history(
+                date_from=self.today - timedelta(days=5),
+                date_to=self.today,
+            )
+            self.total = result.total
+            self.iids = {item.iid for item in result.items}
 
     def then_only_records_within_range_should_be_returned(self):
         """
         Asserts that the repository result contains exactly the two history records within the expected date range.
 
-        Verifies that `self.result.total` equals 2 and that the set of `iid` values in `self.result.items` is exactly {1, 2}; raises AssertionError if these conditions are not met.
+        Verifies that self.total equals 2 and that the set of iid values is exactly {1, 2}.
         """
-        assert self.result.total == 2
-        iids = {item.iid for item in self.result.items}
-        assert iids == {1, 2}
+        assert self.total == 2
+        assert self.iids == {1, 2}
 
     async def do_cleanup(self):
-        """
-        Tears down the scenario's database and session async contexts.
-
-        Exits the active session and database context managers to release resources opened during the scenario setup.
-        """
-        await self._session_ctx.__aexit__(None, None, None)
         await self._db_ctx.__aexit__(None, None, None)

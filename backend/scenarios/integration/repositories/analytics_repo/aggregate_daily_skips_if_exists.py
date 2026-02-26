@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, datetime
 
 import vedro
 from scenarios.contexts.sqlite_client import initialized_test_database
@@ -25,7 +25,7 @@ class Scenario(vedro.Scenario):
         self.db = await self._db_ctx.__aenter__()
         await create_tables(self.db)
 
-        self.target_date = date.today()
+        self.target_date = datetime.now(UTC).date()
 
         async with self.db.transaction() as session:
             daily = AnalyticsDailyModel(

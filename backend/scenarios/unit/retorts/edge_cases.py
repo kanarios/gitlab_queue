@@ -1,9 +1,8 @@
 """Test edge cases in retort (de)serialization.
 
-Covers retorts.py lines 129, 218, 406:
-- _parse_datetime with ' UTC' suffix (line 129)
-- dump_queue_item serializes all fields correctly (line 218)
-- parse_webhook_event returns None for unknown kind (line 406)
+Covers:
+- _parse_datetime with ' UTC' suffix
+- dump_queue_item serializes all fields correctly
 - _extract_labels handles dict labels with 'name' key
 - _extract_labels handles dict labels with 'title' key
 """
@@ -14,6 +13,7 @@ from datetime import UTC, datetime
 
 import vedro
 
+from gitlab_queue.models.queue_item import QueueItem
 from gitlab_queue.models.retorts import (
     _extract_labels,
     _parse_datetime,
@@ -35,29 +35,8 @@ class Scenario(vedro.Scenario):
     def when_parse_datetime_is_called(self):
         self.result = _parse_datetime(self.dt_string)
 
-    def then_result_is_datetime(self):
-        """
-        Assert that self.result is a datetime.datetime instance.
-
-        Raises:
-            AssertionError: if self.result is not an instance of datetime.datetime.
-        """
-        assert isinstance(self.result, datetime)
-
-    def and_result_has_timezone(self):
-        assert self.result.tzinfo is not None
-
-    def and_year_is_correct(self):
-        """
-        Asserts that the parsed datetime's year equals 2025.
-        """
-        assert self.result.year == 2025
-
-    def and_month_is_correct(self):
-        assert self.result.month == 6
-
-    def and_hour_is_correct(self):
-        assert self.result.hour == 14
+    def then_result_is_expected_datetime(self):
+        assert self.result == datetime(2025, 6, 15, 14, 30, 0, tzinfo=UTC)
 
 
 class Scenario2(vedro.Scenario):
@@ -111,8 +90,6 @@ class Scenario4(vedro.Scenario):
         The created QueueItem has mr_iid=1, title "Test", author_name "Alice", author_username "alice",
         target_branch "main", state "queued", queued_at set to 2025-01-01 UTC, and started_at set to None.
         """
-        from gitlab_queue.models.queue_item import QueueItem
-
         self.item = QueueItem(
             mr_iid=1,
             title="Test",
@@ -134,14 +111,8 @@ class Scenario4(vedro.Scenario):
         assert self.result["started_at"] is None
 
     def and_queued_at_is_iso_string(self):
-        """
-        Asserts that the serialized `queued_at` field is an ISO-formatted datetime string containing the date 2025-01-01.
-
-        Raises:
-            AssertionError: If `self.result["queued_at"]` is not a string or does not contain "2025-01-01".
-        """
         assert isinstance(self.result["queued_at"], str)
-        assert "2025-01-01" in self.result["queued_at"]
+        assert self.result["queued_at"] == "2025-01-01T00:00:00+00:00"
 
 
 class Scenario5(vedro.Scenario):

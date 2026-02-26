@@ -46,7 +46,7 @@ class Scenario(vedro.Scenario):
         self.mock_stats.total_processed = 10
         self.mock_stats.success_count = 8
         self.mock_stats.failed_count = 2
-        self.mock_stats.avg_wait_time_seconds = 120.5
+        self.mock_stats.avg_wait_time_seconds = 120.6
 
         self.mock_uow.history = MagicMock()
         self.mock_uow.history.get_stats_for_last_hour = AsyncMock(

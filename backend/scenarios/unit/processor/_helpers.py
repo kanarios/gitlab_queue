@@ -192,6 +192,7 @@ def create_mock_state_machine() -> MagicMock:
     sm.notify_stale_warning = AsyncMock()
     sm.notify_pipeline_retry = AsyncMock()
     sm.notify_rebase_during_testing = AsyncMock()
+    sm.trigger_conflict_during_testing = AsyncMock()
     sm.current_state = MagicMock()
     sm.current_state.id = "merging"
     return sm

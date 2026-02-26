@@ -65,7 +65,7 @@ class Scenario(vedro.Scenario):
             AssertionError: If the response JSON does not contain a "detail" mentioning OAuth or not being configured.
         """
         data = self.response.json()
-        assert "oauth" in data["detail"].lower() or "not configured" in data["detail"].lower()
+        assert "oauth not configured" in data["detail"].lower()
 
 
 class ScenarioMissingAccessToken(vedro.Scenario):
@@ -122,7 +122,7 @@ class ScenarioMissingAccessToken(vedro.Scenario):
                 AssertionError: If the response JSON `detail` does not contain "access token" or "token" (case-insensitive).
         """
         data = self.response.json()
-        assert "access token" in data["detail"].lower() or "token" in data["detail"].lower()
+        assert "access token" in data["detail"].lower()
 
 
 class ScenarioUserInfoFetchFails(vedro.Scenario):
@@ -182,7 +182,7 @@ class ScenarioUserInfoFetchFails(vedro.Scenario):
             AssertionError: if the response JSON `detail` does not contain "user" or "failed" (case-insensitive).
         """
         data = self.response.json()
-        assert "user" in data["detail"].lower() or "failed" in data["detail"].lower()
+        assert "failed to fetch user information" in data["detail"].lower()
 
 
 class ScenarioNetworkError(vedro.Scenario):
@@ -243,4 +243,4 @@ class ScenarioNetworkError(vedro.Scenario):
         Checks the JSON response's "detail" field and verifies it contains either "connect" or "failed" (case-insensitive).
         """
         data = self.response.json()
-        assert "connect" in data["detail"].lower() or "failed" in data["detail"].lower()
+        assert "failed to connect to gitlab" in data["detail"].lower()

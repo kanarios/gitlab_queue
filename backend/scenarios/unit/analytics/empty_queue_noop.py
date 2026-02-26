@@ -102,25 +102,11 @@ class Scenario2(vedro.Scenario):
         )
 
     async def when_save_hourly_snapshot_is_called(self):
-        """
-        Calls the processor's _save_hourly_snapshot with UnitOfWork patched to the prepared mock and records whether an exception was raised into `self.raised`.
-
-        This step patches `gitlab_queue.jobs.analytics.UnitOfWork` to return the scenario's `mock_uow`, invokes `self.processor._save_hourly_snapshot()`, and sets `self.raised` to `True` if the call raises an exception, otherwise `False`.
-        """
         with patch(
             "gitlab_queue.jobs.analytics.UnitOfWork",
             return_value=self.mock_uow,
         ):
-            self.raised = False
-            try:
-                await self.processor._save_hourly_snapshot()
-            except Exception:
-                self.raised = True
+            await self.processor._save_hourly_snapshot()
 
-    def then_no_exception_is_propagated(self):
-        """
-        Asserts that calling _save_hourly_snapshot did not raise an exception.
-
-        Raises an AssertionError if an exception was propagated during the call.
-        """
-        assert self.raised is False
+    def then_snapshot_was_not_called(self):
+        self.mock_uow.analytics.save_hourly_snapshot.assert_not_called()

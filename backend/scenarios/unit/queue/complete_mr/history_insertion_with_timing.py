@@ -38,11 +38,20 @@ class Scenario(vedro.Scenario):
 
     async def when_mr_is_completed(self):
         """
-        Complete the merge request with iid 42 using state "merged" and record the outcome.
+        Complete the merge request with iid 42 using state "merged" and fetch the history record.
 
-        Stores the boolean result of the completion operation in `self.result`.
+        Stores the boolean result of the completion operation in `self.result`
+        and the history timing record in `self.history`.
         """
         self.result = await self.queue.complete_mr(42, "merged")
+
+        async with self.db.session() as session:
+            result = await session.execute(
+                text(_SELECT_HISTORY_TIMING_SQL),
+                {"iid": 42},
+            )
+            self.history = result.mappings().one_or_none()
+            await session.commit()
 
     def then_result_should_be_true(self):
         """
@@ -53,20 +62,7 @@ class Scenario(vedro.Scenario):
         """
         assert self.result is True
 
-    async def and_history_should_have_wait_time(self):
-        """
-        Verify that the stored history record for iid 42 contains a wait_time_seconds field and that it is an integer.
-
-        Queries the test database for the merge request history row with iid 42, stores the resulting mapping in self.history, and asserts that `wait_time_seconds` exists and is an int.
-        """
-        async with self.db.session() as session:
-            result = await session.execute(
-                text(_SELECT_HISTORY_TIMING_SQL),
-                {"iid": 42},
-            )
-            self.history = result.mappings().one_or_none()
-            await session.commit()
-
+    def and_history_should_have_wait_time(self):
         assert self.history is not None
         assert self.history["wait_time_seconds"] is not None
         assert isinstance(self.history["wait_time_seconds"], int)

@@ -40,7 +40,7 @@ class Scenario(vedro.Scenario):
 
         Asserts that notify was awaited and that its first positional argument is 123 (mr_iid) and its second positional argument is "pipeline_failed" (template).
         """
-        self.notifier.notify.assert_awaited()
+        self.notifier.notify.assert_awaited_once()
         call_args = self.notifier.notify.call_args
         assert call_args[0][0] == 123  # mr_iid
         assert call_args[0][1] == "pipeline_failed"  # template

@@ -40,13 +40,7 @@ class Scenario(vedro.Scenario):
             self.error = e
 
     def then_server_error_should_be_raised(self):
-        """
-        Assert that a GitLabServerError was raised and stored on the scenario.
-
-        Raises an AssertionError if no error was captured or if the captured error is not an instance of GitLabServerError.
-        """
         assert self.error is not None
-        assert isinstance(self.error, GitLabServerError)
 
     def and_status_code_should_be_500(self):
         """

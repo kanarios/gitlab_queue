@@ -37,12 +37,10 @@ class Scenario(vedro.Scenario):
         with catched(DLQItemNotFoundError) as self.exc_info:
             await self.manager.get_dlq_entry(999)
 
-    def then_error_should_indicate_item_not_found(self):
-        """
-        Verify the captured DLQItemNotFoundError references the missing item ID 999.
+    def then_dlq_item_not_found_error_is_raised(self):
+        assert self.exc_info.value is not None, "DLQItemNotFoundError was not raised"
 
-        Asserts that the exception's `item_id` equals 999 and that the string representation of the exception contains "999".
-        """
+    def and_error_should_indicate_item_not_found(self):
         assert self.exc_info.value.item_id == 999
         assert "999" in str(self.exc_info.value)
 

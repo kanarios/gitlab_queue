@@ -29,10 +29,10 @@ class Scenario(vedro.Scenario):
         configure_logging(LogLevel.DEBUG, LogFormat.JSON)
         # Capture log output via a string stream handler
         self.log_stream = StringIO()
-        handler = logging.StreamHandler(self.log_stream)
+        self._log_handler = logging.StreamHandler(self.log_stream)
         formatter = logging.getLogger().handlers[0].formatter
-        handler.setFormatter(formatter)
-        logging.getLogger().addHandler(handler)
+        self._log_handler.setFormatter(formatter)
+        logging.getLogger().addHandler(self._log_handler)
 
     async def when_timed_async_operation_completes(self):
         """
@@ -64,11 +64,9 @@ class Scenario(vedro.Scenario):
         assert "duration_seconds" in output
 
     def do_cleanup(self):
-        """
-        Reset global logging configuration to its default state.
-
-        This is intended for test cleanup to remove any handlers, formatters, or level changes applied during a scenario.
-        """
+        logging.getLogger().removeHandler(self._log_handler)
+        self._log_handler.close()
+        self.log_stream.close()
         reset_logging()
 
 
@@ -84,10 +82,10 @@ class Scenario2(vedro.Scenario):
         reset_logging()
         configure_logging(LogLevel.DEBUG, LogFormat.JSON)
         self.log_stream = StringIO()
-        handler = logging.StreamHandler(self.log_stream)
+        self._log_handler = logging.StreamHandler(self.log_stream)
         formatter = logging.getLogger().handlers[0].formatter
-        handler.setFormatter(formatter)
-        logging.getLogger().addHandler(handler)
+        self._log_handler.setFormatter(formatter)
+        logging.getLogger().addHandler(self._log_handler)
 
     async def when_timed_async_operation_fails(self):
         """
@@ -130,9 +128,7 @@ class Scenario2(vedro.Scenario):
         assert "duration_seconds" in output
 
     def do_cleanup(self):
-        """
-        Reset global logging configuration to its default state.
-
-        This is intended for test cleanup to remove any handlers, formatters, or level changes applied during a scenario.
-        """
+        logging.getLogger().removeHandler(self._log_handler)
+        self._log_handler.close()
+        self.log_stream.close()
         reset_logging()
