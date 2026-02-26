@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from gitlab_queue.core.notifier import MRNotifier
     from gitlab_queue.core.queue import QueueManager
     from gitlab_queue.core.queue_position_notifier import QueuePositionNotifier
+    from gitlab_queue.models.mr import MergeRequest
     from gitlab_queue.models.pipeline import Pipeline
     from gitlab_queue.models.queue_item import QueueItem
 
@@ -331,6 +332,8 @@ class MergeProcessor:
             current_state = "testing"
 
         if current_state == "rebasing":
+            # Capture pre-rebase SHA if not already set (e.g., restart recovery)
+            await self._capture_pre_rebase_sha(ctx)
             # Wait for rebase to complete
             result = await self._wait_for_rebase(ctx)
             if result != ProcessingResult.SUCCESS:
@@ -428,7 +431,7 @@ class MergeProcessor:
                 )
 
                 if pipeline and pipeline.sha == new_sha:
-                    pipeline_url = self.notifier.build_pipeline_url(pipeline.id)
+                    pipeline_url = await self.notifier.build_pipeline_url(pipeline.id)
                     await sm.trigger_rebase_complete(
                         pipeline_id=pipeline.id,
                         pipeline_url=pipeline_url,
@@ -612,7 +615,7 @@ class MergeProcessor:
         log.info("Retrying pipeline", mr_iid=mr_iid, retry_count=retry_count + 1)
 
         old_pipeline_id = pipeline.id
-        old_pipeline_url = self.notifier.build_pipeline_url(old_pipeline_id)
+        old_pipeline_url = await self.notifier.build_pipeline_url(old_pipeline_id)
 
         # Capture old SHA before retry rebase for race condition prevention
         old_sha = await self._capture_pre_rebase_sha(ctx)
@@ -636,7 +639,7 @@ class MergeProcessor:
         )
 
         if new_pipeline and new_pipeline.id != old_pipeline_id and new_pipeline.sha == new_sha:
-            new_pipeline_url = self.notifier.build_pipeline_url(new_pipeline.id)
+            new_pipeline_url = await self.notifier.build_pipeline_url(new_pipeline.id)
             await sm.notify_pipeline_retry(
                 old_pipeline_id=old_pipeline_id,
                 old_pipeline_url=old_pipeline_url,
@@ -682,7 +685,7 @@ class MergeProcessor:
                 )
                 return False, None
 
-            new_pipeline_url = self.notifier.build_pipeline_url(created_pipeline.id)
+            new_pipeline_url = await self.notifier.build_pipeline_url(created_pipeline.id)
             await sm.notify_pipeline_retry(
                 old_pipeline_id=old_pipeline_id,
                 old_pipeline_url=old_pipeline_url,
@@ -958,6 +961,11 @@ class MergeProcessor:
         mr_iid = ctx.mr_iid
         failed_jobs = await self._get_failed_jobs(pipeline.id)
 
+        # Sync retry_count with DB to prevent race with webhook handler
+        queue_item = await self.queue_manager.get_queue_item(mr_iid)
+        if queue_item and queue_item.retry_count is not None:
+            retry_count = max(retry_count, queue_item.retry_count)
+
         log.warning(
             "Pipeline failed",
             mr_iid=mr_iid,
@@ -1166,7 +1174,9 @@ class MergeProcessor:
 
         except TimeoutError:
             log.warning("Merge operation timeout", mr_iid=mr_iid)
-            await sm.trigger_timeout(max_wait_hours=0)  # 0 indicates merge timeout
+            await sm.trigger_merge_failed(
+                error_message=f"Merge operation timed out after {self.settings.merge_timeout_seconds} seconds",
+            )
             return ProcessingResult.TIMEOUT
 
         except GitLabConflictError as e:
@@ -1272,8 +1282,8 @@ class MergeProcessor:
                 log.info("MR is no longer open", mr_iid=mr_iid, state=mr.state)
                 return False
 
-            if self.settings.queue_label not in mr.labels:
-                log.info("MR no longer has queue label", mr_iid=mr_iid)
+            if self.settings.queue_label not in mr.labels and self.settings.hotfix_label not in mr.labels:
+                log.info("MR no longer has queue or hotfix label", mr_iid=mr_iid)
                 return False
 
             return True
@@ -1314,18 +1324,26 @@ class MergeProcessor:
                 mr = await self.gitlab_client.get_mr(item.mr_iid)
 
                 if mr.state == "merged":
-                    # Already merged - update DB
-                    await self.queue_manager.update_mr_state(item.mr_iid, "merged")
+                    # Already merged - move to history
+                    await self.queue_manager.complete_mr(item.mr_iid, status="merged")
                     log.info("MR was already merged", mr_iid=item.mr_iid)
 
                 elif mr.state != "opened":
-                    # MR closed - mark as removed
-                    await self.queue_manager.update_mr_state(item.mr_iid, "removed")
+                    # MR closed - move to history as removed
+                    await self.queue_manager.complete_mr(
+                        item.mr_iid,
+                        status="removed",
+                        failure_reason="closed_during_recovery",
+                    )
                     log.info("MR was closed", mr_iid=item.mr_iid)
 
-                elif self.settings.queue_label not in mr.labels:
+                elif self.settings.queue_label not in mr.labels and self.settings.hotfix_label not in mr.labels:
                     # Label removed - mark as removed (orphaned entry cleanup)
-                    await self.queue_manager.update_mr_state(item.mr_iid, "removed")
+                    await self.queue_manager.complete_mr(
+                        item.mr_iid,
+                        status="removed",
+                        failure_reason="label_removed",
+                    )
                     log.info("MR label was removed", mr_iid=item.mr_iid)
 
                 elif item.state in ("rebasing", "testing", "merging"):
@@ -1346,7 +1364,11 @@ class MergeProcessor:
                 continue
 
             except GitLabNotFoundError:
-                await self.queue_manager.update_mr_state(item.mr_iid, "removed")
+                await self.queue_manager.complete_mr(
+                    item.mr_iid,
+                    status="removed",
+                    failure_reason="not_found",
+                )
                 log.warning("MR not found during recovery", mr_iid=item.mr_iid)
 
             except GitLabAPIError as e:
@@ -1370,16 +1392,38 @@ class MergeProcessor:
         log.info("Syncing missing MRs from GitLab")
 
         # Get all open MRs with queue label from GitLab
+        queue_mrs: list[MergeRequest] = []
         try:
-            gitlab_mrs = await self.gitlab_client.list_mrs_with_label(
+            queue_mrs = await self.gitlab_client.list_mrs_with_label(
                 self.settings.queue_label,
                 state="opened",
             )
         except GitLabCircuitOpenError:
-            log.warning("GitLab circuit open, skipping initial sync")
-            return
+            log.warning("GitLab circuit open, skipping queue label sync")
         except GitLabAPIError as e:
-            log.warning("Failed to fetch MRs from GitLab during sync", error=str(e))
+            log.warning("Failed to fetch queue-label MRs from GitLab during sync", error=str(e))
+
+        # Get all open MRs with hotfix label from GitLab
+        hotfix_mrs: list[MergeRequest] = []
+        try:
+            hotfix_mrs = await self.gitlab_client.list_mrs_with_label(
+                self.settings.hotfix_label,
+                state="opened",
+            )
+        except GitLabCircuitOpenError:
+            log.warning("GitLab circuit open, skipping hotfix label sync")
+        except GitLabAPIError as e:
+            log.warning("Failed to fetch hotfix-label MRs from GitLab during sync", error=str(e))
+
+        # Merge without duplicates
+        mrs_dict = {mr.iid: mr for mr in queue_mrs}
+        for mr in hotfix_mrs:
+            if mr.iid not in mrs_dict:
+                mrs_dict[mr.iid] = mr
+        gitlab_mrs = list(mrs_dict.values())
+
+        if not gitlab_mrs:
+            log.info("No MRs found with queue or hotfix labels")
             return
 
         # Get current queue IIDs

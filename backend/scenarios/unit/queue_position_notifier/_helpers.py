@@ -63,10 +63,7 @@ def create_queue_with_mixed_states() -> list[MockQueueItem]:
 
 def create_queue_all_queued(count: int) -> list[MockQueueItem]:
     """Create queue with all MRs in queued state."""
-    return [
-        MockQueueItem(mr_iid=100 + i, state="queued")
-        for i in range(1, count + 1)
-    ]
+    return [MockQueueItem(mr_iid=100 + i, state="queued") for i in range(1, count + 1)]
 
 
 __all__ = [

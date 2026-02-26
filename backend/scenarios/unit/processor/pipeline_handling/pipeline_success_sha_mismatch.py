@@ -24,7 +24,7 @@ class Scenario(vedro.Scenario):
     def given_processor_with_success_pipeline_wrong_sha(self):
         """
         Prepare test fixtures for a scenario where a pipeline reports success but its SHA does not match the expected SHA in the queue item.
-        
+
         Sets the following attributes on self:
         - self.processor: mock processor whose queue_manager.get_queue_item returns the test queue item
         - self.queue_item: test queue item with mr_iid=42, state="testing", expected_sha="different_sha"
@@ -45,7 +45,7 @@ class Scenario(vedro.Scenario):
     async def when_handle_pipeline_status_is_called(self):
         """
         Invoke the processor's _handle_pipeline_status with the prepared context, mock state machine, and pipeline, and store the handler's return value on self.result.
-        
+
         The call uses retry_count=0 and max_retries=1 to simulate the initial handling attempt.
         """
         self.result = await self.processor._handle_pipeline_status(
@@ -59,7 +59,7 @@ class Scenario(vedro.Scenario):
     def then_result_is_none_indicating_continue_polling(self):
         """
         Asserts that the handler returned None to indicate the polling loop should continue.
-        
+
         Verifies that no terminal pipeline action was triggered and polling should keep waiting for a matching SHA.
         """
         assert self.result is None
@@ -67,7 +67,7 @@ class Scenario(vedro.Scenario):
     def and_pipeline_success_is_not_triggered(self):
         """
         Asserts that the state machine's pipeline-success trigger was not awaited.
-        
+
         This verifies that trigger_pipeline_success on the mocked state machine was not called during the test.
         """
         self.mock_sm.trigger_pipeline_success.assert_not_awaited()
@@ -75,7 +75,7 @@ class Scenario(vedro.Scenario):
     def and_pipeline_failed_is_not_triggered(self):
         """
         Asserts that the state machine's pipeline failure trigger was not invoked.
-        
+
         This verifies that mock_sm.trigger_pipeline_failed was not awaited during the test.
         """
         self.mock_sm.trigger_pipeline_failed.assert_not_awaited()

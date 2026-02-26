@@ -17,7 +17,7 @@ class Scenario(vedro.Scenario):
     async def given_database_with_history_records(self):
         """
         Set up a test database context, create required tables, and seed five history records.
-        
+
         Creates an async test database context and tables, then inserts five history entries with iids 100 through 104. Each record's `finished_at` is set to the current UTC time minus 0..4 minutes respectively.
         """
         self._db_ctx = initialized_test_database()
@@ -36,7 +36,7 @@ class Scenario(vedro.Scenario):
     async def when_get_history_is_called_with_pagination(self):
         """
         Call HistoryRepository.get_history for page 1 with 2 items per page and store the paginated result on self.result.
-        
+
         Sets self.result to the pagination object returned by the repository.
         """
         async with self.db.session() as session:
@@ -46,7 +46,7 @@ class Scenario(vedro.Scenario):
     def then_result_should_have_2_items(self):
         """
         Assert that the paginated result contains exactly two items.
-        
+
         Raises:
             AssertionError: If the number of items in self.result.items is not 2.
         """
@@ -61,7 +61,7 @@ class Scenario(vedro.Scenario):
     def and_total_pages_should_be_3(self):
         """
         Verify that the paginated result reports three total pages.
-        
+
         Raises:
             AssertionError: If the result's `total_pages` is not equal to 3.
         """
@@ -70,7 +70,7 @@ class Scenario(vedro.Scenario):
     def and_page_should_be_1(self):
         """
         Asserts that the query result's page is 1.
-        
+
         Raises:
             AssertionError: If the result's page is not 1.
         """

@@ -27,7 +27,7 @@ class Scenario(vedro.Scenario):
     def given_processor_with_successful_rebase_during_testing(self):
         """
         Prepare test fixtures simulating a successful rebase during testing.
-        
+
         Creates and attaches to self:
         - processor: mock processor instance.
         - mock_sm: mock state machine and ctx: processing context with mr_iid=42.

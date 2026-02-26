@@ -15,7 +15,7 @@ import vedro
 from scenarios.library import Labels
 from scenarios.webhooks.mr_webhook._helpers import (
     create_gitlab_client_with_transport,
-    created_mock_settings,
+    create_mock_settings,
 )
 
 from gitlab_queue.api.websocket import WebSocketManager
@@ -29,7 +29,7 @@ class Scenario(vedro.Scenario):
     subject = "WebSocket broadcast is triggered on queue state change"
 
     def given_handler_with_websocket_manager(self):
-        self.settings = created_mock_settings()
+        self.settings = create_mock_settings()
         self.gitlab_client, self.transport = create_gitlab_client_with_transport(
             mr_iid=42,
             labels=[Labels.MERGE_QUEUE],

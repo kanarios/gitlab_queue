@@ -15,7 +15,7 @@ class Scenario(vedro.Scenario):
     async def given_database_with_queued_mr(self):
         """
         Prepare a test database and seed it with a merge request in "queued" status.
-        
+
         Creates an initialized test database context, creates required tables, seeds a merge request with iid 42 and status "queued", and stores the database context and handle on self._db_ctx and self.db for later steps and cleanup.
         """
         self._db_ctx = initialized_test_database()
@@ -28,7 +28,7 @@ class Scenario(vedro.Scenario):
     async def when_status_is_updated_to_rebasing(self):
         """
         Updates the merge request with iid 42 to status "rebasing" and records whether the update succeeded.
-        
+
         This method performs the repository update and stores the resulting boolean in self.updated.
         """
         async with self.db.transaction() as session:
@@ -38,7 +38,7 @@ class Scenario(vedro.Scenario):
     def then_update_should_succeed(self):
         """
         Verify that the repository update operation reported success.
-        
+
         Raises:
             AssertionError: If the update did not succeed (i.e., `self.updated` is not `True`).
         """
@@ -47,7 +47,7 @@ class Scenario(vedro.Scenario):
     async def and_started_at_should_be_set(self):
         """
         Asserts that the merge request with iid 42 has status "rebasing" and a non-null started_at timestamp.
-        
+
         Opens a database session, retrieves the merge request by iid, and verifies it exists, its status equals "rebasing", and its started_at field is set.
         """
         async with self.db.session() as session:
@@ -60,7 +60,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Exit and clean up the test database context used by the scenario.
-        
+
         Closes the asynchronous database context manager to release connections and other related resources.
         """
         await self._db_ctx.__aexit__(None, None, None)

@@ -1,9 +1,9 @@
 """Test scenario: remove already removed MR is idempotent."""
 
 import vedro
-from scenarios.contexts.sqlite_client import initialized_test_database
 
 from gitlab_queue.core.queue import QueueManager
+from scenarios.contexts.sqlite_client import initialized_test_database
 
 from ._helpers import create_test_mr
 
@@ -24,7 +24,7 @@ class Scenario(vedro.Scenario):
     async def when_mr_is_removed_again(self):
         """
         Attempts to remove merge request with ID 42 from the queue a second time.
-        
+
         Stores the boolean outcome on self.result: `True` if the call removed the MR, `False` if the MR was already removed.
         """
         self.result = await self.queue.remove_from_queue(42)
@@ -32,7 +32,7 @@ class Scenario(vedro.Scenario):
     def then_result_should_be_false(self):
         """
         Verify that the previous removal attempt indicated no change.
-        
+
         Raises:
             AssertionError: If the stored result is not False.
         """
@@ -41,7 +41,7 @@ class Scenario(vedro.Scenario):
     async def and_mr_state_should_still_be_removed(self):
         """
         Verifies that the merge request with id 42 remains marked as removed in the queue.
-        
+
         Asserts that the MR state exists and that its `status` field is "removed".
         """
         state = await self.queue.get_mr_state(42)

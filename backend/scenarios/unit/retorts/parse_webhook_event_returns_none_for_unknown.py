@@ -13,7 +13,7 @@ class Scenario(vedro.Scenario):
     def given_payload_with_unknown_object_kind(self):
         """
         Prepare a test payload with an unrecognized `object_kind` and a minimal project.
-        
+
         Sets `self.payload` to {"object_kind": "unknown_event_type", "project": {"id": 1"}} for use in scenarios that verify handling of unknown or missing event types.
         """
         self.payload = {"object_kind": "unknown_event_type", "project": {"id": 1}}
@@ -27,7 +27,7 @@ class Scenario(vedro.Scenario):
     def then_result_is_none(self):
         """
         Asserts that the previously stored result is None.
-        
+
         Raises:
             AssertionError: If `self.result` is not None.
         """

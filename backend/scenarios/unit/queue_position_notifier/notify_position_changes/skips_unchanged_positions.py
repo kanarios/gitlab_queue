@@ -16,7 +16,7 @@ class Scenario(vedro.Scenario):
     async def given_mr_with_same_position_before_and_after(self):
         """
         Set up test state where two merge requests retain the same queue positions before and after notification.
-        
+
         Creates:
         - self.positions_before: mapping of MR IIDs to their previous positions (101->1, 102->2).
         - self.queue_manager populated with two queued MockQueueItem instances for MR IIDs 101 and 102.

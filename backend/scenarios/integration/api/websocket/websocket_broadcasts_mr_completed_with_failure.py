@@ -27,7 +27,7 @@ class Scenario(vedro.Scenario):
     async def when_failed_mr_completed_is_broadcast(self):
         """
         Broadcast a failed merge-request completion event through the test WebSocketManager.
-        
+
         Calls the test manager's broadcast_mr_completed with mr_iid set to 42, status set to QueueState.FAILED, finished_at taken from the test context, and failure_reason "Merge conflict detected".
         """
         await self.manager.broadcast_mr_completed(
@@ -40,7 +40,7 @@ class Scenario(vedro.Scenario):
     def then_broadcast_should_contain_failure_reason(self):
         """
         Verify the WebSocket broadcast for a failed merge request includes the correct type, MR IID, status, and failure reason.
-        
+
         Asserts that send_json was awaited exactly once and that the broadcast payload:
         - has "type" equal to "mr:completed"
         - contains "data.iid" equal to 42

@@ -6,9 +6,10 @@ import secrets
 from unittest.mock import AsyncMock, patch
 
 import vedro
+from starlette.testclient import TestClient
+
 from scenarios.contexts.api_helpers import created_test_app
 from scenarios.schemas.status_code import ForbiddenStatusSchema
-from starlette.testclient import TestClient
 
 from ._helpers import create_mock_httpx_client
 
@@ -19,7 +20,7 @@ class Scenario(vedro.Scenario):
     def given_app_with_no_project_access(self):
         """
         Initialize test fixtures representing an application where the current user lacks project access.
-        
+
         Sets self.app and self.state using created_test_app(), creates a TestClient (with server exceptions suppressed) and stores it on self.client, generates and stores an OAuth state token on self.oauth_state, and creates a mocked HTTPX client assigned to self.mock_httpx_client.
         """
         self.app, self.state = created_test_app()
@@ -30,7 +31,7 @@ class Scenario(vedro.Scenario):
     def when_token_is_exchanged_without_access(self):
         """
         Simulates exchanging an OAuth token when the user lacks project access and records the HTTP response.
-        
+
         Patches the HTTPX AsyncClient to use the test mock client and makes validate_project_access return False, then POSTs to /auth/token with a code and state and stores the resulting response on self.response.
         """
         with (
@@ -56,7 +57,7 @@ class Scenario(vedro.Scenario):
     def then_it_should_return_403(self):
         """
         Asserts that the received HTTP response has the forbidden status code.
-        
+
         The assertion fails (raises AssertionError) if the response status code is not equal to ForbiddenStatusSchema.
         """
         assert self.response.status_code == ForbiddenStatusSchema
@@ -64,7 +65,7 @@ class Scenario(vedro.Scenario):
     def and_detail_should_mention_access_denied(self):
         """
         Verify that the response detail message indicates access was denied.
-        
+
         Asserts that the response JSON's "detail" field contains either "access denied" or "access" (case-insensitive), raising an AssertionError if the check fails.
         """
         data = self.response.json()

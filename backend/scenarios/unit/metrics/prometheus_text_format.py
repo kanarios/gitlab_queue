@@ -19,7 +19,7 @@ class Scenario(vedro.Scenario):
     def given_metrics_are_available(self):
         """
         Ensure default Prometheus metrics are available for the scenario.
-        
+
         This step is a no-op because the Prometheus client already exposes default metrics.
         """
         pass  # Default Prometheus metrics are always available
@@ -33,7 +33,7 @@ class Scenario(vedro.Scenario):
     def then_output_should_be_bytes(self):
         """
         Asserts that the stored metrics output is a bytes object.
-        
+
         Raises:
             AssertionError: If `self.output` is not an instance of `bytes`.
         """
@@ -70,7 +70,7 @@ class Scenario3(vedro.Scenario):
     def given_mock_gitlab_client(self):
         """
         Configure self.gitlab_client as a MagicMock with predefined rate limit and circuit breaker properties for tests.
-        
+
         The mock exposes a rate_limit_state property whose `.remaining` is 950 and a circuit_breaker property whose `.state.value` is "closed".
         """
         self.gitlab_client = MagicMock()
@@ -96,7 +96,7 @@ class Scenario3(vedro.Scenario):
     def and_circuit_breaker_metric_should_be_set(self):
         """
         Asserts that the circuit breaker state metric is present in the Prometheus metrics output.
-        
+
         Raises an AssertionError if the "merge_queue_circuit_breaker_state" metric is not found in the decoded metrics output.
         """
         output = get_metrics_output().decode("utf-8")
@@ -109,7 +109,7 @@ class Scenario4(vedro.Scenario):
     def given_mock_gitlab_client_with_none_remaining(self):
         """
         Set up self.gitlab_client as a MagicMock configured with no remaining rate limit and an open circuit breaker.
-        
+
         Assigns to self.gitlab_client a MagicMock whose rate_limit_state property returns an object with remaining set to None, and whose circuit_breaker property returns an object with state.value equal to "open".
         """
         self.gitlab_client = MagicMock()
@@ -129,7 +129,7 @@ class Scenario4(vedro.Scenario):
     def then_no_error_should_be_raised(self):
         """
         Marks the scenario step as successful when no exception was raised.
-        
+
         No-op step used in scenarios to explicitly indicate that prior operations completed without raising an exception.
         """
         pass  # If we got here, no error was raised

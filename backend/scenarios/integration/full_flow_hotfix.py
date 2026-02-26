@@ -136,7 +136,11 @@ async def hotfix_jumps_to_front_of_queue():
             comment_matcher = jj.match("POST", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes"))
             comment_response = jj.Response(status=201, json={"id": 1})
 
+            project_matcher = jj.match("GET", "/api/v4/projects/123")
+            project_response = jj.Response(status=200, json={"id": 123, "web_url": f"{mock_url}/test/project"})
+
         async with (
+            mocked(project_matcher, project_response),
             mocked(get_mr_10_matcher, get_mr_10_response),
             mocked(get_mr_20_matcher, get_mr_20_response),
             mocked(get_mr_99_matcher, get_mr_99_response),
@@ -311,7 +315,11 @@ async def hotfix_priority_with_processing_continues():
             comment_matcher = jj.match("POST", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes"))
             comment_response = jj.Response(status=201, json={"id": 1})
 
+            project_matcher = jj.match("GET", "/api/v4/projects/123")
+            project_response = jj.Response(status=200, json={"id": 123, "web_url": f"{mock_url}/test/project"})
+
         async with (
+            mocked(project_matcher, project_response),
             mocked(get_mr_10, jj.Response(status=200, json=mr_10_data)),
             mocked(get_mr_20, jj.Response(status=200, json=mr_20_data)),
             mocked(get_mr_99, jj.Response(status=200, json=mr_99_data)),

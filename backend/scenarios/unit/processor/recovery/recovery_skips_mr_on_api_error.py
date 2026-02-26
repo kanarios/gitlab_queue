@@ -20,7 +20,7 @@ class Scenario(vedro.Scenario):
     def given_processor_with_api_error_for_mr(self):
         """
         Prepare a mock processor with an active queue containing a merge request (IID 42) in the "testing" state and configure its GitLab client to raise GitLabAPIError when fetching that MR.
-        
+
         Sets:
             - self.processor: mock processor
             - self.queue_item: test queue item for MR IID 42
@@ -39,7 +39,7 @@ class Scenario(vedro.Scenario):
     async def when_recover_interrupted_state_is_called(self):
         """
         Invoke the processor's interrupted-state recovery and capture any exception in self.raised.
-        
+
         Sets self.raised to the caught exception if one occurs; leaves it as None if no exception is raised.
         """
         self.raised = None
@@ -51,7 +51,7 @@ class Scenario(vedro.Scenario):
     def then_no_error_is_raised(self):
         """
         Asserts that no exception was raised during the tested operation.
-        
+
         Fails the test if self.raised is not None.
         """
         assert self.raised is None
@@ -59,7 +59,7 @@ class Scenario(vedro.Scenario):
     def and_update_mr_state_is_not_called(self):
         """
         Asserts that the queue manager's update_mr_state was not awaited during recovery.
-        
+
         Verifies that no merge request state update was attempted after a GitLab API error.
         """
         self.processor.queue_manager.update_mr_state.assert_not_awaited()

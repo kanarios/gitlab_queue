@@ -101,6 +101,7 @@ class MRStateMachine(StateMachine):
         start_value: str | None = None,
         websocket_manager: WebSocketManager | None = None,
         position_notifier: QueuePositionNotifier | None = None,
+        skip_initial_enter: bool = False,
     ) -> None:
         """Initialize state machine for a specific MR.
 
@@ -120,6 +121,7 @@ class MRStateMachine(StateMachine):
         self.websocket_manager: WebSocketManager | None = websocket_manager
         self.position_notifier: QueuePositionNotifier | None = position_notifier
         self._context: dict[str, Any] = {}
+        self._skip_initial_enter = skip_initial_enter
 
         # Initialize with correct starting state
         # Note: If start_value matches the initial state, we pass None to avoid
@@ -132,12 +134,29 @@ class MRStateMachine(StateMachine):
             initial_state=start_value or "queued",
         )
 
+    def _skip_on_enter_if_resumed(self, state: str) -> bool:
+        """Skip the first on_enter callback when resuming from DB.
+
+        In async mode python-statemachine requires `await sm.activate_initial_state()`
+        to initialize `current_state`. When we resume an existing MR from DB, that
+        activation would re-trigger on_enter_<state>() callbacks (duplicate
+        notifications and metadata overwrites). We skip the very first on_enter
+        callback once, while still activating the machine.
+        """
+        if not self._skip_initial_enter:
+            return False
+        log.debug("Skipping on_enter for resumed state machine", mr_iid=self.mr_iid, state=state)
+        self._skip_initial_enter = False
+        return True
+
     # =========================================================================
     # Async Callbacks (MANDATORY per ADR-006)
     # =========================================================================
 
     async def on_enter_queued(self) -> None:
         """Called when MR enters queued state."""
+        if self._skip_on_enter_if_resumed("queued"):
+            return
         log.debug("Entering queued state", mr_iid=self.mr_iid)
 
         position = await self.queue_manager.get_queue_position(self.mr_iid)
@@ -158,6 +177,8 @@ class MRStateMachine(StateMachine):
 
     async def on_enter_rebasing(self) -> None:
         """Called when MR starts rebasing."""
+        if self._skip_on_enter_if_resumed("rebasing"):
+            return
         log.debug("Entering rebasing state", mr_iid=self.mr_iid)
 
         await self.queue_manager.update_mr_state(self.mr_iid, "rebasing")
@@ -174,6 +195,8 @@ class MRStateMachine(StateMachine):
 
     async def on_enter_testing(self) -> None:
         """Called when pipeline starts after rebase."""
+        if self._skip_on_enter_if_resumed("testing"):
+            return
         log.debug("Entering testing state", mr_iid=self.mr_iid)
 
         pipeline_id = self._context.get("pipeline_id")
@@ -201,6 +224,8 @@ class MRStateMachine(StateMachine):
 
     async def on_enter_merging(self) -> None:
         """Called when pipeline passes and merge starts."""
+        if self._skip_on_enter_if_resumed("merging"):
+            return
         log.debug("Entering merging state", mr_iid=self.mr_iid)
 
         await self.queue_manager.update_mr_state(self.mr_iid, "merging")
@@ -218,15 +243,19 @@ class MRStateMachine(StateMachine):
 
     async def on_enter_merged(self) -> None:
         """Called when MR is successfully merged."""
+        if self._skip_on_enter_if_resumed("merged"):
+            return
         log.debug("Entering merged state", mr_iid=self.mr_iid)
 
         queue_item = await self.queue_manager.get_queue_item(self.mr_iid)
         duration = self._calculate_duration(queue_item)
 
+        now = datetime.now(UTC)
+
         await self.notifier.notify(
             self.mr_iid,
             "merged",
-            merged_at=datetime.now(UTC),
+            merged_at=now,
             duration=duration,
             target_branch=self.target_branch,
         )
@@ -236,7 +265,7 @@ class MRStateMachine(StateMachine):
             await self.websocket_manager.broadcast_mr_completed(
                 self.mr_iid,
                 "merged",
-                finished_at=datetime.now(UTC),
+                finished_at=now,
             )
 
         # Remove queue label (MR is merged, label no longer needed)
@@ -267,6 +296,8 @@ class MRStateMachine(StateMachine):
 
     async def on_enter_failed(self) -> None:
         """Called when MR fails (conflict, pipeline, timeout)."""
+        if self._skip_on_enter_if_resumed("failed"):
+            return
         log.debug("Entering failed state", mr_iid=self.mr_iid)
 
         failure_reason = self._context.get("failure_reason", "unknown")
@@ -291,14 +322,15 @@ class MRStateMachine(StateMachine):
                 retry_count=self._context.get("retry_count", 0),
                 failed_jobs=self._context.get("failed_jobs", []),
             )
-        elif failure_reason == "timeout":
+        elif failure_reason in ("timeout", "merge_failed"):
             queue_item = await self.queue_manager.get_queue_item(self.mr_iid)
+            max_wait_hours = self._context.get("max_wait_hours", 2)
             await self.notifier.notify(
                 self.mr_iid,
                 "timeout",
                 failed_at=datetime.now(UTC),
                 duration=self._calculate_duration(queue_item),
-                max_wait=self._context.get("max_wait_hours", 2),
+                max_wait=max_wait_hours,
             )
         else:
             # Generic failure - use pipeline_failed template
@@ -336,7 +368,7 @@ class MRStateMachine(StateMachine):
         history_status = "failed"
         if failure_reason == "conflict":
             history_status = "conflict"
-        elif failure_reason == "timeout":
+        elif failure_reason in ("timeout", "merge_failed"):
             history_status = "timeout"
 
         await self.queue_manager.complete_mr(
@@ -357,6 +389,8 @@ class MRStateMachine(StateMachine):
 
     async def on_enter_removed(self) -> None:
         """Called when MR is removed from queue."""
+        if self._skip_on_enter_if_resumed("removed"):
+            return
         log.debug("Entering removed state", mr_iid=self.mr_iid)
 
         removal_reason = self._context.get("removal_reason", "label_removed")
@@ -541,6 +575,9 @@ class MRStateMachine(StateMachine):
             await self.pipeline_failed()
         elif current == "merging":
             await self.merge_failed()
+        elif current == "queued":
+            self._context["removal_reason"] = "timeout"
+            await self.mark_removed()
         else:
             log.error("Timeout in unexpected state", mr_iid=self.mr_iid, state=current)
 
@@ -709,7 +746,7 @@ class MRStateMachine(StateMachine):
         )
 
         # Build pipeline URL
-        pipeline_url = self.notifier.build_pipeline_url(new_pipeline_id)
+        pipeline_url = await self.notifier.build_pipeline_url(new_pipeline_id)
 
         # Update context
         self._context["pipeline_id"] = new_pipeline_id
@@ -732,35 +769,49 @@ class MRStateMachine(StateMachine):
     def _calculate_duration(self, queue_item: QueueItem | None) -> str:
         """Calculate human-readable duration from queued_at to now.
 
-        Args:
-            queue_item: QueueItem with queued_at timestamp.
-
-        Returns:
-            Formatted duration string like "1h 23m" or "45s".
+        Delegates to module-level calculate_duration().
         """
         if not queue_item or not queue_item.queued_at:
             return "unknown"
+        return calculate_duration(queue_item.queued_at)
 
-        now = datetime.now(UTC)
-        queued_at = queue_item.queued_at
 
-        # Ensure both are timezone-aware
-        if queued_at.tzinfo is None:
-            queued_at = queued_at.replace(tzinfo=UTC)
+# =============================================================================
+# Public Helpers
+# =============================================================================
 
-        delta = now - queued_at
-        total_seconds = int(delta.total_seconds())
 
-        if total_seconds < 60:
-            return f"{total_seconds}s"
-        elif total_seconds < 3600:
-            minutes = total_seconds // 60
-            seconds = total_seconds % 60
-            return f"{minutes}m {seconds}s"
-        else:
-            hours = total_seconds // 3600
-            minutes = (total_seconds % 3600) // 60
-            return f"{hours}h {minutes}m"
+def calculate_duration(queued_at: datetime | None) -> str:
+    """Calculate human-readable duration from queued_at to now.
+
+    Args:
+        queued_at: Timestamp when MR was queued.
+
+    Returns:
+        Formatted duration string like "1h 23m" or "45s".
+    """
+    if queued_at is None:
+        return "unknown"
+
+    now = datetime.now(UTC)
+
+    if queued_at.tzinfo is None:
+        log.debug("Normalizing naive datetime to UTC", queued_at=str(queued_at))
+        queued_at = queued_at.replace(tzinfo=UTC)
+
+    delta = now - queued_at
+    total_seconds = max(0, int(delta.total_seconds()))
+
+    if total_seconds < 60:
+        return f"{total_seconds}s"
+    elif total_seconds < 3600:
+        minutes = total_seconds // 60
+        seconds = total_seconds % 60
+        return f"{minutes}m {seconds}s"
+    else:
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        return f"{hours}h {minutes}m"
 
 
 # =============================================================================
@@ -806,6 +857,7 @@ async def create_state_machine_for_mr(
             start_value=queue_item.state,
             websocket_manager=websocket_manager,
             position_notifier=position_notifier,
+            skip_initial_enter=True,
         )
     else:
         log.debug("Creating new state machine", mr_iid=mr_iid)
@@ -817,12 +869,12 @@ async def create_state_machine_for_mr(
             websocket_manager=websocket_manager,
             position_notifier=position_notifier,
         )
-
     await sm.activate_initial_state()  # type: ignore[no-untyped-call]
     return sm
 
 
 __all__: list[str] = [
     "MRStateMachine",
+    "calculate_duration",
     "create_state_machine_for_mr",
 ]

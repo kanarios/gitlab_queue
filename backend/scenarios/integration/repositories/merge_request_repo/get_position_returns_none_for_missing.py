@@ -15,7 +15,7 @@ class Scenario(vedro.Scenario):
     async def given_empty_database(self):
         """
         Initialize an isolated test SQLite database and create the required tables for the scenario.
-        
+
         Creates the test database context, enters it to obtain a database handle, and sets up the schema used by the test.
         """
         self._db_ctx = initialized_test_database()
@@ -25,7 +25,7 @@ class Scenario(vedro.Scenario):
     async def when_get_position_is_called_for_nonexistent_mr(self):
         """
         Calls MergeRequestRepository.get_position with a non-existent merge request ID and records the result on the scenario.
-        
+
         Opens an asynchronous database session, invokes get_position(999) on a MergeRequestRepository instance, and assigns the returned value to self.position for later assertions.
         """
         async with self.db.session() as session:
@@ -35,7 +35,7 @@ class Scenario(vedro.Scenario):
     def then_position_should_be_none(self):
         """
         Asserts that the previously retrieved merge request position is None.
-        
+
         Raises:
             AssertionError: If the stored position is not None.
         """
@@ -44,7 +44,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Exit the test database context and release its resources.
-        
+
         This method finalizes the asynchronous database context previously entered for the scenario by calling the context manager's exit method, ensuring connections and related resources are cleaned up.
         """
         await self._db_ctx.__aexit__(None, None, None)

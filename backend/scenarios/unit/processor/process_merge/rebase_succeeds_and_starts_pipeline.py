@@ -30,7 +30,7 @@ class Scenario(vedro.Scenario):
     def given_processor_with_failed_pipeline_and_retry_available(self):
         """
         Prepare a test scenario with a mock processor where a failed pipeline is eligible for a retry and a new pipeline is started after a successful rebase.
-        
+
         Sets up:
         - a mock processor and queue item (MR IID 42) carrying the pre-rebase expected SHA,
         - an old failed pipeline and a new running pipeline with an updated SHA,
@@ -66,9 +66,7 @@ class Scenario(vedro.Scenario):
         mock_mr_after.rebase_in_progress = False
         mock_mr_after.source_branch = "feature/mr-42"
 
-        self.processor.gitlab_client.get_mr = AsyncMock(
-            side_effect=[mock_mr_before, mock_mr_after, mock_mr_after]
-        )
+        self.processor.gitlab_client.get_mr = AsyncMock(side_effect=[mock_mr_before, mock_mr_after, mock_mr_after])
 
         self.processor.gitlab_client.get_latest_mr_pipeline = AsyncMock(return_value=self.new_pipeline)
         self.processor.notifier.build_pipeline_url.side_effect = lambda pid: f"https://gitlab.com/pipeline/{pid}"
@@ -83,7 +81,7 @@ class Scenario(vedro.Scenario):
     async def when_handle_pipeline_failure_retry_is_called(self):
         """
         Call processor._handle_pipeline_failure_retry and store its results on the scenario.
-        
+
         Awaits the processor's retry handler with the scenario's context, pipeline, failed jobs,
         retry_count, and max_retries, then assigns the returned tuple to self.should_continue
         and self.new_start_time.
@@ -102,7 +100,7 @@ class Scenario(vedro.Scenario):
     def and_new_start_time_is_set(self):
         """
         Assert that self.new_start_time is set and is a datetime instance.
-        
+
         Raises:
             AssertionError: If new_start_time is None or not a datetime instance.
         """
@@ -123,7 +121,7 @@ class Scenario(vedro.Scenario):
     def and_pipeline_failed_is_not_triggered(self):
         """
         Asserts that the state machine's trigger_pipeline_failed coroutine was not awaited.
-        
+
         Verifies the pipeline-failed transition was not triggered in this scenario.
         """
         self.mock_sm.trigger_pipeline_failed.assert_not_awaited()

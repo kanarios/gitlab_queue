@@ -3,9 +3,9 @@
 import asyncio
 
 import vedro
-from scenarios.contexts.sqlite_client import initialized_test_database
 
 from gitlab_queue.core.queue import QueueManager
+from scenarios.contexts.sqlite_client import initialized_test_database
 
 from ._helpers import create_test_mr
 
@@ -30,7 +30,7 @@ class Scenario(vedro.Scenario):
     def then_oldest_mr_should_be_returned(self):
         """
         Assert that the previously requested next MR is present and is the oldest queued MR (IID 100).
-        
+
         Checks that self.next_item is not None and that its `mr_iid` equals 100.
         """
         assert self.next_item is not None
@@ -40,7 +40,7 @@ class Scenario(vedro.Scenario):
         # get_next_mr returns status='queued' only, so calling again returns same
         """
         Verify repeated calls to get_next_mr return the same queued merge request.
-        
+
         Asserts that calling get_next_mr a second time yields a non-None MR whose IID remains 100 while the MR's state is 'queued'.
         """
         second_next = await self.queue.get_next_mr()

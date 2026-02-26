@@ -10,9 +10,9 @@ from ._helpers import (
     create_gitlab_client_with_transport,
     create_mock_notifier,
     create_mock_queue_manager,
+    create_mock_settings,
     create_pipeline_event,
     create_queue_item_in_state,
-    created_mock_settings,
 )
 
 OLD_PIPELINE_ID = 1000
@@ -24,7 +24,7 @@ class Scenario(vedro.Scenario):
     subject = "ignore old pipeline canceled webhook after rebase"
 
     def given_handler_and_event(self):
-        self.settings = created_mock_settings()
+        self.settings = create_mock_settings()
         self.gitlab_client, self.transport = create_gitlab_client_with_transport()
         self.queue_manager = create_mock_queue_manager()
         # Queue item tracking the NEW pipeline (after rebase)

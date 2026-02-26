@@ -16,7 +16,7 @@ class Scenario(vedro.Scenario):
     def given_positions_before_regular_mr_added(self):
         """
         Set up test state for a scenario where a regular merge request is added and existing MRs should be notified.
-        
+
         Initializes:
         - added_mr_iid: IID of the newly added MR (103).
         - positions_before: mapping of existing MR IIDs to their positions before addition ({101: 1, 102: 2}).
@@ -43,7 +43,7 @@ class Scenario(vedro.Scenario):
     async def when_notify_after_mr_added_is_called(self):
         """
         Invoke the position notifier to notify affected merge requests after a regular merge request is added.
-        
+
         Calls notify_affected_mrs_after_mr_added using the scenario's added_mr_iid, positions_before, and old_total, with is_hotfix set to False.
         """
         await self.position_notifier.notify_affected_mrs_after_mr_added(
@@ -56,16 +56,16 @@ class Scenario(vedro.Scenario):
     def then_existing_mrs_are_notified(self):
         """
         Asserts that exactly two existing merge requests were notified.
-        
+
         Raises:
-        	AssertionError: If the notifier was called a number of times other than 2.
+                AssertionError: If the notifier was called a number of times other than 2.
         """
         assert self.notifier.notify.call_count == 2
 
     def and_added_mr_is_not_notified(self):
         """
         Verify that the newly added merge request is not among the notified merge requests.
-        
+
         This test inspects the notifier's recorded calls and asserts that `self.added_mr_iid` was not targeted for notification.
         """
         calls = self.notifier.notify.call_args_list
@@ -75,7 +75,7 @@ class Scenario(vedro.Scenario):
     def and_notifications_use_total_changed_template(self):
         """
         Asserts that every notification used the "total_changed" template.
-        
+
         Raises:
             AssertionError: If any notification was sent with a template other than "total_changed".
         """
@@ -86,7 +86,7 @@ class Scenario(vedro.Scenario):
     def and_old_total_is_passed_in_kwargs(self):
         """
         Verify that every notification call received the original total (old_total = 2) in its keyword arguments.
-        
+
         Raises:
             AssertionError: If any notification's `old_total` is not equal to 2.
         """

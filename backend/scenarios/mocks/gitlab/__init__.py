@@ -31,12 +31,14 @@ from scenarios.mocks.gitlab.mocked_gitlab_pipelines import (
     mocked_gitlab_mr_pipelines,
     mocked_gitlab_pipeline,
 )
+from scenarios.mocks.gitlab.mocked_gitlab_project import make_project_mock
 from scenarios.mocks.gitlab.mocked_gitlab_rate_limit import mocked_gitlab_rate_limit
 from scenarios.mocks.gitlab.mocked_gitlab_rebase import mocked_gitlab_rebase
 
 __all__ = [
     "JJ_MOCK_URL",
     "get_mock_url",
+    "make_project_mock",
     "mocked_gitlab_add_comment",
     "mocked_gitlab_get_conflicts",
     "mocked_gitlab_get_mr",

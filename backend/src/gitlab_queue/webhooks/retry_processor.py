@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from gitlab_queue.config import Settings
     from gitlab_queue.core.notifier import MRNotifier
     from gitlab_queue.core.queue import QueueManager
+    from gitlab_queue.core.queue_position_notifier import QueuePositionNotifier
     from gitlab_queue.models.retry import RetryQueueItem
     from gitlab_queue.webhooks.retry_manager import WebhookRetryManager
 
@@ -53,6 +54,7 @@ class WebhookRetryProcessor:
     gitlab_client: GitLabClient
     queue_manager: QueueManager
     notifier: MRNotifier
+    position_notifier: QueuePositionNotifier | None = None
     websocket_manager: WebSocketManager | None = None
 
     # Internal state
@@ -194,6 +196,8 @@ class WebhookRetryProcessor:
             settings=self.settings,
             gitlab_client=self.gitlab_client,
             queue_manager=self.queue_manager,
+            notifier=self.notifier,
+            position_notifier=self.position_notifier,
             websocket_manager=self.websocket_manager,
         )
 
@@ -213,6 +217,7 @@ class WebhookRetryProcessor:
             gitlab_client=self.gitlab_client,
             queue_manager=self.queue_manager,
             notifier=self.notifier,
+            position_notifier=self.position_notifier,
             websocket_manager=self.websocket_manager,
         )
 
@@ -276,6 +281,7 @@ def create_retry_processor(
     gitlab_client: GitLabClient,
     queue_manager: QueueManager,
     notifier: MRNotifier,
+    position_notifier: QueuePositionNotifier | None = None,
     websocket_manager: WebSocketManager | None = None,
 ) -> WebhookRetryProcessor:
     """Create a configured WebhookRetryProcessor instance.
@@ -297,6 +303,7 @@ def create_retry_processor(
         gitlab_client=gitlab_client,
         queue_manager=queue_manager,
         notifier=notifier,
+        position_notifier=position_notifier,
         websocket_manager=websocket_manager,
     )
 

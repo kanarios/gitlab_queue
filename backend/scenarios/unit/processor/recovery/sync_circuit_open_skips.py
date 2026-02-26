@@ -20,7 +20,7 @@ class Scenario(vedro.Scenario):
     def given_processor_with_circuit_open(self):
         """
         Prepare a mock processor whose GitLab client will raise a GitLabCircuitOpenError when listing merge requests.
-        
+
         The created processor is stored on `self.processor` and its `gitlab_client.list_mrs_with_label`
         is configured to raise `GitLabCircuitOpenError("Circuit open", retry_after=30)`.
         """
@@ -32,7 +32,7 @@ class Scenario(vedro.Scenario):
     async def when_sync_missing_mrs_from_gitlab_is_called(self):
         """
         Invoke the processor's _sync_missing_mrs_from_gitlab and store any raised exception on self.raised.
-        
+
         This coroutine calls self.processor._sync_missing_mrs_from_gitlab() and assigns the caught exception to self.raised for later assertions.
         """
         self.raised = None
@@ -44,7 +44,7 @@ class Scenario(vedro.Scenario):
     def then_no_error_is_raised(self):
         """
         Asserts that no exception was captured during the scenario.
-        
+
         Raises:
             AssertionError: If an exception was stored in `self.raised`.
         """

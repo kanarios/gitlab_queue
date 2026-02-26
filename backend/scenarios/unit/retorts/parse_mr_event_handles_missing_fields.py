@@ -21,7 +21,7 @@ class Scenario(vedro.Scenario):
     def given_queue_item_data_with_string_dates_and_string_labels(self):
         """
         Set up self.data with a queue-item payload containing ISO-8601 date strings and JSON-encoded labels.
-        
+
         The payload emulates a queued merge request entry with fields: mr_iid, title, author_name, author_username, target_branch, state, queued_at and started_at as ISO-8601 strings with timezone, and labels as a JSON-encoded string '["merge_queue", "hotfix"]'.
         """
         self.data = {
@@ -42,7 +42,7 @@ class Scenario(vedro.Scenario):
     def then_queued_at_is_parsed_as_datetime(self):
         """
         Verify queued_at was parsed as a date-time value.
-        
+
         Asserts that self.item.queued_at is an instance of datetime.
         """
         from datetime import datetime
@@ -89,7 +89,7 @@ class Scenario3(vedro.Scenario):
     def given_pipeline_event_payload_with_z_suffix_timestamp(self):
         """
         Set up a pipeline webhook payload whose `created_at` timestamp uses a 'Z' (UTC) suffix.
-        
+
         Initializes self.payload with a pipeline event dict containing project id, object_attributes including id 200 and created_at "2025-06-01T12:00:00Z", and a null merge_request to exercise parsing of Z-suffixed timestamps.
         """
         self.payload = {
@@ -138,7 +138,7 @@ class Scenario4(vedro.Scenario):
     def when_parse_note_event_is_called(self):
         """
         Parse the scenario's note webhook payload into an event object and store it on self.event.
-        
+
         Calls parse_note_event with self.payload and assigns the resulting parsed event to the instance attribute `event`.
         """
         self.event = parse_note_event(self.payload)
@@ -146,7 +146,7 @@ class Scenario4(vedro.Scenario):
     def then_note_id_is_correct(self):
         """
         Verify that the parsed note event's `note_id` equals 301.
-        
+
         Raises:
             AssertionError: If `self.event.note_id` is not 301.
         """
@@ -167,7 +167,7 @@ class Scenario5(vedro.Scenario):
     def given_note_event_payload_with_merge_request(self):
         """
         Prepare a note-event payload on self.payload that includes an associated merge request.
-        
+
         Sets self.payload to a dictionary representing a GitLab note webhook where the noteable is a MergeRequest, containing user info, object_attributes with id and note body, and a merge_request field with `iid` 55.
         """
         self.payload = {
@@ -186,7 +186,7 @@ class Scenario5(vedro.Scenario):
     def when_parse_note_event_is_called(self):
         """
         Parse the scenario's note webhook payload into an event object and store it on self.event.
-        
+
         Calls parse_note_event with self.payload and assigns the resulting parsed event to the instance attribute `event`.
         """
         self.event = parse_note_event(self.payload)
@@ -194,7 +194,7 @@ class Scenario5(vedro.Scenario):
     def then_merge_request_iid_is_set(self):
         """
         Asserts that the parsed event contains the expected merge request IID of 55.
-        
+
         This verification checks that the event's `merge_request_iid` field equals 55.
         """
         assert self.event.merge_request_iid == 55

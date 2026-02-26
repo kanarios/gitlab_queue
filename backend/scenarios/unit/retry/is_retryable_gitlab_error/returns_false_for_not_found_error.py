@@ -15,7 +15,7 @@ class Scenario(vedro.Scenario):
     def given_not_found_error(self):
         """
         Create and store a GitLab "not found" error for the scenario.
-        
+
         Assigns the error object returned by create_not_found_error() to self.error.
         """
         self.error = create_not_found_error()
@@ -23,7 +23,7 @@ class Scenario(vedro.Scenario):
     def when_checked_for_retryability(self):
         """
         Checks whether the stored GitLab error is considered retryable and stores the boolean outcome on self.result.
-        
+
         This step calls is_retryable_gitlab_error with the error previously set on the scenario and records the result as a boolean attribute.
         """
         self.result = is_retryable_gitlab_error(self.error)

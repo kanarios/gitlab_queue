@@ -42,7 +42,7 @@ class Scenario(vedro.Scenario):
     def and_get_mr_called_ten_times(self):
         """
         Asserts that GitLabClient.get_mr was called exactly ten times.
-        
+
         Raises:
             AssertionError: If the recorded call count is not 10.
         """
@@ -51,7 +51,7 @@ class Scenario(vedro.Scenario):
     def and_put_never_awaited(self):
         """
         Assert that the client's `put` AsyncMock was never awaited.
-        
+
         Raises:
             AssertionError: If the `put` AsyncMock was awaited at least once during the scenario.
         """

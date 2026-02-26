@@ -17,7 +17,7 @@ class Scenario(vedro.Scenario):
     def given_logging_is_reset(self):
         """
         Reset global logging and structlog configuration to a clean default state for test isolation.
-        
+
         Ensures subsequent logging configuration in the scenario starts from a known baseline.
         """
         reset_logging()
@@ -31,7 +31,7 @@ class Scenario(vedro.Scenario):
     def then_root_logger_should_have_handler(self):
         """
         Asserts that the root logger has at least one handler configured.
-        
+
         Raises:
             AssertionError: If the root logger has no handlers.
         """
@@ -41,7 +41,7 @@ class Scenario(vedro.Scenario):
     def and_root_logger_level_should_match(self):
         """
         Asserts that the root logger's effective logging level is DEBUG.
-        
+
         Raises:
             AssertionError: If the root logger's effective level is not logging.DEBUG.
         """
@@ -52,7 +52,7 @@ class Scenario(vedro.Scenario):
         # Verify structlog can create loggers without error
         """
         Asserts that structlog is configured and can produce a stdlib logger.
-        
+
         Obtains a structlog stdlib logger named "test_json_config" and fails the test if the logger cannot be created.
         """
         log = structlog.stdlib.get_logger("test_json_config")
@@ -61,7 +61,7 @@ class Scenario(vedro.Scenario):
     def and_app_logger_level_should_be_set(self):
         """
         Asserts that the logger named "gitlab_queue" has an effective logging level of DEBUG.
-        
+
         Raises:
             AssertionError: If the logger's effective level is not DEBUG.
         """
@@ -71,7 +71,7 @@ class Scenario(vedro.Scenario):
     def and_httpx_logger_should_be_suppressed(self):
         """
         Asserts that the 'httpx' logger's effective logging level is at least WARNING.
-        
+
         This ensures noisy httpx output is suppressed during tests.
         """
         httpx_logger = logging.getLogger("httpx")
@@ -90,7 +90,7 @@ class Scenario2(vedro.Scenario):
     def given_logging_is_reset(self):
         """
         Reset global logging and structlog configuration to a clean default state for test isolation.
-        
+
         Ensures subsequent logging configuration in the scenario starts from a known baseline.
         """
         reset_logging()
@@ -98,7 +98,7 @@ class Scenario2(vedro.Scenario):
     def when_logging_is_configured_twice(self):
         """
         Invoke the logging configuration twice with INFO level and JSON format to exercise idempotency.
-        
+
         This step calls the logging setup two times to verify that repeated configuration does not add duplicate handlers or otherwise alter the intended logging state.
         """
         configure_logging(LogLevel.INFO, LogFormat.JSON)
@@ -107,7 +107,7 @@ class Scenario2(vedro.Scenario):
     def then_root_logger_should_have_exactly_one_handler(self):
         """
         Asserts that the root logger has exactly one handler.
-        
+
         Raises:
             AssertionError: If the root logger does not have exactly one handler.
         """

@@ -15,7 +15,6 @@ import jj
 import vedro
 from jj.expiration_policy import ExpireAfterRequests
 from jj.mock import mocked
-from scenarios.contexts.jj_gitlab_mock import get_mock_url
 
 from gitlab_queue.clients.gitlab import GitLabClient
 from gitlab_queue.config import Settings
@@ -24,6 +23,7 @@ from gitlab_queue.core.processor import MergeProcessor, ProcessingResult
 from gitlab_queue.core.queue import QueueManager
 from gitlab_queue.db.database import Database
 from gitlab_queue.models.mr import Author, MergeRequest
+from scenarios.contexts.jj_gitlab_mock import get_mock_url
 
 
 class Scenario(vedro.Scenario):
@@ -120,6 +120,9 @@ class Scenario(vedro.Scenario):
         self.get_notes_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/42/notes")
         self.get_notes_response = jj.Response(status=200, json=[])
 
+        self.project_matcher = jj.match("GET", "/api/v4/projects/123")
+        self.project_response = jj.Response(status=200, json={"id": 123, "web_url": f"{self.mock_url}/test/project"})
+
         # Settings
         self.settings = Settings(
             gitlab_url=self.mock_url,
@@ -143,7 +146,7 @@ class Scenario(vedro.Scenario):
         # First call returns failed (then expires), subsequent calls return success
         """
         Run the merge processor against a queued MR where the first pipeline fetch returns a failed result (then expires) and a subsequent fetch returns a success.
-        
+
         Sets up mock endpoints (MR details, rebase, two pipeline responses with expiration behavior, merge, and notes), instantiates GitLabClient, MRNotifier, and MergeProcessor, retrieves the next MR from the queue, processes it, and records outcomes on the test instance:
         - self.result: processing result
         - self.merge_history: history of merge API calls
@@ -151,6 +154,7 @@ class Scenario(vedro.Scenario):
         - self.pipeline_success_history: history of success-pipeline API calls
         """
         async with (
+            mocked(self.project_matcher, self.project_response),
             mocked(self.get_mr_matcher, self.get_mr_response),
             mocked(self.rebase_matcher, self.rebase_response),
             # Success pipeline mock (registered first, used after failed expires)
@@ -189,7 +193,7 @@ class Scenario(vedro.Scenario):
     async def then_mr_should_be_successfully_merged(self):
         """
         Assert that the merge processing result indicates success.
-        
+
         Raises an AssertionError if the recorded processing result is not ProcessingResult.SUCCESS.
         """
         assert self.result == ProcessingResult.SUCCESS
@@ -197,7 +201,7 @@ class Scenario(vedro.Scenario):
     async def and_merge_should_be_called_once(self):
         """
         Asserts that exactly one merge API call was recorded in the test merge history.
-        
+
         Raises:
             AssertionError: If the number of recorded merge calls is not 1.
         """
@@ -207,7 +211,7 @@ class Scenario(vedro.Scenario):
         # Verify failed pipeline mock was called (the skip happened)
         """
         Asserts that the failed pipeline mock was called exactly once.
-        
+
         Raises:
             AssertionError: If the recorded failed pipeline call count is not equal to 1.
         """
@@ -227,7 +231,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Close the scenario's database connection.
-        
+
         This cleanup hook releases the in-memory database resource held by the scenario after the test completes.
         """
         await self.db.close()

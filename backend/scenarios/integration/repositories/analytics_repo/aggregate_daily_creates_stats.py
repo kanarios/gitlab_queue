@@ -21,7 +21,7 @@ class Scenario(vedro.Scenario):
     async def given_database_with_history_and_hourly_data(self):
         """
         Prepare a test database populated with predefined history and hourly records for aggregate_daily testing.
-        
+
         Creates and opens an initialized test database, creates required tables, fixes the target date to 2026-01-15, and inserts two history records (IID 1: merged and marked hotfix; IID 2: failed) plus a single hourly record with queue_depth 10 to be used by the aggregate_daily test.
         """
         self._db_ctx = initialized_test_database()
@@ -60,7 +60,7 @@ class Scenario(vedro.Scenario):
     async def when_aggregate_daily_is_called(self):
         """
         Execute the daily aggregation for the scenario's target date and store the resulting daily statistics on self.daily.
-        
+
         After completion, self.daily will contain the created or updated daily record for the target date.
         """
         async with self.db.transaction() as session:
@@ -70,7 +70,7 @@ class Scenario(vedro.Scenario):
     def then_daily_record_should_be_created(self):
         """
         Assert that a daily statistics record was created with expected counts and queue depth.
-        
+
         Asserts that self.daily is present and has total_processed == 2, success_count == 1, failed_count == 1, hotfix_count == 1, and max_queue_depth == 10.
         """
         assert self.daily is not None
@@ -83,7 +83,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Close and clean up the test database context, releasing its associated resources.
-        
+
         Ensures the database context manager created during setup is exited so connections and temporary state are released.
         """
         await self._db_ctx.__aexit__(None, None, None)

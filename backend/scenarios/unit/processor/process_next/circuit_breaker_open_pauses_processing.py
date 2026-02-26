@@ -22,7 +22,7 @@ class Scenario(vedro.Scenario):
     def given_processor_with_circuit_open_error(self):
         """
         Prepare a mock processor whose _process_iteration raises a GitLabCircuitOpenError on first call and signals shutdown on the second.
-        
+
         Sets up:
         - self.processor: a mock processor instance from create_mock_processor().
         - self.call_count: a counter starting at 0.
@@ -35,7 +35,7 @@ class Scenario(vedro.Scenario):
         async def process_iteration_side_effect():
             """
             Side effect for tests that simulates a GitLab circuit-breaker opening on the first call and stops the processor on the next call.
-            
+
             Increments `self.call_count`. On the first invocation raises `GitLabCircuitOpenError(retry_after=1)`; on the second invocation sets `self.processor._shutdown_event` to signal shutdown.
             """
             self.call_count += 1
@@ -49,12 +49,12 @@ class Scenario(vedro.Scenario):
     async def when_run_is_called(self):
         """
         Starts the processor run loop with key internals patched to simulate a circuit-open error and controlled sleep behavior.
-        
+
         Patches:
         - _recover_interrupted_state and _sync_missing_mrs_from_gitlab as no-op AsyncMocks.
         - _process_iteration as an AsyncMock using self.process_iteration_side_effect to raise GitLabCircuitOpenError on the first iteration and signal shutdown afterwards.
         - _interruptible_sleep as an AsyncMock with side effect self._interruptible_sleep_side_effect; the mock is exposed as self.mock_sleep.
-        
+
         Awaits self.processor.run() so the scenario exercises the processor's handling of a circuit-breaker open condition and verifies sleep was invoked with the expected retry interval.
         """
         with (
@@ -83,16 +83,16 @@ class Scenario(vedro.Scenario):
         ):
             await self.processor.run()
 
-    async def _interruptible_sleep_side_effect(self, seconds):
+    async def _interruptible_sleep_side_effect(self, _seconds):
         # After first sleep (circuit breaker), set shutdown to stop loop
         """
         Signal shutdown and act as a test side effect for an interruptible sleep.
-        
+
         Sets the processor's shutdown event to stop the run loop, then returns `False`.
-        
+
         Parameters:
             seconds (int | float): Requested sleep duration (unused by the side effect).
-        
+
         Returns:
             bool: `False` indicating the sleep was interrupted or did not complete.
         """
@@ -102,7 +102,7 @@ class Scenario(vedro.Scenario):
     def then_interruptible_sleep_was_called(self):
         """
         Asserts that the interruptible sleep was awaited with the GitLab circuit's retry_after value of 1 second.
-        
+
         Verifies that the mocked _interruptible_sleep was awaited with an argument of 1.
         """
         self.mock_sleep.assert_any_await(1)

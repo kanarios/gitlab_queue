@@ -26,7 +26,7 @@ class Scenario(vedro.Scenario):
     def given_processor_with_successful_pipeline_matching_sha(self):
         """
         Prepare test fixtures: a mock processor, queue item, processing context with a mock state machine, and a mock pipeline whose SHA matches the queue item's expected SHA and whose status is "success".
-        
+
         Sets:
         - self.processor: mock processor
         - self.queue_item: queue item with mr_iid=42, state="testing", expected_sha="abc123" (returned by processor.queue_manager.get_queue_item)
@@ -47,7 +47,7 @@ class Scenario(vedro.Scenario):
     async def when_handle_pipeline_status_is_called(self):
         """
         Invoke the processor's _handle_pipeline_status with the prepared context, state machine, and pipeline, and store the returned processing result on self.result.
-        
+
         This awaits the asynchronous call using retry_count=0 and max_retries=1 and assigns its result to the instance attribute `self.result` for later assertions.
         """
         self.result = await self.processor._handle_pipeline_status(
@@ -61,7 +61,7 @@ class Scenario(vedro.Scenario):
     def then_result_is_success(self):
         """
         Asserts that the scenario's processing result equals ProcessingResult.SUCCESS.
-        
+
         Raises:
             AssertionError: If the result is not ProcessingResult.SUCCESS.
         """
@@ -70,7 +70,7 @@ class Scenario(vedro.Scenario):
     def and_pipeline_success_is_triggered_on_state_machine(self):
         """
         Asserts that the state machine's pipeline-success trigger was awaited exactly once.
-        
+
         This verifies the scenario invoked the state machine's `trigger_pipeline_success` coroutine one time.
         """
         self.mock_sm.trigger_pipeline_success.assert_awaited_once()
@@ -78,7 +78,7 @@ class Scenario(vedro.Scenario):
     def and_pipeline_failed_is_not_triggered(self):
         """
         Asserts that the state machine's trigger_pipeline_failed method was not awaited.
-        
+
         Raises:
             AssertionError: If trigger_pipeline_failed was awaited one or more times.
         """

@@ -39,9 +39,9 @@ class Scenario(vedro.Scenario):
     async def when_notify_position_changes_is_called(self):
         """
         Invoke the position notifier using the scenario's prepared inputs and record the returned notified count.
-        
+
         The call uses excluded_mr_iid=999, positions_before and old_total derived from the scenario, and an empty log_context; the result is stored on self.notified_count.
-        
+
         Returns:
             notified_count (int): Number of merge requests that were notified.
         """
@@ -56,9 +56,9 @@ class Scenario(vedro.Scenario):
     def notified_iids(self) -> list[int]:
         """
         Collect the merge request IIDs that were passed to the notifier's recorded calls.
-        
+
         Extracts the `mr_iid` value from each recorded call to `self.notifier.notify` (preferring the `mr_iid` keyword argument, falling back to the first positional argument) and returns them in call order.
-        
+
         Returns:
             list[int]: List of MR IIDs that were passed to the notifier.
         """
@@ -67,7 +67,7 @@ class Scenario(vedro.Scenario):
     def then_mr_in_non_queued_state_is_not_notified(self):
         """
         Asserts that merge request with IID 101 was not notified.
-        
+
         Raises an AssertionError if IID 101 appears in the recorded notified IIDs.
         """
         assert 101 not in self.notified_iids

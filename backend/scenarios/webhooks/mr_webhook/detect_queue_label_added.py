@@ -1,20 +1,23 @@
 """Test: detect queue label added."""
 
 import vedro
-
-from gitlab_queue.webhooks.handlers import MRWebhookHandler
 from scenarios.library import Labels
 
-from ._helpers import (create_gitlab_client_with_transport,
-                       create_mock_queue_manager, create_mr_event,
-                       created_mock_settings)
+from gitlab_queue.webhooks.handlers import MRWebhookHandler
+
+from ._helpers import (
+    create_gitlab_client_with_transport,
+    create_mock_queue_manager,
+    create_mock_settings,
+    create_mr_event,
+)
 
 
 class Scenario(vedro.Scenario):
     subject = "detect queue label added"
 
     def given_handler_and_event(self):
-        self.settings = created_mock_settings()
+        self.settings = create_mock_settings()
         self.gitlab_client, _ = create_gitlab_client_with_transport(mr_iid=123)
         self.handler = MRWebhookHandler(
             settings=self.settings,

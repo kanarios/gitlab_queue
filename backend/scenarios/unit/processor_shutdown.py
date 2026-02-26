@@ -14,7 +14,6 @@ import contextlib
 
 import jj
 from jj.mock import mocked
-from scenarios.contexts.jj_gitlab_mock import get_mock_url
 from vedro import given, scenario, then, when
 
 from gitlab_queue.clients.gitlab import GitLabClient
@@ -24,6 +23,8 @@ from gitlab_queue.core.processor import MergeProcessor, ProcessingResult
 from gitlab_queue.core.queue import QueueManager
 from gitlab_queue.db.database import Database
 from gitlab_queue.models.mr import Author, MergeRequest
+from scenarios.contexts.jj_gitlab_mock import get_mock_url
+from scenarios.mocks.gitlab import make_project_mock
 
 
 @scenario()
@@ -148,6 +149,8 @@ async def graceful_shutdown_during_rebase():
         get_notes_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/70/notes")
         get_notes_response = jj.Response(status=200, json=[])
 
+        project_matcher, project_response = make_project_mock(mock_url)
+
         settings = Settings(
             gitlab_url=mock_url,
             gitlab_project_id=123,
@@ -162,6 +165,7 @@ async def graceful_shutdown_during_rebase():
         )
 
     async with (
+        mocked(project_matcher, project_response),
         mocked(get_mr_matcher, get_mr_response),
         mocked(rebase_matcher, rebase_response) as rebase_mock,
         mocked(status_matcher, status_response),
@@ -314,7 +318,10 @@ async def processor_state_recovery_after_shutdown():
         response = jj.Response(status=200, json=mr_data)
         mr_mocks.append(mocked(matcher, response))
 
+    project_matcher, project_response = make_project_mock(mock_url)
+
     async with (
+        mocked(project_matcher, project_response),
         mr_mocks[0],
         mr_mocks[1],
         mr_mocks[2],
@@ -360,7 +367,7 @@ async def processor_state_recovery_after_shutdown():
 async def shutdown_timeout_handling():
     """
     Test processor behavior when the shutdown wait times out.
-    
+
     Sets up an in-memory database, queue manager, GitLab client, notifier, and MergeProcessor, starts the processor, requests shutdown with a very short wait timeout, and asserts that the processor's shutdown flag is set.
     """
 
@@ -478,6 +485,8 @@ async def concurrent_processing_during_shutdown():
         get_notes_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/75/notes")
         get_notes_response = jj.Response(status=200, json=[])
 
+        project_matcher, project_response = make_project_mock(mock_url)
+
         settings = Settings(
             gitlab_url=mock_url,
             gitlab_project_id=123,
@@ -491,6 +500,7 @@ async def concurrent_processing_during_shutdown():
         )
 
     async with (
+        mocked(project_matcher, project_response),
         mocked(get_mr_matcher, get_mr_response),
         mocked(rebase_matcher, rebase_response),
         mocked(pipelines_matcher, pipelines_response),

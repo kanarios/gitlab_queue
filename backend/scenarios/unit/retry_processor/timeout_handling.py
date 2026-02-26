@@ -26,9 +26,7 @@ class Scenario(vedro.Scenario):
         # Make the processor shut down after one iteration
         self._iteration_count = 0
 
-        original_sleep = self.processor._interruptible_sleep
-
-        async def mock_sleep(seconds):
+        async def mock_sleep(_seconds):
             self._iteration_count += 1
             if self._iteration_count >= 1:
                 self.processor.request_shutdown()

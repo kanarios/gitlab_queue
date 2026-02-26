@@ -6,8 +6,9 @@ import secrets
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import vedro
-from scenarios.contexts.api_helpers import created_test_app
 from starlette.testclient import TestClient
+
+from scenarios.contexts.api_helpers import created_test_app
 
 
 class Scenario(vedro.Scenario):
@@ -16,7 +17,7 @@ class Scenario(vedro.Scenario):
     def given_app_with_failing_gitlab(self):
         """
         Set up a test application and an AsyncClient mock that simulates a failed GitLab token exchange.
-        
+
         Initializes a test app and TestClient, generates an OAuth state, and creates self.mock_client whose POST returns a response with status_code 400 and text "invalid_grant". The mock also implements async context manager methods so it can be used with "async with".
         """
         self.app, self.state = created_test_app()
@@ -49,7 +50,7 @@ class Scenario(vedro.Scenario):
         # 502 Bad Gateway when GitLab returns non-200
         """
         Assert that the HTTP response status code is 502 Bad Gateway.
-        
+
         Raises:
             AssertionError: If the response status code is not 502.
         """
@@ -58,7 +59,7 @@ class Scenario(vedro.Scenario):
     def and_detail_should_indicate_failure(self):
         """
         Assert that the response JSON 'detail' indicates a token exchange failure.
-        
+
         Raises:
             AssertionError: If the response JSON `detail` field does not contain "failed" or "token" (case-insensitive).
         """

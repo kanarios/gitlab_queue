@@ -3,9 +3,9 @@
 import asyncio
 
 import vedro
-from scenarios.contexts.sqlite_client import initialized_test_database
 
 from gitlab_queue.core.queue import QueueManager
+from scenarios.contexts.sqlite_client import initialized_test_database
 
 from ._helpers import create_test_mr
 
@@ -31,7 +31,7 @@ class Scenario(vedro.Scenario):
     def then_order_should_match_insertion_order(self):
         """
         Asserts that the active queue's MR iids match the original insertion order.
-        
+
         Builds a list of mr_iid values from the current active queue and raises an AssertionError if that list differs from the recorded insertion order (self.iid_order).
         """
         actual_order = [item.mr_iid for item in self.active_queue]
@@ -40,7 +40,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Exit the scenario's test database context and release associated resources.
-        
+
         Calls the asynchronous context-exit on the stored _db_context to close the connection and perform cleanup.
         """
         await self._db_context.__aexit__(None, None, None)

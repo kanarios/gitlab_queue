@@ -15,7 +15,7 @@ class Scenario(vedro.Scenario):
     def given_mr_model(self):
         """
         Prepare a Merge Request model on self.mr populated with test data.
-        
+
         Creates and assigns to self.mr a test MR model with preset fields used by the scenario, including iid 42, title "Test MR", author information ("Test User", "testuser", avatar URL), status "rebasing", hotfix flag set, labels ["merge_queue", "urgent"], target_branch "main", pipeline_id 1234 with status "running", retry_count 2, last_error "timeout", and stale_warning_sent flag set.
         """
         self.mr = create_test_mr_model(
@@ -38,7 +38,7 @@ class Scenario(vedro.Scenario):
     def when_mr_model_is_converted(self):
         """
         Convert the stored Merge Request model to a QueueItem and save it on self.item.
-        
+
         This invokes ModelConverter.mr_model_to_queue_item with the MR model previously assigned to self.mr and stores the resulting QueueItem instance in self.item.
         """
         self.item = ModelConverter.mr_model_to_queue_item(self.mr)
@@ -46,7 +46,7 @@ class Scenario(vedro.Scenario):
     def then_queue_item_fields_should_match(self):
         """
         Assert that the converted QueueItem matches the expected Merge Request values.
-        
+
         Checks that self.item is a QueueItem and that its fields equal the expected test values:
         mr_iid 42, title "Test MR", author_name "Test User", author_username "testuser",
         author_avatar "https://avatar.url/test.png", state "rebasing", is_hotfix True,

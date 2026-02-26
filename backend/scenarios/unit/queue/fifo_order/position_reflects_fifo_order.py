@@ -3,9 +3,9 @@
 import asyncio
 
 import vedro
-from scenarios.contexts.sqlite_client import initialized_test_database
 
 from gitlab_queue.core.queue import QueueManager
+from scenarios.contexts.sqlite_client import initialized_test_database
 
 from ._helpers import create_test_mr
 
@@ -27,7 +27,7 @@ class Scenario(vedro.Scenario):
     async def when_positions_are_queried(self):
         """
         Query and store queue positions for merge requests with iids 5, 15, and 25.
-        
+
         Populates or replaces self.positions with a dict mapping each iid to its current position in the queue (e.g. {5: pos5, 15: pos15, 25: pos25}).
         """
         self.positions = {}
@@ -37,7 +37,7 @@ class Scenario(vedro.Scenario):
     def then_positions_should_reflect_insertion_order(self):
         """
         Assert that stored positions reflect FIFO insertion order.
-        
+
         Checks that merge requests with iids 5, 15, and 25 have queue positions 1, 2, and 3 respectively.
         """
         assert self.positions[5] == 1
@@ -47,7 +47,7 @@ class Scenario(vedro.Scenario):
     async def and_removing_first_should_shift_positions(self):
         """
         Verify that removing the first merge request shifts queue positions of the remaining items.
-        
+
         Removes the MR with iid 5 from the queue and asserts that the MR with iid 15 is at position 1 and the MR with iid 25 is at position 2.
         """
         await self.queue.remove_from_queue(5)
@@ -59,7 +59,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Exit and clean up the test database context used by the scenario.
-        
+
         This asynchronously finalizes and closes the underlying database context manager held in
         self._db_context.
         """

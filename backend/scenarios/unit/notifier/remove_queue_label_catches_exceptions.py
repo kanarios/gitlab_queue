@@ -15,7 +15,7 @@ class Scenario(vedro.Scenario):
     def given_notifier_whose_client_raises_on_label_removal(self):
         """
         Set up a notifier whose GitLab client raises an exception when removing a merge request label.
-        
+
         Creates an AsyncMock gitlab_client whose remove_mr_label raises RuntimeError("GitLab API unavailable"), assigns a test notifier configured with that client to `self.notifier`, and sets `self.mr_iid` to 42.
         """
         gitlab_client = AsyncMock()
@@ -30,7 +30,7 @@ class Scenario(vedro.Scenario):
         # Should complete without raising even though the client raises
         """
         Calls the notifier's remove_queue_label and records whether it raised an exception.
-        
+
         Sets self.raised to True if an exception was raised during the call, otherwise sets it to False.
         """
         self.raised = False
@@ -42,7 +42,7 @@ class Scenario(vedro.Scenario):
     def then_no_exception_is_propagated(self):
         """
         Asserts that no exception was propagated when remove_queue_label was called.
-        
+
         Raises AssertionError if an exception was propagated (i.e., if self.raised is True).
         """
         assert self.raised is False

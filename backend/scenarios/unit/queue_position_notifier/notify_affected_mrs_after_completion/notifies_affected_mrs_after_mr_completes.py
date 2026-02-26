@@ -40,7 +40,7 @@ class Scenario(vedro.Scenario):
     def then_affected_mrs_are_notified(self):
         """
         Assert that exactly two merge requests were notified.
-        
+
         Raises:
             AssertionError: If notifier.notify was not called exactly two times.
         """

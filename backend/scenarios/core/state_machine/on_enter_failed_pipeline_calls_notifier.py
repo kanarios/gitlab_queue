@@ -25,7 +25,7 @@ class Scenario(vedro.Scenario):
     async def when_pipeline_failed_is_triggered(self):
         """
         Trigger the state machine's pipeline-failed event using a predefined failure payload.
-        
+
         Sets failed_jobs to ["test", "lint", "typecheck"], retry_count to 2, and error_message to "Tests failed".
         """
         await self.sm.trigger_pipeline_failed(
@@ -37,7 +37,7 @@ class Scenario(vedro.Scenario):
     def then_notifier_should_be_called_with_pipeline_failed_template(self):
         """
         Verify the notifier was awaited and invoked with the "pipeline_failed" template for MR 123.
-        
+
         Asserts that notify was awaited and that its first positional argument is 123 (mr_iid) and its second positional argument is "pipeline_failed" (template).
         """
         self.notifier.notify.assert_awaited()

@@ -101,8 +101,12 @@ async def process_multiple_mrs_in_order():
             comment_matcher = jj.match("POST", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes"))
             comment_response = jj.Response(status=201, json={"id": 1})
 
+            project_matcher = jj.match("GET", "/api/v4/projects/123")
+            project_response = jj.Response(status=200, json={"id": 123, "web_url": f"{mock_url}/test/project"})
+
         # Setup all mocks
         async with (
+            mocked(project_matcher, project_response),
             mocked(mr_mocks[10]["get_mr"][0], mr_mocks[10]["get_mr"][1]),
             mocked(mr_mocks[20]["get_mr"][0], mr_mocks[20]["get_mr"][1]),
             mocked(mr_mocks[30]["get_mr"][0], mr_mocks[30]["get_mr"][1]),

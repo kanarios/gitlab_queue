@@ -1,8 +1,7 @@
 """Helper functions for queue add MR tests."""
 
-from scenarios.library import Labels, MRState
-
 from gitlab_queue.models.mr import Author, MergeRequest
+from scenarios.library import Labels, MRState
 
 
 def create_test_mr(

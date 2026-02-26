@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import vedro
+
 from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, created_test_client
 from scenarios.transports import GitLabMockTransport
 

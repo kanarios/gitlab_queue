@@ -18,8 +18,8 @@ from gitlab_queue.webhooks.handlers import MRWebhookHandler
 from ._helpers import (
     create_gitlab_client_with_transport,
     create_mock_queue_manager,
+    create_mock_settings,
     create_mr_event,
-    created_mock_settings,
 )
 
 
@@ -27,7 +27,7 @@ class Scenario(vedro.Scenario):
     subject = "notification failure after adding MR is swallowed"
 
     def given_handler_with_failing_notifier(self):
-        self.settings = created_mock_settings()
+        self.settings = create_mock_settings()
         self.gitlab_client, self.transport = create_gitlab_client_with_transport(
             mr_iid=123,
             labels=[Labels.MERGE_QUEUE],

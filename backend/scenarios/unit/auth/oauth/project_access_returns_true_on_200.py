@@ -23,7 +23,7 @@ class Scenario(vedro.Scenario):
     async def when_project_access_is_validated(self):
         """
         Calls validate_project_access with httpx.AsyncClient patched to return the prepared mock client and saves the call result.
-        
+
         Patches gitlab_queue.auth.oauth.httpx.AsyncClient to return self.mock_client, invokes validate_project_access with gitlab_url "https://gitlab.example.com", access_token "test-token", and project_id 123, and stores the returned value in self.result.
         """
         with patch("gitlab_queue.auth.oauth.httpx.AsyncClient", return_value=self.mock_client):
@@ -36,7 +36,7 @@ class Scenario(vedro.Scenario):
     def then_it_should_return_true(self):
         """
         Assert that the validation result is True.
-        
+
         Raises:
             AssertionError: If self.result is not True.
         """
@@ -45,7 +45,7 @@ class Scenario(vedro.Scenario):
     def and_it_should_call_correct_url(self):
         """
         Asserts the mocked HTTP client's GET was awaited once and that it was called with the expected GitLab project URL and Authorization header.
-        
+
         Checks:
         - the GET coroutine was awaited exactly one time.
         - the requested URL equals "https://gitlab.example.com/api/v4/projects/123".

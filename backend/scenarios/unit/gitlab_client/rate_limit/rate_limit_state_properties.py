@@ -13,7 +13,7 @@ class Scenario(vedro.Scenario):
     def given_rate_limit_states(self):
         """
         Prepare several RateLimitState instances used by the scenario.
-        
+
         Creates:
             - self.state_80_percent: RateLimitState with limit=100 and remaining=20 (80% usage).
             - self.state_97_percent: RateLimitState with limit=100 and remaining=3 (97% usage).
@@ -28,7 +28,7 @@ class Scenario(vedro.Scenario):
     def when_properties_are_accessed(self):
         """
         Access several computed properties from the prepared RateLimitState instances and store them on self for later assertions.
-        
+
         Sets the following attributes:
         - ratio_80: usage_ratio of self.state_80_percent
         - approaching: result of self.state_80_percent.is_approaching_limit(0.7)
@@ -45,7 +45,7 @@ class Scenario(vedro.Scenario):
     def then_usage_ratio_should_be_0_8(self):
         """
         Asserts that the scenario's usage_ratio equals 0.8 within a 1e-9 tolerance.
-        
+
         Raises:
             AssertionError: If `self.ratio_80` is None or its absolute difference from 0.8 is greater than or equal to 1e-9.
         """
@@ -55,7 +55,7 @@ class Scenario(vedro.Scenario):
     def and_is_approaching_limit_should_be_true(self):
         """
         Asserts that the rate limit state is considered to be approaching the configured threshold.
-        
+
         Verifies that the previously computed `self.approaching` value is `True`.
         """
         assert self.approaching is True

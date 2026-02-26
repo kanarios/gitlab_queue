@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import httpx
 import vedro
-from scenarios.contexts.gitlab_client_factory import created_test_client
-from scenarios.transports import GitLabMockTransport
 
 from gitlab_queue.clients.gitlab import GitLabServerError
+from scenarios.contexts.gitlab_client_factory import created_test_client
+from scenarios.transports import GitLabMockTransport
 
 
 class Scenario(vedro.Scenario):
@@ -16,7 +16,7 @@ class Scenario(vedro.Scenario):
     def given_mock_response_with_500(self):
         """
         Prepare a test GitLab client and an HTTP 500 response for the scenario.
-        
+
         Sets self.transport to a GitLabMockTransport, self.client to a test GitLab client using that transport, and self.response to an httpx.Response with status code 500 and a JSON body containing a "message" key.
         """
         self.transport = GitLabMockTransport()
@@ -30,7 +30,7 @@ class Scenario(vedro.Scenario):
     def when_handle_error_response_is_called(self):
         """
         Invokes the client's error handler with the prepared response and captures a raised GitLabServerError.
-        
+
         If GitLabServerError is raised by _handle_error_response, assigns the exception to self.error; otherwise leaves self.error as None.
         """
         self.error = None
@@ -42,7 +42,7 @@ class Scenario(vedro.Scenario):
     def then_server_error_should_be_raised(self):
         """
         Assert that a GitLabServerError was raised and stored on the scenario.
-        
+
         Raises an AssertionError if no error was captured or if the captured error is not an instance of GitLabServerError.
         """
         assert self.error is not None
@@ -57,7 +57,7 @@ class Scenario(vedro.Scenario):
     def and_response_body_should_be_available(self):
         """
         Verifies the raised error includes a JSON response body containing a "message" key.
-        
+
         Asserts that self.error.response_body is not None, is a dict, and contains the "message" key.
         """
         assert self.error.response_body is not None
@@ -67,7 +67,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Closes the test GitLab client to release network resources.
-        
+
         This awaits the client's close coroutine to ensure any open connections are terminated before the scenario ends.
         """
         await self.client.close()

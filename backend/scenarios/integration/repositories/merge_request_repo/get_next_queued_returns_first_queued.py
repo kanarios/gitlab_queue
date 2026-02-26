@@ -17,11 +17,11 @@ class Scenario(vedro.Scenario):
     async def given_database_with_queued_mrs(self):
         """
         Prepare a test database, create required tables, and seed two queued merge requests with distinct queued_at timestamps.
-        
+
         Seeds two MRs:
         - iid=10 with queued_at 5 minutes before now
         - iid=20 with queued_at 10 minutes before now
-        
+
         This establishes state for testing selection of the oldest queued merge request.
         """
         self._db_ctx = initialized_test_database()
@@ -46,7 +46,7 @@ class Scenario(vedro.Scenario):
     async def when_get_next_queued_is_called(self):
         """
         Open an async database session, call MergeRequestRepository.get_next_queued(), and store the retrieved merge request on self.result.
-        
+
         Enters the session context (saved to self._session_ctx) and assigns the repository's next queued Merge Request (or None) to self.result for later assertions.
         """
         self._session_ctx = self.db.session()
@@ -57,9 +57,9 @@ class Scenario(vedro.Scenario):
     def then_result_should_be_the_oldest_queued_mr(self):
         """
         Verify that the fetched merge request is the oldest queued MR.
-        
+
         Asserts that `self.result` is not None and that its `iid` equals 20.
-        
+
         Raises:
             AssertionError: If `self.result` is None or its `iid` is not 20.
         """
@@ -69,7 +69,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Clean up by exiting the session and database asynchronous contexts.
-        
+
         Ensures the session and database context managers created during the scenario are properly exited and their resources released.
         """
         await self._session_ctx.__aexit__(None, None, None)

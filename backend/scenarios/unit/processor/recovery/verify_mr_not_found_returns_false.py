@@ -20,7 +20,7 @@ class Scenario(vedro.Scenario):
     def given_processor_with_mr_not_found(self):
         """
         Prepare a mock processor whose GitLab client raises GitLabNotFoundError for MR lookups.
-        
+
         Sets self.processor to a mock created by create_mock_processor() and configures its gitlab_client.get_mr to raise GitLabNotFoundError("MR not found") when called.
         """
         self.processor = create_mock_processor()
@@ -29,7 +29,7 @@ class Scenario(vedro.Scenario):
     async def when_verify_mr_in_queue_is_called(self):
         """
         Call the processor's _verify_mr_in_queue with MR id 42 and save the outcome.
-        
+
         This step invokes _verify_mr_in_queue(42) and assigns its return value to self.result for later assertions.
         """
         self.result = await self.processor._verify_mr_in_queue(42)
@@ -37,7 +37,7 @@ class Scenario(vedro.Scenario):
     def then_result_is_false(self):
         """
         Asserts that the stored test result is False.
-        
+
         Raises:
             AssertionError: If self.result is not exactly False.
         """

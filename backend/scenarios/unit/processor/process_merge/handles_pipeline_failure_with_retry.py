@@ -26,7 +26,7 @@ class Scenario(vedro.Scenario):
     def given_processor_with_failed_pipeline_and_no_retries_left(self):
         """
         Set up a processor scenario where a pipeline has failed and no retries remain.
-        
+
         Initializes:
         - a mock processor,
         - a failed mock pipeline (id 100, sha "abc123"),
@@ -49,7 +49,7 @@ class Scenario(vedro.Scenario):
     async def when_handle_pipeline_failure_retry_is_called(self):
         """
         Invoke the processor's pipeline-failure retry handler with the scenario's prepared inputs and store its outputs for later assertions.
-        
+
         This step calls the processor method using the scenario's ctx, pipeline, failed_jobs, retry_count, and max_retries, then assigns the returned tuple to `self.should_continue` and `self.new_start_time` for subsequent verification.
         """
         self.should_continue, self.new_start_time = await self.processor._handle_pipeline_failure_retry(
@@ -69,7 +69,7 @@ class Scenario(vedro.Scenario):
     def and_new_start_time_is_none(self):
         """
         Assert that the scenario's computed `new_start_time` is None.
-        
+
         Raises:
             AssertionError: If `self.new_start_time` is not None.
         """
@@ -78,7 +78,7 @@ class Scenario(vedro.Scenario):
     def and_pipeline_failed_is_triggered_on_state_machine(self):
         """
         Verifies that the state machine's trigger_pipeline_failed was awaited once with the expected failed jobs and retry count.
-        
+
         Asserts that trigger_pipeline_failed was awaited exactly one time and that its call keyword arguments include `failed_jobs` equal to the scenario's failed_jobs and `retry_count` equal to the scenario's retry_count.
         """
         self.mock_sm.trigger_pipeline_failed.assert_awaited_once()
@@ -89,7 +89,7 @@ class Scenario(vedro.Scenario):
     def and_rebase_is_not_attempted(self):
         """
         Asserts that the processor did not attempt to rebase the merge request.
-        
+
         Verifies that the `rebase_mr` coroutine on the processor's GitLab client was not awaited.
         """
         self.processor.gitlab_client.rebase_mr.assert_not_awaited()

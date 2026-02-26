@@ -29,7 +29,7 @@ class Scenario(vedro.Scenario):
     def given_processor_with_api_error_during_rebase(self):
         """
         Prepare the scenario with a mocked processor, state machine, processing context, rebase context, pipeline, and a rebase handler that raises GitLabAPIError.
-        
+
         Sets:
         - self.processor: mocked processor
         - self.mock_sm: mocked state machine
@@ -53,7 +53,7 @@ class Scenario(vedro.Scenario):
     async def when_check_and_handle_rebase_during_testing_is_called(self):
         """
         Calls the processor's _check_and_handle_rebase_during_testing with the prepared context, state machine, rebase handler, rebase context, and pipeline.
-        
+
         Awaits the call and stores its return value in self.result for later assertions.
         """
         self.result = await self.processor._check_and_handle_rebase_during_testing(
@@ -68,7 +68,7 @@ class Scenario(vedro.Scenario):
     def then_result_is_pipeline_failed(self):
         """
         Asserts that the processing result indicates the pipeline failed.
-        
+
         Raises:
             AssertionError: If the stored result is not `ProcessingResult.PIPELINE_FAILED`.
         """
@@ -77,7 +77,7 @@ class Scenario(vedro.Scenario):
     def and_trigger_pipeline_failed_was_called(self):
         """
         Asserts that the state machine's pipeline-failed trigger was awaited exactly once.
-        
+
         Raises an AssertionError if `trigger_pipeline_failed` was not awaited once on the mocked state machine.
         """
         self.mock_sm.trigger_pipeline_failed.assert_awaited_once()

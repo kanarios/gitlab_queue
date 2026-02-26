@@ -29,9 +29,7 @@ class Scenario(vedro.Scenario):
         self.ctx = create_context(rebase_count=1, max_attempts=3)
 
     async def when_handle_rebase_if_needed_is_called(self):
-        self.new_ctx, self.pipeline = await self.handler.handle_rebase_if_needed(
-            42, self.ctx
-        )
+        self.new_ctx, self.pipeline = await self.handler.handle_rebase_if_needed(42, self.ctx)
 
     def then_rebase_count_is_incremented(self):
         assert self.new_ctx.rebase_count == 2

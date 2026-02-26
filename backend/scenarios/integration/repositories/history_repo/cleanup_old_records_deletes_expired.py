@@ -17,11 +17,11 @@ class Scenario(vedro.Scenario):
     async def given_database_with_old_and_recent_history(self):
         """
         Prepare a test database containing one expired and one recent history record.
-        
+
         Initializes an async test database context, creates required tables, and seeds two history entries:
         - iid=1 with finished_at set to 400 days before now (expired)
         - iid=2 with finished_at set to now (recent)
-        
+
         Side effects:
         - stores the async database context on self._db_ctx and the opened database on self.db for use by subsequent steps.
         """
@@ -45,7 +45,7 @@ class Scenario(vedro.Scenario):
     async def when_cleanup_old_records_is_called(self):
         """
         Executes the repository cleanup with a 1-day retention and records the number of deleted history records.
-        
+
         This method runs the cleanup operation against the test database and stores the resulting deleted count in self.deleted_count.
         """
         async with self.db.transaction() as session:
@@ -58,7 +58,7 @@ class Scenario(vedro.Scenario):
     async def and_recent_record_should_remain(self):
         """
         Assert that only the recent history record remains in the database.
-        
+
         Fetches history from the repository and asserts that exactly one record is present and its `iid` equals 2.
         """
         async with self.db.session() as session:

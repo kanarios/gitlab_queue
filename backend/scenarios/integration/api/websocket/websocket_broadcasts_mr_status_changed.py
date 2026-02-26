@@ -25,7 +25,7 @@ class Scenario(vedro.Scenario):
     async def when_mr_status_changed_is_broadcast(self):
         """
         Trigger broadcasting an mr:status_changed event for IID 42 with a queued→rebasing status transition.
-        
+
         This awaits the WebSocketManager to broadcast an event indicating merge request 42 changed from QueueState.QUEUED to QueueState.REBASING.
         """
         await self.manager.broadcast_mr_status_changed(42, QueueState.QUEUED, QueueState.REBASING)
@@ -33,7 +33,7 @@ class Scenario(vedro.Scenario):
     def then_broadcast_should_contain_status_change(self):
         """
         Assert that the mocked WebSocket received an mr:status_changed broadcast with the expected payload.
-        
+
         Verifies that send_json was awaited exactly once and that the sent JSON has:
         - type "mr:status_changed"
         - data.iid equals 42

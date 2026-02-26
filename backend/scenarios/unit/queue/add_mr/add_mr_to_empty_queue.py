@@ -1,10 +1,10 @@
 """Test scenario for adding MR to empty queue."""
 
 import vedro
-from scenarios.contexts.sqlite_client import initialized_test_database
-from scenarios.library import QueueState
 
 from gitlab_queue.core.queue import QueueManager
+from scenarios.contexts.sqlite_client import initialized_test_database
+from scenarios.library import QueueState
 
 from ._helpers import create_test_mr
 
@@ -25,7 +25,7 @@ class Scenario(vedro.Scenario):
     async def then_item_should_be_at_position_1(self):
         """
         Assert that the merge request with IID 42 occupies queue position 1.
-        
+
         Raises:
             AssertionError: If the merge request's position is not 1.
         """
@@ -35,7 +35,7 @@ class Scenario(vedro.Scenario):
     def and_state_should_be_queued(self):
         """
         Verify the added queue item's state is QueueState.QUEUED.
-        
+
         Asserts that self.item.state is equal to QueueState.QUEUED.
         """
         assert self.item.state == QueueState.QUEUED
@@ -43,7 +43,7 @@ class Scenario(vedro.Scenario):
     def and_mr_data_should_match(self):
         """
         Asserts that the stored merge request item matches the expected test MR values.
-        
+
         Checks:
         - `item.mr_iid` equals 42
         - `item.title` equals "Test MR"

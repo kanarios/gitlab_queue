@@ -15,7 +15,7 @@ class Scenario(vedro.Scenario):
     async def given_empty_database(self):
         """
         Set up an initialized test database and create the required tables for the scenario.
-        
+
         Stores the async database context on self._db_ctx and the acquired database handle on self.db, ensuring the schema is created before the test proceeds.
         """
         self._db_ctx = initialized_test_database()
@@ -25,7 +25,7 @@ class Scenario(vedro.Scenario):
     async def when_add_if_not_exists_is_called(self):
         """
         Adds a merge request with IID 42 to the repository and saves the returned MergeRequest object on the scenario as self.result.
-        
+
         The created merge request uses title "New MR", author name "Test User", author username "testuser", no author avatar, is not a hotfix, has labels ["merge_queue"], and targets the "main" branch.
         """
         async with self.db.transaction() as session:
@@ -52,7 +52,7 @@ class Scenario(vedro.Scenario):
     async def and_mr_should_be_in_database(self):
         """
         Asserts that a merge request with IID 42 exists in the database.
-        
+
         Verifies that a lookup for IID 42 returns a non-None merge request record.
         """
         async with self.db.session() as session:
@@ -63,7 +63,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Close the database test context used by the scenario.
-        
+
         Exits the asynchronous database context manager created in setup, ensuring the in-memory test database and related resources are released.
         """
         await self._db_ctx.__aexit__(None, None, None)

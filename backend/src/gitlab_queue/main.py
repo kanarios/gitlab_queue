@@ -270,6 +270,7 @@ async def create_application(settings: Settings) -> Application:
         gitlab_client=gitlab_client,
         queue_manager=queue_manager,
         notifier=notifier,
+        position_notifier=position_notifier,
     )
 
     # 13. Create analytics job processor

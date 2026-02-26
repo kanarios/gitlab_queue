@@ -23,7 +23,7 @@ class Scenario(vedro.Scenario):
     def given_analytics_processor_with_old_data(self):
         """
         Prepare the test fixture with an AnalyticsJobProcessor and mocks that simulate existing old hourly analytics data.
-        
+
         Sets:
         - self.database and self.settings as MagicMock instances.
         - self.mock_uow as an async context manager mock whose .analytics.cleanup_hourly coroutine returns 150.
@@ -55,7 +55,7 @@ class Scenario(vedro.Scenario):
     def then_cleanup_was_called_with_30_day_retention(self):
         """
         Asserts that the analytics hourly cleanup was invoked once with a 30-day retention.
-        
+
         Raises an assertion error if cleanup_hourly was not awaited exactly once with the argument 30.
         """
         self.mock_uow.analytics.cleanup_hourly.assert_awaited_once_with(30)
@@ -63,7 +63,7 @@ class Scenario(vedro.Scenario):
     def and_vacuum_was_triggered(self):
         """
         Asserts that the processor triggered a single database vacuum operation.
-        
+
         Raises an AssertionError if the processor's _vacuum_database coroutine was not awaited exactly once.
         """
         self.processor._vacuum_database.assert_awaited_once()
@@ -99,7 +99,7 @@ class Scenario2(vedro.Scenario):
     def then_cleanup_was_called(self):
         """
         Assert that hourly analytics cleanup was awaited exactly once with a 30-day retention.
-        
+
         Raises:
             AssertionError: If `analytics.cleanup_hourly` was not awaited exactly once with the argument 30.
         """
@@ -139,16 +139,16 @@ class Scenario3(vedro.Scenario):
     def then_cleanup_was_called_with_365_day_retention(self):
         """
         Asserts that history.cleanup_old_records was awaited exactly once with a 365-day retention.
-        
+
         Raises:
-        	AssertionError: If the mocked method was not awaited exactly once with the value 365.
+                AssertionError: If the mocked method was not awaited exactly once with the value 365.
         """
         self.mock_uow.history.cleanup_old_records.assert_awaited_once_with(365)
 
     def and_vacuum_was_triggered(self):
         """
         Asserts that the processor triggered a single database vacuum operation.
-        
+
         Raises an AssertionError if the processor's _vacuum_database coroutine was not awaited exactly once.
         """
         self.processor._vacuum_database.assert_awaited_once()

@@ -26,7 +26,7 @@ class Scenario(vedro.Scenario):
     async def when_queue_updated_is_broadcast(self):
         """
         Trigger the manager to broadcast a "queue:updated" event using prepared test data.
-        
+
         Prepares self.queue_data as a single-item list (mr_iid=42, title="Test", status=QueueState.REBASING) and self.stats_data mapping QueueState.QUEUED to 0 and QueueState.REBASING to 1, then calls manager.broadcast_queue_updated with those values.
         """
         self.queue_data = [{"mr_iid": 42, "title": "Test", "status": QueueState.REBASING}]
@@ -36,7 +36,7 @@ class Scenario(vedro.Scenario):
     def then_broadcast_should_be_sent_to_connection(self):
         """
         Assert that a "queue:updated" broadcast was sent to the mock WebSocket with the expected payload.
-        
+
         Verifies that send_json was awaited exactly once and that the sent message has:
         - "type" equal to "queue:updated"
         - "data.queue" equal to self.queue_data

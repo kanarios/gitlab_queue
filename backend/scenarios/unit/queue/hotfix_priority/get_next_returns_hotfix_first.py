@@ -3,9 +3,9 @@
 import asyncio
 
 import vedro
-from scenarios.contexts.sqlite_client import initialized_test_database
 
 from gitlab_queue.core.queue import QueueManager
+from scenarios.contexts.sqlite_client import initialized_test_database
 
 from ._helpers import create_test_mr
 
@@ -37,7 +37,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Exit and clean up the test database context used by the scenario.
-        
+
         Invokes the scenario's database context manager async exit to release connections and other resources associated with the test database.
         """
         await self._db_context.__aexit__(None, None, None)

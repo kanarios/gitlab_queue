@@ -40,7 +40,7 @@ class Scenario(vedro.Scenario):
     def and_get_mr_called_once(self):
         """
         Assert that GitLabClient.get_mr was called exactly once.
-        
+
         Raises:
             AssertionError: If `self.mock_get_mr.call_count` is not 1.
         """
@@ -49,7 +49,7 @@ class Scenario(vedro.Scenario):
     def and_put_never_awaited(self):
         """
         Asserts that the mocked GitLabClient.put coroutine was never awaited during the scenario.
-        
+
         This verifies that no asynchronous PUT operation was executed after attempting to merge the merge request.
         """
         self.mock_put.assert_not_awaited()

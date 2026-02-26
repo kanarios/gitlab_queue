@@ -184,6 +184,9 @@ async def full_flow_with_failures_and_recovery():
             comment_matcher = jj.match("POST", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes"))
             comment_response = jj.Response(status=201, json={"id": 80})
 
+            project_matcher = jj.match("GET", "/api/v4/projects/123")
+            project_response = jj.Response(status=200, json={"id": 123, "web_url": f"{mock_url}/test/project"})
+
             failed_jobs_matcher = jj.match("GET", jj.matchers.regex(r"/api/v4/projects/123/pipelines/\d+/jobs"))
             failed_jobs_response = jj.Response(status=200, json=[{"id": 9000, "name": "test", "status": "failed"}])
 
@@ -202,6 +205,7 @@ async def full_flow_with_failures_and_recovery():
         get_mr_401_mock_2 = mocked(get_mr_401_matcher, get_mr_401_responses[1])
 
         async with (
+            mocked(project_matcher, project_response),
             mocked(get_mr_400_matcher, get_mr_400_response),
             rebase_400_mock_1,
             pipelines_400_mock_1,

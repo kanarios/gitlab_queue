@@ -10,13 +10,13 @@ from gitlab_queue.core.notifier import MRNotifier
 def create_test_notifier(*, gitlab_client=None, settings=None):
     """
     Create an MRNotifier configured with mocked GitLab client and settings for use in tests.
-    
+
     Parameters:
         gitlab_client (Optional[unittest.mock.AsyncMock]): If None, an AsyncMock is created and configured so
             its add_or_update_pinned_comment returns a mock note with id = 1.
         settings (Optional[unittest.mock.MagicMock]): If None, a MagicMock is created with
             queue_label = "merge_queue" and gitlab_url = "https://gitlab.example.com/group/project".
-    
+
     Returns:
         MRNotifier: An MRNotifier instance initialized with the provided or automatically created mocks.
     """

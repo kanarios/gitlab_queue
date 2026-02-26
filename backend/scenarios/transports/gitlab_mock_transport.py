@@ -234,7 +234,7 @@ class GitLabMockTransport(httpx.AsyncBaseTransport):
     def assert_called_once(self) -> None:
         """
         Assert that exactly one request was recorded in the transport history.
-        
+
         Raises:
             AssertionError: If the number of recorded requests is not exactly 1.
         """
@@ -251,10 +251,10 @@ class GitLabMockTransport(httpx.AsyncBaseTransport):
     def assert_called_with_path(self, path: str) -> None:
         """
         Verify that at least one recorded request targeted the given URL path.
-        
+
         Parameters:
             path (str): URL path to look for (for example, "/api/v4/projects").
-        
+
         Raises:
             AssertionError: If no recorded request matches the provided path.
         """

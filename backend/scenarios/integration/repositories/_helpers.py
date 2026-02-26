@@ -40,7 +40,7 @@ def create_test_mr_model(
 ) -> MergeRequestModel:
     """
     Builds a MergeRequestModel populated with sensible defaults for testing.
-    
+
     Parameters:
         iid (int): Merge request internal ID.
         title (str): Merge request title.
@@ -49,7 +49,7 @@ def create_test_mr_model(
         author_avatar (str | None): URL or identifier for the author's avatar, if any.
         status (str): Merge request status (e.g., "queued", "merged").
         is_hotfix (int): Hotfix flag (0 or 1).
-        labels (str | None): JSON-formatted string of labels (e.g., '["merge_queue"]'). 
+        labels (str | None): JSON-formatted string of labels (e.g., '["merge_queue"]').
         target_branch (str): Target branch name.
         queued_at (str | None): ISO 8601 timestamp for when the MR was queued. If omitted, the current UTC time is used.
         started_at (str | None): ISO 8601 timestamp for when processing started.
@@ -59,7 +59,7 @@ def create_test_mr_model(
         retry_count (int): Number of retry attempts.
         last_error (str | None): Last error message, if any.
         stale_warning_sent (int): Flag indicating whether a stale warning was sent (0 or 1).
-    
+
     Returns:
         MergeRequestModel: A MergeRequestModel instance populated with the provided values and defaults.
     """
@@ -110,7 +110,7 @@ def create_test_history_model(
 ) -> MergeRequestHistoryModel:
     """
     Create a MergeRequestHistoryModel populated with sensible defaults for use in tests.
-    
+
     Parameters:
         iid (int): Merge request internal ID.
         title (str): Merge request title.
@@ -131,7 +131,7 @@ def create_test_history_model(
         pipeline_status (str | None): Status of the pipeline, or None.
         pipeline_duration_seconds (int | None): Pipeline duration in seconds, or None.
         pipeline_failed_jobs (str | None): JSON or string describing failed pipeline jobs, or None.
-    
+
     Returns:
         MergeRequestHistoryModel: A model instance with the supplied values and UTC-based defaults for missing timestamps.
     """
@@ -173,9 +173,9 @@ def create_test_hourly_model(
 ) -> AnalyticsHourlyModel:
     """
     Constructs an AnalyticsHourlyModel representing metrics for a specific hour.
-    
+
     If `timestamp` is not provided, it defaults to the current UTC hour (minutes, seconds, and microseconds zeroed) formatted as an ISO 8601 string.
-    
+
     Parameters:
         timestamp (str | None): ISO 8601 timestamp for the hour; defaults to the current UTC hour when omitted.
         queue_depth (int): Number of items in the queue at the timestamp.
@@ -183,7 +183,7 @@ def create_test_hourly_model(
         success_count (int): Number of successfully processed items during the hour.
         failed_count (int): Number of failed items during the hour.
         avg_wait_time_seconds (int | None): Average wait time in seconds for processed items; may be None.
-    
+
     Returns:
         AnalyticsHourlyModel: An instance populated with the supplied or default hourly metrics.
     """
@@ -203,7 +203,7 @@ def create_test_hourly_model(
 async def seed_mr(session: AsyncSession, **kwargs) -> MergeRequestModel:
     """
     Create and persist a test MergeRequestModel in the provided session.
-    
+
     Returns:
         MergeRequestModel: The created MergeRequestModel instance added to and flushed on the session.
     """
@@ -216,13 +216,13 @@ async def seed_mr(session: AsyncSession, **kwargs) -> MergeRequestModel:
 async def seed_history(session: AsyncSession, **kwargs) -> MergeRequestHistoryModel:
     """
     Add a test MergeRequestHistoryModel to the provided session using sensible defaults with optional overrides.
-    
+
     The keyword arguments are forwarded to create_test_history_model to override default field values. The created history model is added to the session and the session is flushed before the model is returned.
-    
+
     Parameters:
         session (AsyncSession): Database session to which the history model will be added.
         **kwargs: Fields to override on the generated MergeRequestHistoryModel (forwarded to create_test_history_model).
-    
+
     Returns:
         MergeRequestHistoryModel: The history model instance that was added to the session and flushed.
     """
@@ -235,7 +235,7 @@ async def seed_history(session: AsyncSession, **kwargs) -> MergeRequestHistoryMo
 async def seed_hourly(session: AsyncSession, **kwargs) -> AnalyticsHourlyModel:
     """
     Create, add, and flush an AnalyticsHourlyModel in the given database session.
-    
+
     Returns:
         AnalyticsHourlyModel: The created AnalyticsHourlyModel instance persisted to the session.
     """

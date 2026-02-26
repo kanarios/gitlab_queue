@@ -15,7 +15,7 @@ class Scenario(vedro.Scenario):
     def given_rate_limit_error(self):
         """
         Create and store a GitLab rate limit error on the scenario.
-        
+
         Sets self.error to an error object representing a GitLab rate limit condition (created via create_rate_limit_error()).
         """
         self.error = create_rate_limit_error()

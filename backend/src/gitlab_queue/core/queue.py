@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 
 from gitlab_queue.metrics import OPERATIONS_TOTAL
 from gitlab_queue.models.queue_item import DashboardStats, QueueItem
@@ -130,18 +130,6 @@ SET status = :status
 WHERE iid = :iid AND status != :status
 """
 
-_COUNT_POSITION_SQL = """
-SELECT COUNT(*) FROM merge_requests
-WHERE status IN ('queued', 'rebasing', 'testing', 'merging')
-AND (
-    is_hotfix > (SELECT COALESCE(is_hotfix, 0) FROM merge_requests WHERE iid = :iid)
-    OR (
-        is_hotfix = (SELECT COALESCE(is_hotfix, 0) FROM merge_requests WHERE iid = :iid)
-        AND id < (SELECT id FROM merge_requests WHERE iid = :iid)
-    )
-)
-"""
-
 _SELECT_MR_STATE_SQL = """
 SELECT status, started_at, last_error, finished_at FROM merge_requests WHERE iid = :iid
 """
@@ -180,8 +168,8 @@ ALTER TABLE merge_requests ADD COLUMN expected_sha TEXT
 """
 
 _SELECT_RECENT_HISTORY_SQL = """
-SELECT * FROM merge_requests
-WHERE status IN ('merged', 'failed', 'removed')
+SELECT * FROM merge_requests_history
+WHERE status IN ('merged', 'failed', 'removed', 'conflict', 'timeout')
 AND finished_at IS NOT NULL
 ORDER BY finished_at DESC
 LIMIT :limit
@@ -190,14 +178,14 @@ LIMIT :limit
 _SELECT_STATS_WINDOW_SQL = """
 SELECT
     SUM(CASE WHEN status = 'merged' THEN 1 ELSE 0 END) as merged_count,
-    SUM(CASE WHEN status IN ('merged', 'failed') THEN 1 ELSE 0 END) as total_completed,
+    SUM(CASE WHEN status IN ('merged', 'failed', 'conflict', 'timeout') THEN 1 ELSE 0 END) as total_completed,
     AVG(CASE WHEN started_at IS NOT NULL AND queued_at IS NOT NULL THEN
         (julianday(started_at) - julianday(queued_at)) * 86400 ELSE NULL END
     ) as avg_wait_seconds,
     AVG(CASE WHEN finished_at IS NOT NULL AND started_at IS NOT NULL AND status = 'merged' THEN
         (julianday(finished_at) - julianday(started_at)) * 86400 ELSE NULL END
     ) as avg_processing_seconds
-FROM merge_requests
+FROM merge_requests_history
 WHERE finished_at >= datetime('now', :days_param)
 """
 
@@ -261,15 +249,23 @@ class QueueCache:
     Attributes:
         _active_queue: Cached list of active queue items, or None if invalid.
         _last_refresh: Timestamp of last cache refresh.
+        _version: Monotonic version counter incremented on invalidation.
     """
 
     _active_queue: list[QueueItem] | None = field(default=None)
     _last_refresh: datetime | None = field(default=None)
+    _version: int = field(default=0)
 
     def invalidate(self) -> None:
         """Clear all cached data."""
         self._active_queue = None
         self._last_refresh = None
+        self._version += 1
+
+    @property
+    def version(self) -> int:
+        """Get current cache version for stale-write protection."""
+        return self._version
 
     @property
     def is_valid(self) -> bool:
@@ -280,8 +276,17 @@ class QueueCache:
         """Get cached active queue or None if cache is invalid."""
         return self._active_queue
 
-    def set_active_queue(self, items: list[QueueItem]) -> None:
-        """Update cached active queue."""
+    def set_active_queue(self, items: list[QueueItem], *, version: int | None = None) -> None:
+        """Update cached active queue.
+
+        Args:
+            items: Active queue items to cache.
+            version: Optional version captured before an async refresh. If provided and
+                differs from current cache version, the write is skipped to avoid
+                overwriting newer data with stale results.
+        """
+        if version is not None and version != self._version:
+            return
         self._active_queue = items
         self._last_refresh = datetime.now(UTC)
 
@@ -337,17 +342,17 @@ class QueueManager:
             try:
                 await session.execute(text(_ALTER_TABLE_STALE_WARNING_SQL))
                 log.info("Added stale_warning_sent column to merge_requests table")
-            except Exception:
-                # Column already exists - ignore
-                pass
+            except OperationalError as e:
+                if "duplicate column" not in str(e).lower():
+                    raise
 
             # Migrate: add expected_sha column if not exists
             try:
                 await session.execute(text(_ALTER_TABLE_EXPECTED_SHA_SQL))
                 log.info("Added expected_sha column to merge_requests table")
-            except Exception:
-                # Column already exists - ignore
-                pass
+            except OperationalError as e:
+                if "duplicate column" not in str(e).lower():
+                    raise
 
         log.info("Database schema ensured")
 
@@ -541,6 +546,8 @@ class QueueManager:
         if cached is not None:
             return cached
 
+        version_before = self._cache.version
+
         # Fetch from database and cache
         async with self.db.session() as session:
             result = await session.execute(text(_SELECT_ACTIVE_QUEUE_SQL))
@@ -548,7 +555,7 @@ class QueueManager:
             await session.commit()
 
         items = [self._row_to_queue_item(row) for row in rows]
-        self._cache.set_active_queue(items)
+        self._cache.set_active_queue(items, version=version_before)
         return items
 
     async def get_queue_length(self) -> int:
@@ -770,12 +777,20 @@ class QueueManager:
         wait_time_seconds: int | None = None
         processing_time_seconds: int | None = None
 
-        if mr.queued_at and mr.started_at:
-            wait_time_seconds = int((mr.started_at - mr.queued_at).total_seconds())
-            processing_time_seconds = int((now - mr.started_at).total_seconds())
-        elif mr.queued_at:
+        # Normalize naive datetimes to UTC-aware
+        queued_at = mr.queued_at
+        if queued_at is not None and queued_at.tzinfo is None:
+            queued_at = queued_at.replace(tzinfo=UTC)
+        started_at = mr.started_at
+        if started_at is not None and started_at.tzinfo is None:
+            started_at = started_at.replace(tzinfo=UTC)
+
+        if queued_at and started_at:
+            wait_time_seconds = int((started_at - queued_at).total_seconds())
+            processing_time_seconds = int((now - started_at).total_seconds())
+        elif queued_at:
             # MR never started processing (e.g., removed while queued)
-            wait_time_seconds = int((now - mr.queued_at).total_seconds())
+            wait_time_seconds = int((now - queued_at).total_seconds())
 
         # Prepare history record params
         history_params = {
@@ -821,8 +836,12 @@ class QueueManager:
                 mr_iid=mr_iid,
                 status=status,
             )
-            # MR already in history means it was deleted from active queue;
-            # invalidate cache to ensure consistency
+            # Explicitly delete from active table in a separate transaction
+            try:
+                async with self.db.transaction() as session:
+                    await session.execute(text(_DELETE_MR_SQL), {"iid": mr_iid})
+            except IntegrityError as exc:
+                log.debug("Active queue entry already cleaned up", mr_iid=mr_iid, error=str(exc))
             self._cache.invalidate()
             return False
 

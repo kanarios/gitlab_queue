@@ -35,7 +35,7 @@ class Scenario(vedro.Scenario):
     async def when_notify_position_changes_is_called(self):
         """
         Calls _notify_position_changes on the position_notifier with the prepared test inputs and stores the returned notified count.
-        
+
         This invokes the notifier with excluded_mr_iid=999, the scenario's positions_before, old_total set to the length of positions_before, and an empty log_context, then assigns the result to self.notified_count.
         """
         self.notified_count = await self.position_notifier._notify_position_changes(
@@ -60,7 +60,7 @@ class Scenario(vedro.Scenario):
     def and_notified_count_is_1(self):
         """
         Assert that exactly one merge request was notified.
-        
+
         Raises:
             AssertionError: If self.notified_count is not equal to 1.
         """

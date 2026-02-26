@@ -1,8 +1,7 @@
 """Helper functions for queue state test scenarios."""
 
-from scenarios.library import Labels, MRState
-
 from gitlab_queue.models.mr import Author, MergeRequest
+from scenarios.library import Labels, MRState
 
 
 def create_test_mr(
@@ -13,13 +12,13 @@ def create_test_mr(
 ) -> MergeRequest:
     """
     Create a MergeRequest object pre-filled with minimal, consistent test data.
-    
+
     Parameters:
         iid (int): The MR internal ID; also used as the author's id and to derive SHA and branch names.
         title (str): MR title (defaults to "Test MR").
         author_name (str): Author's display name (defaults to "Test User").
         author_username (str): Author's username (defaults to "testuser").
-    
+
     Returns:
         MergeRequest: A MergeRequest with state set to MRState.OPENED, labels containing Labels.FEATURE,
         sha formatted as "sha{iid}", source_branch "feature-{iid}", target_branch "master",

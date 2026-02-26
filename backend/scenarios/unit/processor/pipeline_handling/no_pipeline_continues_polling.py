@@ -27,7 +27,7 @@ class Scenario(vedro.Scenario):
     def given_processor_with_no_pipeline(self):
         """
         Prepare the scenario with a mock processor and processing context where no pipeline exists for the merge request.
-        
+
         Configures:
         - a mock processor,
         - a mock state machine with current state id "testing",
@@ -47,7 +47,7 @@ class Scenario(vedro.Scenario):
         # First call: return None (continue), second call: return ERROR (stop loop)
         """
         Invokes the processor's _wait_for_pipeline while simulating a "no pipeline found" poll followed by a termination.
-        
+
         Patches _check_pipeline_termination_conditions to first yield None (continue polling) and then ProcessingResult.ERROR (stop), patches _interruptible_sleep to be awaitable, awaits _wait_for_pipeline, and stores the outcome on self.result.
         """
         with (
@@ -69,7 +69,7 @@ class Scenario(vedro.Scenario):
     def then_result_is_error(self):
         """
         Asserts that the processor's wait result indicates an error.
-        
+
         Checks that `self.result` is equal to `ProcessingResult.ERROR`.
         """
         assert self.result == ProcessingResult.ERROR
@@ -77,7 +77,7 @@ class Scenario(vedro.Scenario):
     def and_interruptible_sleep_was_called(self):
         """
         Asserts that the processor's interruptible sleep was awaited exactly once.
-        
+
         Raises:
             AssertionError: If the interruptible sleep was not awaited exactly one time.
         """

@@ -6,6 +6,8 @@ but no longer has the queue label, it should mark the MR as 'removed'.
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import vedro
 
 from .._helpers import (
@@ -21,13 +23,14 @@ class Scenario(vedro.Scenario):
     def given_processor_with_unlabeled_mr_in_queue(self):
         """
         Set up a mock processor with an active queued merge request (IID 42) that exists on GitLab but lacks the queue label.
-        
+
         Configures:
         - a mock processor instance,
         - an active queue containing a queue item for MR IID 42 with state "queued",
         - the GitLab client to return a mock MR (IID 42, state "opened") whose labels do not include the queue label.
         """
         self.processor = create_mock_processor()
+        self.processor.queue_manager.complete_mr = AsyncMock(return_value=True)
 
         self.queue_item = create_test_queue_item(mr_iid=42, state="queued")
         self.processor.queue_manager.get_active_queue.return_value = [
@@ -46,7 +49,12 @@ class Scenario(vedro.Scenario):
     def then_mr_is_marked_as_removed(self):
         """
         Asserts that the merge request with IID 42 was marked as removed in the queue manager.
-        
-        Verifies that queue_manager.update_mr_state was awaited exactly once with arguments (42, "removed").
+
+        Verifies that queue_manager.complete_mr was awaited exactly once with status "removed"
+        and failure_reason "label_removed".
         """
-        self.processor.queue_manager.update_mr_state.assert_awaited_once_with(42, "removed")
+        self.processor.queue_manager.complete_mr.assert_awaited_once_with(
+            42,
+            status="removed",
+            failure_reason="label_removed",
+        )

@@ -17,7 +17,7 @@ class Scenario(vedro.Scenario):
     async def given_database_with_dated_history(self):
         """
         Prepare a test database and seed it with three history records having distinct finished_at timestamps.
-        
+
         Sets up an initialized test database context, creates required tables, stores the database handle on the instance, records today's date as `self.today`, and inserts three history entries:
         - iid=1 with finished_at set to now
         - iid=2 with finished_at 3 days before now
@@ -50,7 +50,7 @@ class Scenario(vedro.Scenario):
     async def when_get_history_is_called_with_date_range(self):
         """
         Fetch history records for the date range from self.today - 5 days to self.today and store the fetched result on self.result.
-        
+
         Opens a database session, constructs a HistoryRepository, and assigns the repository's get_history result to self.result.
         """
         self._session_ctx = self.db.session()
@@ -64,7 +64,7 @@ class Scenario(vedro.Scenario):
     def then_only_records_within_range_should_be_returned(self):
         """
         Asserts that the repository result contains exactly the two history records within the expected date range.
-        
+
         Verifies that `self.result.total` equals 2 and that the set of `iid` values in `self.result.items` is exactly {1, 2}; raises AssertionError if these conditions are not met.
         """
         assert self.result.total == 2
@@ -74,7 +74,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Tears down the scenario's database and session async contexts.
-        
+
         Exits the active session and database context managers to release resources opened during the scenario setup.
         """
         await self._session_ctx.__aexit__(None, None, None)

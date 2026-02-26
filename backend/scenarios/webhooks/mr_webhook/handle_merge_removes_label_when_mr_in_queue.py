@@ -4,8 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import vedro
 
-from gitlab_queue.models.events import (MergeRequestAttributes,
-                                        MergeRequestEvent)
+from gitlab_queue.models.events import MergeRequestAttributes, MergeRequestEvent
 from gitlab_queue.webhooks.handlers import MRWebhookHandler
 
 
@@ -22,7 +21,8 @@ class Scenario(vedro.Scenario):
 
     def given_queue_manager(self):
         self.queue_manager = AsyncMock()
-        self.queue_manager.remove_from_queue.return_value = True
+        self.queue_manager.get_queue_item = AsyncMock(return_value=MagicMock())
+        self.queue_manager.remove_from_queue = AsyncMock(return_value=True)
 
     def given_handler(self):
         self.handler = MRWebhookHandler(

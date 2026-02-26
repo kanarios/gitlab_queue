@@ -60,7 +60,9 @@ _SENSITIVE_KEYS = frozenset(
         "private_token",
         "password",
         "secret",
+        "secret_value",
         "api_key",
+        "api_token",
         "apikey",
         "auth",
         "authorization",
@@ -69,6 +71,7 @@ _SENSITIVE_KEYS = frozenset(
         "key",
         "private_key",
         "secret_key",
+        "token_expiry",
     }
 )
 
@@ -86,7 +89,7 @@ def _sanitize_response_body(body: dict[str, Any] | str | None) -> dict[str, Any]
         result: dict[str, Any] = {}
         for key, value in d.items():
             key_lower = key.lower()
-            if any(sensitive in key_lower for sensitive in _SENSITIVE_KEYS):
+            if key_lower in _SENSITIVE_KEYS:
                 result[key] = "***"
             elif isinstance(value, dict):
                 result[key] = redact_dict(value)
@@ -313,6 +316,10 @@ class GitLabClient:
         self._rate_limit_state = RateLimitState()
         self._rate_limit_lock = asyncio.Lock()
 
+        # Cached project web URL (fetched lazily on first use)
+        self._project_web_url: str | None = None
+        self._project_web_url_lock = asyncio.Lock()
+
     @property
     def rate_limit_state(self) -> RateLimitState:
         """Return current rate limit state for inspection.
@@ -335,6 +342,22 @@ class GitLabClient:
     def project_id(self) -> int:
         """Return the GitLab project ID."""
         return self._project_id
+
+    async def get_project_web_url(self) -> str:
+        """Get the project web URL from GitLab API. Cached after first call."""
+        if self._project_web_url is not None:
+            return self._project_web_url
+        async with self._project_web_url_lock:
+            if self._project_web_url is not None:
+                return self._project_web_url
+            response = await self.get(f"/projects/{self._project_id}", project_scoped=False)
+            web_url = response.get("web_url")
+            if not web_url:
+                raise GitLabAPIError(
+                    f"Project {self._project_id} response missing 'web_url' field",
+                )
+            self._project_web_url = web_url
+            return self._project_web_url
 
     async def __aenter__(self) -> GitLabClient:
         """Enter async context."""

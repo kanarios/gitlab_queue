@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import vedro
-from scenarios.contexts.sqlite_client import initialized_test_database
 
 from gitlab_queue.core.queue import QueueManager
+from scenarios.contexts.sqlite_client import initialized_test_database
 
 from ._helpers import create_test_mr
 
@@ -16,7 +16,7 @@ class Scenario(vedro.Scenario):
     async def given_queue_with_mixed_statuses(self):
         """
         Set up a test queue with two merge requests in different statuses.
-        
+
         Initializes a test SQLite database and QueueManager, ensures the queue schema exists, enqueues two test merge requests (IID 1 and IID 2), and updates the state of the merge request with IID 2 to "testing" so that one MR remains queued and the other is in testing.
         """
         self._db_context = initialized_test_database()
@@ -34,7 +34,7 @@ class Scenario(vedro.Scenario):
     async def when_stats_are_retrieved(self):
         """
         Retrieve queue statistics and assign them to self.stats.
-        
+
         The fetched value is the mapping of queue statuses to their counts and is stored on the scenario instance for later assertions.
         """
         self.stats = await self.queue.get_queue_stats()
@@ -45,7 +45,7 @@ class Scenario(vedro.Scenario):
     def and_testing_count_should_be_1(self):
         """
         Asserts that the queue statistics report exactly one item with status "testing".
-        
+
         Raises:
             AssertionError: If the 'testing' count is not 1.
         """
@@ -60,7 +60,7 @@ class Scenario(vedro.Scenario):
     def and_merging_count_should_be_0(self):
         """
         Asserts that the retrieved queue statistics report zero items in the "merging" status.
-        
+
         Raises:
             AssertionError: If the "merging" count is not 0.
         """
@@ -69,7 +69,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Exit the test database context and release associated resources.
-        
+
         This cleans up the initialized test SQLite database context used by the scenario.
         """
         await self._db_context.__aexit__(None, None, None)

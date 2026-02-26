@@ -23,7 +23,7 @@ class Scenario(vedro.Scenario):
     def given_settings_without_client_id(self):
         """
         Prepare a MagicMock settings object with an absent OAuth client ID and otherwise populated OAuth fields.
-        
+
         Sets self.settings to a MagicMock with:
         - oauth_client_id = None
         - oauth_client_secret mocked
@@ -43,7 +43,7 @@ class Scenario(vedro.Scenario):
     def then_result_is_none(self):
         """
         Asserts that the scenario's result is None.
-        
+
         Raises:
             AssertionError: If `self.result` is not None.
         """
@@ -56,7 +56,7 @@ class Scenario2(vedro.Scenario):
     def given_settings_without_client_secret(self):
         """
         Configure self.settings as a MagicMock representing OAuth settings with a client ID and redirect URI but no client secret.
-        
+
         Sets:
             self.settings.oauth_client_id = "test-client-id"
             self.settings.oauth_client_secret = None
@@ -76,7 +76,7 @@ class Scenario2(vedro.Scenario):
     def then_result_is_none(self):
         """
         Asserts that the scenario's result is None.
-        
+
         Raises:
             AssertionError: If `self.result` is not None.
         """
@@ -89,7 +89,7 @@ class Scenario3(vedro.Scenario):
     def given_settings_without_redirect_uri(self):
         """
         Prepare self.settings with an OAuth client ID and secret while leaving the redirect URI unset.
-        
+
         Sets:
             self.settings.oauth_client_id to "test-client-id"
             self.settings.oauth_client_secret to a MagicMock instance
@@ -109,7 +109,7 @@ class Scenario3(vedro.Scenario):
     def then_result_is_none(self):
         """
         Asserts that the scenario's result is None.
-        
+
         Raises:
             AssertionError: If `self.result` is not None.
         """
@@ -122,7 +122,7 @@ class Scenario4(vedro.Scenario):
     def given_settings_with_partial_oauth_config(self):
         """
         Configure the scenario's settings with a partially populated OAuth configuration.
-        
+
         Sets self.settings to a MagicMock and assigns:
         - oauth_client_id: "test-client-id"
         - oauth_client_secret: None
@@ -149,7 +149,7 @@ class Scenario5(vedro.Scenario):
     def given_gitlab_returns_403(self):
         """
         Prepare mocked HTTP client and response to simulate a GitLab 403 (Forbidden) response.
-        
+
         Sets:
         - self.mock_response: MagicMock with .status_code = 403.
         - self.mock_client: AsyncMock whose .get returns self.mock_response and whose async context manager methods (__aenter__, __aexit__) are configured to enter/exit returning the client and None respectively.
@@ -164,7 +164,7 @@ class Scenario5(vedro.Scenario):
     async def when_project_access_is_validated(self):
         """
         Trigger project access validation and store its outcome on self.result.
-        
+
         Patches httpx.AsyncClient to return self.mock_client, calls validate_project_access with gitlab_url "https://gitlab.example.com", access_token "test-token", and project_id 123, and assigns the returned boolean to self.result.
         """
         with patch(

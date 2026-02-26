@@ -16,7 +16,7 @@ class Scenario(vedro.Scenario):
     def given_gitlab_network_error(self):
         """
         Prepare self.mock_client as an AsyncMock that simulates a GitLab network failure.
-        
+
         Sets self.mock_client.get to raise an httpx.ConnectError("Connection refused") when awaited and configures __aenter__ and __aexit__ so the mock can be used in an async with context.
         """
         self.mock_client = AsyncMock()
@@ -29,7 +29,7 @@ class Scenario(vedro.Scenario):
     async def when_project_access_is_validated(self):
         """
         Patch httpx.AsyncClient to use the prepared mock client and invoke validate_project_access, storing the call result on self.result.
-        
+
         This step replaces gitlab_queue.auth.oauth.httpx.AsyncClient with a factory that returns self.mock_client, then awaits validate_project_access with a sample GitLab URL, access token, and project ID and saves the returned value to self.result.
         """
         with patch("gitlab_queue.auth.oauth.httpx.AsyncClient", return_value=self.mock_client):

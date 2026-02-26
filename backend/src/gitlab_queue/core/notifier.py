@@ -114,7 +114,7 @@ _If pipeline fails, bot will retry once before removing from queue._
 Retrying due to failed jobs: {failed_jobs}
 
 ---
-_This is the last retry attempt._
+{final_attempt_text}
 """,
     "rebase_during_testing": """## 🤖 Merge Queue Bot
 
@@ -345,6 +345,15 @@ class MRNotifier:
             elif key == "failed_jobs" and isinstance(value, list):
                 full_context[key] = self._format_job_list(value)
 
+        # Add final attempt text for pipeline_retry
+        if status == "pipeline_retry":
+            retry_count = full_context.get("retry_count", 0)
+            max_retries = full_context.get("max_retries", 0)
+            if retry_count >= max_retries:
+                full_context["final_attempt_text"] = "_This is the last retry attempt._"
+            else:
+                full_context["final_attempt_text"] = ""
+
         # Add final attempt text for rebase_during_testing
         if status == "rebase_during_testing":
             rebase_count = full_context.get("rebase_count", 0)
@@ -399,7 +408,7 @@ class MRNotifier:
             formatted.append(f"- _...and {len(jobs) - 10} more_")
         return "\n".join(formatted)
 
-    def build_pipeline_url(self, pipeline_id: int) -> str:
+    async def build_pipeline_url(self, pipeline_id: int) -> str:
         """Build full GitLab pipeline URL.
 
         Args:
@@ -408,8 +417,8 @@ class MRNotifier:
         Returns:
             Full URL to the pipeline page.
         """
-        base = self.settings.gitlab_url.rstrip("/")
-        return f"{base}/-/pipelines/{pipeline_id}"
+        project_url = await self.gitlab_client.get_project_web_url()
+        return f"{project_url}/-/pipelines/{pipeline_id}"
 
     async def remove_queue_label(self, mr_iid: int) -> None:
         """Remove the queue label from an MR.

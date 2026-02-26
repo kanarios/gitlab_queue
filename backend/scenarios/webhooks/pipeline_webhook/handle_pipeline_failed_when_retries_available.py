@@ -10,9 +10,9 @@ from ._helpers import (
     create_gitlab_client_with_transport,
     create_mock_notifier,
     create_mock_queue_manager,
+    create_mock_settings,
     create_pipeline_event,
     create_queue_item_in_state,
-    created_mock_settings,
 )
 
 
@@ -20,7 +20,7 @@ class Scenario(vedro.Scenario):
     subject = "handle pipeline failed when retries available"
 
     def given_handler_and_event(self):
-        self.settings = created_mock_settings()
+        self.settings = create_mock_settings()
         self.settings.pipeline_retry_count = 3
         self.gitlab_client, self.transport = create_gitlab_client_with_transport()
         self.queue_manager = create_mock_queue_manager()
@@ -38,7 +38,7 @@ class Scenario(vedro.Scenario):
     async def when_event_is_handled(self):
         await self.handler.handle(self.event)
 
-    def then_mr_should_be_marked_for_retry(self):
+    def then_mr_should_be_marked_as_failed(self):
         self.queue_manager.update_mr_state.assert_awaited_once_with(
             123,
             "testing",

@@ -24,7 +24,7 @@ class Scenario(vedro.Scenario):
     def given_log_context_with_request_id(self):
         """
         Sets a fixed request_id for the scenario.
-        
+
         Assigns the string "test-req-123" to self.request_id for use in subsequent steps.
         """
         self.request_id = "test-req-123"
@@ -32,7 +32,7 @@ class Scenario(vedro.Scenario):
     def when_log_context_is_entered(self):
         """
         Enter a LogContext with the scenario's request_id and capture the request_id value both inside the context and after exiting it.
-        
+
         This sets:
         - self.value_inside: the value of request_id_ctx.get() while inside the LogContext.
         - self.value_outside: the value of request_id_ctx.get() after the LogContext has been exited.
@@ -47,7 +47,7 @@ class Scenario(vedro.Scenario):
     def and_request_id_should_be_reset_outside_context(self):
         """
         Assert that the request_id context variable is unset outside the LogContext.
-        
+
         Raises:
             AssertionError: If the stored outside value is not `None`.
         """
@@ -66,7 +66,7 @@ class Scenario2(vedro.Scenario):
     def when_log_context_is_entered(self):
         """
         Enter a LogContext with mr_iid set and record the mr_iid_ctx value inside and after exiting the context.
-        
+
         Sets self.value_inside to the context value observed while inside the LogContext and self.value_outside to the value observed after the context is exited.
         """
         with LogContext(mr_iid=self.mr_iid):
@@ -82,7 +82,7 @@ class Scenario2(vedro.Scenario):
     def and_mr_iid_should_be_reset_outside_context(self):
         """
         Asserts that the mr_iid context variable is reset to None outside of the LogContext.
-        
+
         Checks that the captured outside value (self.value_outside) is None, indicating the context was cleared after exiting the LogContext.
         """
         assert self.value_outside is None
@@ -94,7 +94,7 @@ class Scenario3(vedro.Scenario):
     def given_log_context_with_operation(self):
         """
         Prepare the scenario by setting the operation value used in the test.
-        
+
         Sets self.operation to "rebase" so subsequent steps can verify LogContext propagation.
         """
         self.operation = "rebase"
@@ -102,7 +102,7 @@ class Scenario3(vedro.Scenario):
     def when_log_context_is_entered(self):
         """
         Enters a LogContext with the scenario's operation and records the operation context value inside and after exiting the context.
-        
+
         Sets self.value_inside to the value of operation_ctx.get() from within the LogContext and sets self.value_outside to the value of operation_ctx.get() after the context has been exited.
         """
         with LogContext(operation=self.operation):
@@ -112,7 +112,7 @@ class Scenario3(vedro.Scenario):
     def then_operation_should_be_set_inside_context(self):
         """
         Asserts that the captured operation context value matches the expected operation inside the LogContext.
-        
+
         Raises:
             AssertionError: If the captured context value does not equal self.operation.
         """
@@ -121,7 +121,7 @@ class Scenario3(vedro.Scenario):
     def and_operation_should_be_reset_outside_context(self):
         """
         Asserts that the operation context variable is reset to None after exiting LogContext.
-        
+
         Raises:
             AssertionError: If the operation context is not None.
         """
@@ -139,7 +139,7 @@ class Scenario4(vedro.Scenario):
     def when_log_context_is_entered_with_all_fields(self):
         """
         Enter a LogContext with request_id, mr_iid, and operation set and capture each context variable's value inside and after exiting.
-        
+
         Sets req_inside, iid_inside, and op_inside to the values observed while inside the context, and sets req_outside, iid_outside, and op_outside to the values observed after exiting the context.
         """
         with LogContext(
@@ -157,7 +157,7 @@ class Scenario4(vedro.Scenario):
     def then_all_values_should_be_set_inside_context(self):
         """
         Asserts that the request_id, mr_iid, and operation captured inside the LogContext match the expected values.
-        
+
         Raises:
             AssertionError: If any captured value does not equal its expected value.
         """
@@ -168,9 +168,9 @@ class Scenario4(vedro.Scenario):
     def and_all_values_should_be_reset_outside_context(self):
         """
         Asserts that the captured request_id, mr_iid, and operation values are None outside the LogContext.
-        
+
         Raises:
-        	AssertionError: If any of `req_outside`, `iid_outside`, or `op_outside` is not None.
+                AssertionError: If any of `req_outside`, `iid_outside`, or `op_outside` is not None.
         """
         assert self.req_outside is None
         assert self.iid_outside is None

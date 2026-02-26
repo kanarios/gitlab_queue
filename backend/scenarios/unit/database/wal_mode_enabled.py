@@ -16,7 +16,7 @@ class Scenario(vedro.Scenario):
     async def given_database_with_file_backend(self):
         """
         Prepare a file-backed Database instance in a temporary directory for testing.
-        
+
         Creates a temporary directory, constructs a SQLite URL using aiosqlite pointing to test.db inside that directory, and stores the created objects on the instance:
         - self._tmp_dir: TemporaryDirectory object
         - self._db_path: Path to the database file
@@ -31,7 +31,7 @@ class Scenario(vedro.Scenario):
     async def when_database_is_initialized(self):
         """
         Initialize the Database instance and record its health status on the scenario.
-        
+
         Sets `self.status` to the result of the database health check performed after initialization.
         """
         await self.db.initialize()
@@ -40,7 +40,7 @@ class Scenario(vedro.Scenario):
     def then_wal_mode_should_be_enabled(self):
         """
         Assert that the database is operating in WAL (Write-Ahead Logging) mode.
-        
+
         Raises:
             AssertionError: if `self.status.wal_mode_enabled` is not True.
         """
@@ -49,7 +49,7 @@ class Scenario(vedro.Scenario):
     def and_database_should_be_connected(self):
         """
         Assert that the database connection is established.
-        
+
         Raises:
             AssertionError: If the database is not connected (i.e., `self.status.connected` is false).
         """

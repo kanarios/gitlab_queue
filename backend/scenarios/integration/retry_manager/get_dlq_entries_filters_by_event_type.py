@@ -14,7 +14,7 @@ class Scenario(vedro.Scenario):
     async def given_dlq_entries_of_different_types(self):
         """
         Seed the test context with dead-letter queue (DLQ) entries of different event types.
-        
+
         Initializes a test database context and retry manager, ensures the schema exists, then adds two failed DLQ entries with event_type "merge_request" and one failed DLQ entry with event_type "pipeline". Sets self._db_ctx, self.db, and self.manager for use by subsequent scenario steps.
         """
         self._db_ctx = initialized_test_database()
@@ -46,7 +46,7 @@ class Scenario(vedro.Scenario):
     async def when_dlq_entries_filtered_by_merge_request(self):
         """
         Filter dead-letter queue entries by event_type "merge_request" and store the results on the scenario.
-        
+
         Sets self.filtered_entries to the list of DLQ entries whose event_type equals "merge_request".
         """
         self.filtered_entries = await self.manager.get_dlq_entries(
@@ -56,7 +56,7 @@ class Scenario(vedro.Scenario):
     def then_only_merge_request_entries_should_be_returned(self):
         """
         Assert that the filtered entries contain exactly two items and every entry has event_type equal to "merge_request".
-        
+
         Raises:
             AssertionError: If the number of entries is not two or if any entry's event_type is not "merge_request".
         """
@@ -67,7 +67,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Exit and clean up the test database context used by the scenario.
-        
+
         Closes the async database context manager opened during setup so resources are released.
         """
         await self._db_ctx.__aexit__(None, None, None)

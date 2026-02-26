@@ -104,10 +104,7 @@ def create_test_retry_item(
         RetryQueueItem instance.
     """
     if payload is None:
-        if event_type == "merge_request":
-            payload = create_mr_payload()
-        else:
-            payload = create_pipeline_payload()
+        payload = create_mr_payload() if event_type == "merge_request" else create_pipeline_payload()
 
     return RetryQueueItem(
         id=item_id,

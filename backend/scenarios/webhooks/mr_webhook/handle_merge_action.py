@@ -1,26 +1,33 @@
 """Test: handle merge action cleans up queue."""
 
-import vedro
+from unittest.mock import AsyncMock, MagicMock
 
-from gitlab_queue.webhooks.handlers import MRWebhookHandler
+import vedro
 from scenarios.library import Labels
 
-from ._helpers import (create_gitlab_client_with_transport,
-                       create_mock_queue_manager, create_mr_event,
-                       created_mock_settings)
+from gitlab_queue.webhooks.handlers import MRWebhookHandler
+
+from ._helpers import (
+    create_gitlab_client_with_transport,
+    create_mock_queue_manager,
+    create_mock_settings,
+    create_mr_event,
+)
 
 
 class Scenario(vedro.Scenario):
     subject = "handle merge action cleans up queue"
 
     def given_handler(self):
-        self.settings = created_mock_settings()
+        self.settings = create_mock_settings()
         self.gitlab_client, self.transport = create_gitlab_client_with_transport(
             mr_iid=123,
             state="merged",
             labels=[Labels.MERGE_QUEUE],
         )
         self.queue_manager = create_mock_queue_manager()
+        # MR is in queue (get_queue_item returns non-None)
+        self.queue_manager.get_queue_item = AsyncMock(return_value=MagicMock())
         self.handler = MRWebhookHandler(
             settings=self.settings,
             gitlab_client=self.gitlab_client,

@@ -17,7 +17,7 @@ class Scenario(vedro.Scenario):
     async def given_database_with_recent_and_old_history(self):
         """
         Set up a test database and seed it with one recent and one old history record.
-        
+
         Creates tables in a temporary test database, opens a transactional session, and inserts two history entries:
         - iid=1, status="merged", finished_at = now (UTC) minus 30 minutes (recent)
         - iid=2, status="merged", finished_at = now (UTC) minus 3 hours (old)
@@ -52,9 +52,9 @@ class Scenario(vedro.Scenario):
     def then_only_recent_record_should_be_counted(self):
         """
         Asserts that the repository statistics count only the recent history record.
-        
+
         Raises:
-        	AssertionError: If `self.stats.total_processed` is not 1 or `self.stats.success_count` is not 1.
+                AssertionError: If `self.stats.total_processed` is not 1 or `self.stats.success_count` is not 1.
         """
         assert self.stats.total_processed == 1
         assert self.stats.success_count == 1
@@ -62,7 +62,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Tear down the test database context used by the scenario.
-        
+
         Exits the asynchronous database context manager to release connections and other resources.
         """
         await self._db_ctx.__aexit__(None, None, None)

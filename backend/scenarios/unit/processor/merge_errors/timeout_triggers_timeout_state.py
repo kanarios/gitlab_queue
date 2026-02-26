@@ -1,7 +1,7 @@
-"""Test _process_merge triggers timeout state on TimeoutError.
+"""Test _process_merge triggers merge_failed state on TimeoutError.
 
 When the merge operation exceeds the configured timeout, the processor
-should trigger the timeout transition on the state machine and return
+should trigger the merge_failed transition on the state machine and return
 TIMEOUT result.
 """
 
@@ -22,12 +22,12 @@ from .._helpers import (
 
 
 class Scenario(vedro.Scenario):
-    subject = "process merge triggers timeout state on TimeoutError"
+    subject = "process merge triggers merge_failed state on TimeoutError"
 
     def given_processor_with_merge_timeout(self):
         """
         Set up a mock processor, a queue item in "merging" state, a mock state machine, and a processing context.
-        
+
         Creates:
         - self.processor: mock processor with its queue_manager.get_queue_item returning the prepared queue item.
         - self.queue_item: test queue item with mr_iid=42, state="merging", expected_sha="abc123".
@@ -53,16 +53,16 @@ class Scenario(vedro.Scenario):
     def then_result_is_timeout(self):
         """
         Asserts that the processing result equals ProcessingResult.TIMEOUT.
-        
+
         Raises:
             AssertionError: If self.result is not ProcessingResult.TIMEOUT.
         """
         assert self.result == ProcessingResult.TIMEOUT
 
-    def and_timeout_is_triggered_on_state_machine(self):
+    def and_merge_failed_is_triggered_on_state_machine(self):
         """
-        Asserts that the mocked state machine's trigger_timeout coroutine was awaited exactly once.
-        
-        This verifies that a timeout during processing triggered the timeout transition on the state machine.
+        Asserts that the mocked state machine's trigger_merge_failed coroutine was awaited exactly once.
+
+        Merge timeout now triggers merge_failed (not timeout) for correct notification type.
         """
-        self.mock_sm.trigger_timeout.assert_awaited_once()
+        self.mock_sm.trigger_merge_failed.assert_awaited_once()

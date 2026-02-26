@@ -27,7 +27,7 @@ class Scenario(vedro.Scenario):
     def given_datetime_string_with_utc_suffix(self):
         """
         Set up a datetime string ending with ' UTC' for the scenario.
-        
+
         Assigns "2025-06-15 14:30:00 UTC" to self.dt_string.
         """
         self.dt_string = "2025-06-15 14:30:00 UTC"
@@ -38,7 +38,7 @@ class Scenario(vedro.Scenario):
     def then_result_is_datetime(self):
         """
         Assert that self.result is a datetime.datetime instance.
-        
+
         Raises:
             AssertionError: if self.result is not an instance of datetime.datetime.
         """
@@ -72,7 +72,7 @@ class Scenario2(vedro.Scenario):
     def then_result_is_none(self):
         """
         Assert that the scenario result is None.
-        
+
         Raises:
             AssertionError: If `self.result` is not `None`.
         """
@@ -94,7 +94,7 @@ class Scenario3(vedro.Scenario):
     def then_result_is_none(self):
         """
         Assert that the scenario result is None.
-        
+
         Raises:
             AssertionError: If `self.result` is not `None`.
         """
@@ -107,7 +107,7 @@ class Scenario4(vedro.Scenario):
     def given_queue_item_without_started_at(self):
         """
         Prepare a QueueItem instance without a started_at timestamp and assign it to self.item.
-        
+
         The created QueueItem has mr_iid=1, title "Test", author_name "Alice", author_username "alice",
         target_branch "main", state "queued", queued_at set to 2025-01-01 UTC, and started_at set to None.
         """
@@ -136,7 +136,7 @@ class Scenario4(vedro.Scenario):
     def and_queued_at_is_iso_string(self):
         """
         Asserts that the serialized `queued_at` field is an ISO-formatted datetime string containing the date 2025-01-01.
-        
+
         Raises:
             AssertionError: If `self.result["queued_at"]` is not a string or does not contain "2025-01-01".
         """
@@ -150,7 +150,7 @@ class Scenario5(vedro.Scenario):
     def given_labels_as_dict_list_with_name_key(self):
         """
         Set the scenario's labels to a list of label dictionaries using the 'name' key.
-        
+
         Each dictionary represents a label; this step assigns [{"name": "bug"}, {"name": "feature"}] to self.labels.
         """
         self.labels = [{"name": "bug"}, {"name": "feature"}]
@@ -184,7 +184,7 @@ class Scenario7(vedro.Scenario):
     def given_empty_labels(self):
         """
         Set up an empty labels list for the scenario.
-        
+
         Assigns an empty list to self.labels to simulate a case with no labels.
         """
         self.labels = []

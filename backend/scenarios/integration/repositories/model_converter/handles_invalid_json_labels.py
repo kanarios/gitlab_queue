@@ -14,7 +14,7 @@ class Scenario(vedro.Scenario):
     def given_mr_model_with_invalid_json_labels(self):
         """
         Create and store a test merge request model whose labels field contains an invalid JSON string.
-        
+
         The created model is assigned to `self.mr` and has `iid=42` and `labels="not json"`.
         """
         self.mr = create_test_mr_model(iid=42, labels="not json")
@@ -28,7 +28,7 @@ class Scenario(vedro.Scenario):
     def then_labels_should_be_empty_list(self):
         """
         Verify that the converted item's labels are an empty list.
-        
+
         Asserts that self.item.labels is equal to [].
         """
         assert self.item.labels == []
@@ -36,7 +36,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Performs scenario cleanup after execution.
-        
+
         This lifecycle hook is implemented as a no-op and exists to allow asynchronous cleanup logic to be added later if needed.
         """
         pass

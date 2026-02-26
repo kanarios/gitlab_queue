@@ -28,7 +28,7 @@ class Scenario(vedro.Scenario):
     def given_processor_with_merge_conflict_and_notifier(self):
         """
         Prepare a mock processor that simulates a merge conflict and create a processing context with a mock state machine.
-        
+
         Sets:
         - self.processor: a mock processor whose queue_manager.get_queue_item returns a test queue item (mr_iid=42, state="merging", expected_sha="abc123").
         - self.processor.gitlab_client.merge_mr: raises GitLabConflictError("Merge conflict detected", status_code=409) when called.
@@ -50,7 +50,7 @@ class Scenario(vedro.Scenario):
     async def when_process_merge_encounters_conflict(self):
         """
         Invoke the processor's _process_merge with the prepared context and store the outcome on self.result.
-        
+
         This step runs the merge processing coroutine using self.ctx and assigns its result to self.result for subsequent assertions.
         """
         self.result = await self.processor._process_merge(self.ctx)
@@ -61,7 +61,7 @@ class Scenario(vedro.Scenario):
     def and_trigger_merge_failed_is_called_on_state_machine(self):
         """
         Asserts that the state machine's trigger_merge_failed coroutine was awaited exactly once.
-        
+
         Verifies that the processor notified the state machine of a merge failure.
         """
         self.mock_sm.trigger_merge_failed.assert_awaited_once()
@@ -69,7 +69,7 @@ class Scenario(vedro.Scenario):
     def and_error_message_is_passed_to_state_machine(self):
         """
         Asserts that the state machine was passed an `error_message` containing the merge conflict text.
-        
+
         Checks that the mocked state's `trigger_merge_failed` call included an `error_message` keyword argument and that the message contains the substring "Merge conflict".
         """
         call_kwargs = self.mock_sm.trigger_merge_failed.call_args.kwargs

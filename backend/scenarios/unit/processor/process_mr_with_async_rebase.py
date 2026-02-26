@@ -9,7 +9,6 @@ from __future__ import annotations
 import jj
 import vedro
 from jj.mock import mocked
-from scenarios.contexts.jj_gitlab_mock import get_mock_url
 
 from gitlab_queue.clients.gitlab import GitLabClient
 from gitlab_queue.config import Settings
@@ -18,6 +17,7 @@ from gitlab_queue.core.processor import MergeProcessor, ProcessingResult
 from gitlab_queue.core.queue import QueueManager
 from gitlab_queue.db.database import Database
 from gitlab_queue.models.mr import Author, MergeRequest
+from scenarios.contexts.jj_gitlab_mock import get_mock_url
 
 
 class Scenario(vedro.Scenario):
@@ -98,6 +98,9 @@ class Scenario(vedro.Scenario):
         self.get_notes_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/43/notes")
         self.get_notes_response = jj.Response(status=200, json=[])
 
+        self.project_matcher = jj.match("GET", "/api/v4/projects/123")
+        self.project_response = jj.Response(status=200, json={"id": 123, "web_url": f"{self.mock_url}/test/project"})
+
         self.settings = Settings(
             gitlab_url=self.mock_url,
             gitlab_project_id=123,
@@ -113,6 +116,7 @@ class Scenario(vedro.Scenario):
 
     async def when_processor_handles_async_rebase(self):
         async with (
+            mocked(self.project_matcher, self.project_response),
             mocked(self.get_mr_matcher, self.get_mr_response),
             mocked(self.rebase_init_matcher, self.rebase_init_response) as self.rebase_mock,
             mocked(self.rebase_check_matcher, self.rebase_check_response),
@@ -140,7 +144,7 @@ class Scenario(vedro.Scenario):
     async def then_mr_should_be_successfully_processed(self):
         """
         Assert that the processed merge request completed successfully.
-        
+
         Verifies that the processor produced ProcessingResult.SUCCESS for the merge request handled in the scenario.
         """
         assert self.result == ProcessingResult.SUCCESS
@@ -148,7 +152,7 @@ class Scenario(vedro.Scenario):
     async def and_rebase_should_be_initiated(self):
         """
         Asserts that exactly one rebase operation was initiated during processing.
-        
+
         This validates that the processor initiated a single rebase action by checking the recorded rebase history length equals one.
         """
         assert len(self.rebase_history) == 1
@@ -156,7 +160,7 @@ class Scenario(vedro.Scenario):
     async def and_merge_should_be_called(self):
         """
         Asserts that exactly one merge operation was invoked during the scenario.
-        
+
         This verification ensures the processor called the merge endpoint one time.
         """
         assert len(self.merge_history) == 1
@@ -164,7 +168,7 @@ class Scenario(vedro.Scenario):
     async def and_final_state_should_be_merged(self):
         """
         Assert that the merge request with IID 43 is in the "merged" state.
-        
+
         Raises:
             AssertionError: If the MR's status is not "merged".
         """
@@ -174,7 +178,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Close the scenario's database connection.
-        
+
         Intended for test cleanup to release the in-memory database resources used by the scenario.
         """
         await self.db.close()

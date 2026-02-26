@@ -20,7 +20,7 @@ class Scenario(vedro.Scenario):
     def given_fresh_database(self):
         """
         Prepare a fresh temporary SQLite database for the scenario.
-        
+
         Sets the following attributes on self:
         - _tmp_dir: a tempfile.TemporaryDirectory instance managing the temp directory.
         - _db_path: a pathlib.Path pointing to the database file inside the temp directory.
@@ -33,7 +33,7 @@ class Scenario(vedro.Scenario):
     async def when_pending_migrations_are_checked(self):
         """
         Fetch pending migrations and the current migration revision for the scenario's database.
-        
+
         Stores the list of pending migration identifiers on self.pending and the current revision (or None) on self.current_revision.
         """
         self.pending = await get_pending_migrations(self._db_url)
@@ -48,7 +48,7 @@ class Scenario(vedro.Scenario):
     def and_current_revision_should_be_none(self):
         """
         Asserts that the database has no current migration revision.
-        
+
         Raises:
             AssertionError: If self.current_revision is not None.
         """
@@ -57,7 +57,7 @@ class Scenario(vedro.Scenario):
     def and_pending_should_be_a_list_of_strings(self):
         """
         Asserts that self.pending is a list where every item is a string.
-        
+
         Raises:
             AssertionError: if self.pending is not a list or any element is not a `str`.
         """
@@ -68,7 +68,7 @@ class Scenario(vedro.Scenario):
     def do_cleanup(self):
         """
         Remove temporary directory created for the scenario.
-        
+
         Performs cleanup of filesystem resources allocated during the scenario by removing the temporary directory.
         """
         self._tmp_dir.cleanup()
@@ -80,7 +80,7 @@ class ScenarioFullyMigrated(vedro.Scenario):
     def given_fully_migrated_database(self):
         """
         Prepare a temporary SQLite database file and store its path and connection URL on the instance for use in tests.
-        
+
         Sets:
             _tmp_dir (tempfile.TemporaryDirectory): Temporary directory holding the database file.
             _db_path (Path): Filesystem path to the temporary SQLite database file.
@@ -93,7 +93,7 @@ class ScenarioFullyMigrated(vedro.Scenario):
     async def when_migrations_are_run_and_then_checked(self):
         """
         Apply all database migrations and record remaining pending migrations on the scenario.
-        
+
         Stores the list of pending migration identifiers in self.pending.
         """
         await run_migrations(self._db_url)
@@ -102,7 +102,7 @@ class ScenarioFullyMigrated(vedro.Scenario):
     def then_pending_should_be_empty(self):
         """
         Asserts that there are no pending database migrations.
-        
+
         Raises an AssertionError if the stored `self.pending` list has a length greater than zero.
         """
         assert len(self.pending) == 0
@@ -110,7 +110,7 @@ class ScenarioFullyMigrated(vedro.Scenario):
     def do_cleanup(self):
         """
         Remove temporary directory created for the scenario.
-        
+
         Performs cleanup of filesystem resources allocated during the scenario by removing the temporary directory.
         """
         self._tmp_dir.cleanup()

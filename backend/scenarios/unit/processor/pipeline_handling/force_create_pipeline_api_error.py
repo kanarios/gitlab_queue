@@ -30,7 +30,7 @@ class Scenario(vedro.Scenario):
     def given_processor_with_create_pipeline_failing(self):
         """
         Prepare a mock processor and context where forcing a pipeline creation fails with a GitLabAPIError.
-        
+
         Configures:
         - a test queue item (mr_iid=42) and an old failed pipeline (id=100, sha="sha_old");
         - gitlab client to report rebase complete and to return an MR with sha "sha_new";

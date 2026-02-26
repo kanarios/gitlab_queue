@@ -373,6 +373,7 @@ async def _route_webhook_event(
             settings=state.settings,
             gitlab_client=state.gitlab_client,
             queue_manager=state.queue_manager,
+            notifier=state.notifier,
             position_notifier=state.position_notifier,
             websocket_manager=state.websocket_manager,
         )

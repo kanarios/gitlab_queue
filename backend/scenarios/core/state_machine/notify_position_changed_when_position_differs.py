@@ -33,7 +33,7 @@ class Scenario(vedro.Scenario):
     def and_notifier_should_be_called_with_position_changed_template(self):
         """
         Assert that notifier.notify was awaited with the MR IID 123 and the "position_changed" template.
-        
+
         Verifies that the notifier's notify method was awaited and that its first positional argument is 123 (MR IID) and its second positional argument is "position_changed".
         """
         self.notifier.notify.assert_awaited()

@@ -23,7 +23,7 @@ class Scenario(vedro.Scenario):
     def given_processor_with_stale_mr_and_failing_state_machine(self):
         """
         Prepare a mock processor configured to report a single stale merge request.
-        
+
         Sets self.processor to a mock processor, creates self.stale_item representing MR IID 42 in state "queued" with stale_warning_sent set to False, and makes processor.queue_manager.get_stale_mrs return a list containing that item.
         """
         self.processor = create_mock_processor()
@@ -36,7 +36,7 @@ class Scenario(vedro.Scenario):
     async def when_check_stale_mrs_is_called(self):
         """
         Invokes the processor's stale-MR check while mocking state machine creation to raise an exception and records any exception that propagates.
-        
+
         The test patches create_state_machine_for_mr to raise Exception("State machine creation failed"), calls the processor's _check_stale_mrs, and stores any raised exception on self.raised (None if no exception propagated).
         """
         self.raised = None
@@ -53,7 +53,7 @@ class Scenario(vedro.Scenario):
     def then_no_error_is_raised(self):
         """
         Asserts that no exception was raised during the stale MR check.
-        
+
         Raises an AssertionError if self.raised is not None.
         """
         assert self.raised is None

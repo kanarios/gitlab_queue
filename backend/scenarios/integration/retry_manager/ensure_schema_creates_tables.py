@@ -14,7 +14,7 @@ class Scenario(vedro.Scenario):
     async def given_retry_manager(self):
         """
         Initialize a test database context, enter it, and create a retry manager bound to that database.
-        
+
         Sets:
         - self._db_ctx: the test database async context manager
         - self.db: the entered database instance
@@ -33,7 +33,7 @@ class Scenario(vedro.Scenario):
     async def then_tables_should_exist(self):
         """
         Verifies that the retry and DLQ tables accept inserts by adding a payload to the retry queue.
-        
+
         Adds a test payload with event_type "merge_request" and error "test error", then asserts the returned retry_id is greater than 0 indicating successful insertion.
         """
         payload = create_test_payload()
@@ -47,7 +47,7 @@ class Scenario(vedro.Scenario):
     async def and_ensure_schema_should_be_idempotent(self):
         """
         Verifies that calling ensure_schema a second time remains idempotent.
-        
+
         Calls the manager's ensure_schema again, inserts a test payload into the retry queue, and asserts that the insertion returns a retry_id greater than 0.
         """
         await self.manager.ensure_schema()
@@ -61,7 +61,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Close and clean up the asynchronous test database context used by the scenario.
-        
+
         This exits the database context manager to release connections and other resources acquired for the test.
         """
         await self._db_ctx.__aexit__(None, None, None)

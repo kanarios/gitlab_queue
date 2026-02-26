@@ -23,10 +23,7 @@ class Scenario(vedro.Scenario):
 
     async def given_queue_with_mr_at_specified_position(self):
         self.mr_iid = 100 + self.position
-        queue_items = [
-            MockQueueItem(mr_iid=100 + i)
-            for i in range(1, self.position + 1)
-        ]
+        queue_items = [MockQueueItem(mr_iid=100 + i) for i in range(1, self.position + 1)]
         self.notifier = create_mock_notifier()
         self.queue_manager = create_mock_queue_manager(queue_items)
         self.position_notifier = create_position_notifier(

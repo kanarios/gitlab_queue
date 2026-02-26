@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from gitlab_queue.core.polling import PollStatus, PollingConfig
+from gitlab_queue.core.polling import PollingConfig, PollStatus
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -82,9 +82,7 @@ def create_counting_poll_fn(
     return poll_fn, counter
 
 
-def create_instant_sleep_fn() -> (
-    tuple[Callable[[float, asyncio.Event], Awaitable[bool]], list[float]]
-):
+def create_instant_sleep_fn() -> tuple[Callable[[float, asyncio.Event], Awaitable[bool]], list[float]]:
     """Create sleep_fn that completes instantly.
 
     Returns:
@@ -103,7 +101,7 @@ def create_instant_sleep_fn() -> (
 def create_shutdown_sleep_fn() -> Callable[[float, asyncio.Event], Awaitable[bool]]:
     """Create sleep_fn that simulates shutdown interruption."""
 
-    async def sleep_fn(seconds: float, _shutdown_event: asyncio.Event) -> bool:
+    async def sleep_fn(_seconds: float, _shutdown_event: asyncio.Event) -> bool:
         return False
 
     return sleep_fn

@@ -10,8 +10,8 @@ from ._helpers import (
     create_gitlab_client_with_transport,
     create_mock_notifier,
     create_mock_queue_manager,
+    create_mock_settings,
     create_pipeline_event,
-    created_mock_settings,
 )
 
 
@@ -19,7 +19,7 @@ class Scenario(vedro.Scenario):
     subject = "ignore pipeline for MR not in queue"
 
     def given_handler_and_event(self):
-        self.settings = created_mock_settings()
+        self.settings = create_mock_settings()
         self.gitlab_client, self.transport = create_gitlab_client_with_transport()
         self.queue_manager = create_mock_queue_manager()
         self.queue_manager.get_queue_item = AsyncMock(return_value=None)

@@ -18,7 +18,7 @@ class Scenario(vedro.Scenario):
     async def given_initialized_database(self):
         """
         Initialize an in-memory test database, enter its async context, and create required tables.
-        
+
         This stores the async database context manager on `self._db_ctx` and the opened database handle on `self.db` for use by subsequent test steps.
         """
         self._db_ctx = initialized_test_database()
@@ -28,7 +28,7 @@ class Scenario(vedro.Scenario):
     async def when_mr_is_added_via_uow_with_auto_commit(self):
         """
         Adds a test merge request to the database using a UnitOfWork configured to auto-commit on success.
-        
+
         Creates a merge request model with iid=42 and title "UoW Test MR" and adds it to the unit's merge_requests repository; the UnitOfWork's auto-commit will persist the change when the context is exited if no errors occur.
         """
         async with UnitOfWork(self.db, auto_commit=True) as uow:
@@ -38,7 +38,7 @@ class Scenario(vedro.Scenario):
     async def then_mr_should_be_persisted(self):
         """
         Verify that a merge request with iid 42 was persisted and has the expected title.
-        
+
         Asserts that the repository returns a MergeRequest with iid 42 and that its title equals "UoW Test MR".
         """
         async with self.db.session() as session:
@@ -50,7 +50,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Release the initialized test database context and free associated resources.
-        
+
         Closes the asynchronous database context manager obtained during setup so the test database connection and related resources are cleaned up.
         """
         await self._db_ctx.__aexit__(None, None, None)

@@ -16,7 +16,7 @@ class Scenario(vedro.Scenario):
     def given_mr_with_same_position_but_different_total(self):
         """
         Set up a scenario where merge request 101 retains its position but the queue total changes.
-        
+
         Initializes:
         - positions_before mapping MR 101 to position 1
         - old_total set to 1
@@ -39,7 +39,7 @@ class Scenario(vedro.Scenario):
     async def when_notify_position_changes_is_called(self):
         """
         Invoke the position notifier to detect and record position change notifications.
-        
+
         Calls self.position_notifier._notify_position_changes with the test's configured
         excluded_mr_iid, positions_before, old_total, log_context, and is_hotfix values and
         stores the resulting notified count on self.notified_count.
@@ -61,16 +61,16 @@ class Scenario(vedro.Scenario):
     def and_notified_count_is_1(self):
         """
         Asserts that exactly one notification was recorded.
-        
+
         Raises:
-        	AssertionError: If the recorded notified_count is not 1.
+                AssertionError: If the recorded notified_count is not 1.
         """
         assert self.notified_count == 1
 
     def and_mr_102_is_not_notified(self):
         """
         Asserts that MR with IID 102 was not passed to the notifier.
-        
+
         Checks the notifier's recorded notify calls and raises an AssertionError if 102 appears among the notified MR IIDs.
         """
         calls = self.notifier.notify.call_args_list
@@ -80,7 +80,7 @@ class Scenario(vedro.Scenario):
     def and_notification_uses_total_changed_template(self):
         """
         Asserts that the first notification used the "total_changed" template.
-        
+
         Verifies the notifier's first call passed "total_changed" as the template argument.
         """
         call = self.notifier.notify.call_args_list[0]
@@ -90,7 +90,7 @@ class Scenario(vedro.Scenario):
     def and_old_total_is_passed_in_kwargs(self):
         """
         Asserts that the notifier call includes the original total under the 'old_total' keyword.
-        
+
         Checks the first recorded notify call's kwargs and verifies that 'old_total' equals 1.
         """
         call = self.notifier.notify.call_args_list[0]

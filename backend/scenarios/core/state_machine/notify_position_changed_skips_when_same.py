@@ -35,7 +35,7 @@ class Scenario(vedro.Scenario):
     def then_notifier_should_not_be_called(self):
         """
         Asserts that the notifier's `notify` coroutine was not awaited.
-        
+
         Raises:
             AssertionError: If `notifier.notify` was awaited.
         """

@@ -37,7 +37,7 @@ class Scenario(vedro.Scenario):
     def then_broadcast_should_contain_completion_info(self):
         """
         Assert that the last broadcast contains Merge Request completion information.
-        
+
         Verifies that send_json was awaited exactly once and that the payload has:
         - "type" equal to "mr:completed"
         - "data.iid" equal to 42

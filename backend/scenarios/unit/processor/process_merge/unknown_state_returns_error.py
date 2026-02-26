@@ -24,7 +24,7 @@ class Scenario(vedro.Scenario):
     def given_processor_with_mr_in_unknown_state(self):
         """
         Set up a mock processor, a state machine whose current state id is "unknown_state", and a processing context for merge request 42.
-        
+
         Assigns:
             self.processor: a mock processor
             self.mock_sm: the mock state machine with current_state.id == "unknown_state"
@@ -46,7 +46,7 @@ class Scenario(vedro.Scenario):
     def then_result_is_error(self):
         """
         Asserts that the workflow execution result equals ProcessingResult.ERROR.
-        
+
         Verifies that _execute_workflow produced an error result when the state machine was in an unknown state.
         """
         assert self.result == ProcessingResult.ERROR

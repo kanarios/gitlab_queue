@@ -5,19 +5,18 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 from d42 import fake
-
-from gitlab_queue.clients.gitlab import GitLabClient
-from gitlab_queue.models.events import (LabelChanges, MergeRequestAttributes,
-                                        MergeRequestEvent)
-from gitlab_queue.models.mr import Author, MergeRequest
 from scenarios.contexts.gitlab_client_factory import created_test_settings
 from scenarios.library import Labels, MRState
 from scenarios.schemas import AuthorSchema, MergeRequestSchema
 from scenarios.transports import GitLabMockTransport
 from scenarios.transports.responses import mr_response
 
+from gitlab_queue.clients.gitlab import GitLabClient
+from gitlab_queue.models.events import LabelChanges, MergeRequestAttributes, MergeRequestEvent
+from gitlab_queue.models.mr import Author, MergeRequest
 
-def created_mock_settings(queue_label: str = Labels.MERGE_QUEUE, hotfix_label: str = Labels.HOTFIX):
+
+def create_mock_settings(queue_label: str = Labels.MERGE_QUEUE, hotfix_label: str = Labels.HOTFIX):
     """Create mock settings."""
     settings = MagicMock()
     settings.queue_label = queue_label
@@ -26,7 +25,7 @@ def created_mock_settings(queue_label: str = Labels.MERGE_QUEUE, hotfix_label: s
 
 
 # Alias for backward compatibility
-create_mock_settings = created_mock_settings
+created_mock_settings = create_mock_settings
 
 
 def create_mock_gitlab_client():

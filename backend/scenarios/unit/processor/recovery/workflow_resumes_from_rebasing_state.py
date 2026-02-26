@@ -26,7 +26,7 @@ class Scenario(vedro.Scenario):
     def given_processor_with_mr_in_rebasing_state(self):
         """
         Prepare a mock processor and a processing context whose state machine is in the "rebasing" state.
-        
+
         Sets:
             self.processor: mock processor instance.
             self.mock_sm: mock state machine with current_state.id == "rebasing".
@@ -42,7 +42,7 @@ class Scenario(vedro.Scenario):
     async def when_execute_workflow_is_called(self):
         """
         Execute the processor workflow with key steps stubbed to succeed and store the outcome in self.result.
-        
+
         Patches the processor's _wait_for_rebase, _wait_for_pipeline, and _process_merge coroutines to return ProcessingResult.SUCCESS, then awaits _execute_workflow using self.ctx and assigns the returned ProcessingResult to self.result.
         """
         with (
@@ -70,7 +70,7 @@ class Scenario(vedro.Scenario):
     def then_result_is_success(self):
         """
         Asserts that the scenario result indicates successful processing.
-        
+
         Raises:
             AssertionError: If self.result is not ProcessingResult.SUCCESS.
         """

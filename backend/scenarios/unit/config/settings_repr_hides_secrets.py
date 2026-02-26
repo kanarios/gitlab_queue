@@ -13,7 +13,7 @@ class Scenario(vedro.Scenario):
     def given_settings_with_secrets(self):
         """
         Prepare a Settings instance populated with secret values for testing representation masking.
-        
+
         Creates sample secret strings for a GitLab token, a JWT secret, and a webhook secret, then constructs a Settings object using those values along with a GitLab URL and project ID and stores it on the scenario instance for later assertions.
         """
         self.token_value = "glpat-super-secret-token"
@@ -30,7 +30,7 @@ class Scenario(vedro.Scenario):
     def when_repr_is_called(self):
         """
         Capture and store the string representation of the Settings instance.
-        
+
         Sets self.result to the value of repr(self.settings).
         """
         self.result = repr(self.settings)
@@ -41,7 +41,7 @@ class Scenario(vedro.Scenario):
     def and_token_value_is_not_in_result(self):
         """
         Asserts that the original GitLab token value does not appear in the stored repr result.
-        
+
         This verifies that the sensitive gitlab token is masked in the Settings string representation.
         """
         assert self.token_value not in self.result
@@ -49,7 +49,7 @@ class Scenario(vedro.Scenario):
     def and_jwt_value_is_not_in_result(self):
         """
         Asserts that the JWT secret value does not appear in the stored representation result.
-        
+
         This verifies that sensitive JWT content is masked or omitted from repr(self.settings).
         """
         assert self.jwt_value not in self.result

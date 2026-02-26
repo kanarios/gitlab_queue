@@ -23,7 +23,7 @@ class Scenario(vedro.Scenario):
     def given_processor_with_running_pipeline(self):
         """
         Set up a mock processor, a mock state machine, a processing context, and a pipeline with status "running" for the test scenario.
-        
+
         This initializes the following attributes on self:
         - processor: a mock processor instance
         - mock_sm: a mock state machine
@@ -40,7 +40,7 @@ class Scenario(vedro.Scenario):
     async def when_handle_pipeline_status_is_called(self):
         """
         Calls the processor's _handle_pipeline_status with the prepared context, state machine, and pipeline and stores the outcome in self.result.
-        
+
         This invokes the handler with retry_count=0 and max_retries=1 to capture the handler's response for a pipeline in the "running" state.
         """
         self.result = await self.processor._handle_pipeline_status(
@@ -54,7 +54,7 @@ class Scenario(vedro.Scenario):
     def then_result_is_none_indicating_continue_polling(self):
         """
         Assert that the handler returned None to indicate polling should continue.
-        
+
         Raises:
             AssertionError: If `self.result` is not `None`.
         """

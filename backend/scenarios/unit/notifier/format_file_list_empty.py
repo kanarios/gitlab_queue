@@ -13,7 +13,7 @@ class Scenario(vedro.Scenario):
     def given_notifier_and_empty_file_list(self):
         """
         Create a test notifier and initialize an empty file list for the scenario.
-        
+
         Creates a test notifier via create_test_notifier() and assigns an empty list to self.files.
         """
         self.notifier = create_test_notifier()

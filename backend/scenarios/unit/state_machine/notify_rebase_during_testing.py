@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock
 
 import vedro
 
@@ -14,7 +14,7 @@ class Scenario(vedro.Scenario):
 
     def given_state_machine_in_testing_state(self):
         self.notifier = create_mock_notifier()
-        self.notifier.build_pipeline_url = MagicMock(return_value="https://gitlab.com/pipeline/200")
+        self.notifier.build_pipeline_url = AsyncMock(return_value="https://gitlab.com/pipeline/200")
         self.queue_manager = create_mock_queue_manager()
         self.sm = create_state_machine(
             notifier=self.notifier,

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import jj
 from jj.mock import mocked
-from scenarios.contexts.jj_gitlab_mock import get_mock_url
 from vedro import given, scenario, then, when
 
 from gitlab_queue.clients.gitlab import GitLabClient
@@ -21,6 +20,8 @@ from gitlab_queue.core.processor import MergeProcessor, ProcessingResult
 from gitlab_queue.core.queue import QueueManager
 from gitlab_queue.db.database import Database
 from gitlab_queue.models.mr import Author, MergeRequest
+from scenarios.contexts.jj_gitlab_mock import get_mock_url
+from scenarios.mocks.gitlab import make_project_mock
 
 
 @scenario()
@@ -85,6 +86,8 @@ async def process_mr_with_rebase_timeout():
         get_notes_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/60/notes")
         get_notes_response = jj.Response(status=200, json=[])
 
+        project_matcher, project_response = make_project_mock(mock_url)
+
         settings = Settings(
             gitlab_url=mock_url,
             gitlab_project_id=123,
@@ -99,6 +102,7 @@ async def process_mr_with_rebase_timeout():
         )
 
     async with (
+        mocked(project_matcher, project_response),
         mocked(get_mr_matcher, get_mr_response),
         mocked(rebase_matcher, rebase_response) as rebase_mock,
         mocked(status_matcher, status_response),
@@ -204,6 +208,8 @@ async def process_mr_with_pipeline_timeout():
         get_notes_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/61/notes")
         get_notes_response = jj.Response(status=200, json=[])
 
+        project_matcher, project_response = make_project_mock(mock_url)
+
         settings = Settings(
             gitlab_url=mock_url,
             gitlab_project_id=123,
@@ -218,6 +224,7 @@ async def process_mr_with_pipeline_timeout():
         )
 
     async with (
+        mocked(project_matcher, project_response),
         mocked(get_mr_matcher, get_mr_response),
         mocked(rebase_matcher, rebase_response),
         mocked(pipelines_matcher, pipelines_response) as pipelines_mock,
@@ -323,6 +330,8 @@ async def process_mr_with_merge_timeout():
         get_notes_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/62/notes")
         get_notes_response = jj.Response(status=200, json=[])
 
+        project_matcher, project_response = make_project_mock(mock_url)
+
         settings = Settings(
             gitlab_url=mock_url,
             gitlab_project_id=123,
@@ -338,6 +347,7 @@ async def process_mr_with_merge_timeout():
     # Since JJ mock doesn't support delaying responses easily,
     # we'll test the timeout logic differently
     async with (
+        mocked(project_matcher, project_response),
         mocked(get_mr_matcher, get_mr_response),
         mocked(rebase_matcher, rebase_response),
         mocked(pipelines_matcher, pipelines_response),
@@ -388,6 +398,7 @@ async def process_mr_with_merge_timeout():
             # State should indicate failure
             assert mr_state["status"] in (
                 "failed",
+                "timeout",
                 "testing",
                 "merging",
             ), f"MR should be in failed or intermediate state, got {mr_state}"
@@ -482,6 +493,8 @@ async def process_mr_with_label_removed_during_timeout():
         get_notes_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/63/notes")
         get_notes_response = jj.Response(status=200, json=[])
 
+        project_matcher, project_response = make_project_mock(mock_url)
+
         settings = Settings(
             gitlab_url=mock_url,
             gitlab_project_id=123,
@@ -496,6 +509,7 @@ async def process_mr_with_label_removed_during_timeout():
         )
 
     async with (
+        mocked(project_matcher, project_response),
         mocked(get_mr_matcher_1, get_mr_response_1),
         mocked(rebase_matcher, rebase_response),
         mocked(pipelines_matcher, pipelines_response),

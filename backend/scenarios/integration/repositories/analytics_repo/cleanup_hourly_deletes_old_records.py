@@ -20,7 +20,7 @@ class Scenario(vedro.Scenario):
     async def given_database_with_old_and_recent_hourly(self):
         """
         Prepare a test database and seed it with one old hourly record and one recent hourly record.
-        
+
         Creates an initialized test database, ensures tables exist, and inserts two hourly entries:
         one timestamped 60 days ago (rounded to the hour) with queue_depth 3, and one for the current hour
         (rounded to the hour) with queue_depth 7. Intended as setup for tests that verify cleanup behavior.
@@ -48,7 +48,7 @@ class Scenario(vedro.Scenario):
     async def when_cleanup_hourly_is_called(self):
         """
         Calls AnalyticsRepository.cleanup_hourly with retention_days=1 and stores the number of deleted hourly records in self.deleted_count.
-        
+
         This step runs the cleanup inside a database transaction.
         """
         async with self.db.transaction() as session:
@@ -61,7 +61,7 @@ class Scenario(vedro.Scenario):
     async def and_recent_record_should_remain(self):
         """
         Verify the recent hourly metric with queue_depth 7 is preserved and exactly one hourly entry exists.
-        
+
         Fetch metrics for queue_depth 7 and assert that there is exactly one entry in metrics.hourly_trend and that its "queue_depth" equals 7.
         """
         async with self.db.session() as session:
@@ -73,7 +73,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Close the test database context.
-        
+
         Exit the internal context manager to release database resources and complete teardown.
         """
         await self._db_ctx.__aexit__(None, None, None)

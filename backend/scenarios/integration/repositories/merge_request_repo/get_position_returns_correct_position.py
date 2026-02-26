@@ -17,12 +17,12 @@ class Scenario(vedro.Scenario):
     async def given_database_with_ordered_mrs(self):
         """
         Set up an in-memory test database, create required tables, and seed three queued merge requests with ordered queued_at timestamps.
-        
+
         Initializes self._db_ctx and self.db, creates database tables, and inserts three merge requests:
         - iid=1 queued at now minus 30 minutes
         - iid=2 queued at now minus 20 minutes
         - iid=3 queued at now minus 10 minutes
-        
+
         The seeded `queued_at` values are stored as ISO-formatted timestamps.
         """
         self._db_ctx = initialized_test_database()
@@ -53,7 +53,7 @@ class Scenario(vedro.Scenario):
     async def when_get_position_is_called_for_second_mr(self):
         """
         Invoke MergeRequestRepository.get_position for the merge request with iid 2 and store the returned 1-indexed position on self.position.
-        
+
         This step opens a database session, constructs the repository, calls get_position(2), and assigns the result to self.position.
         """
         async with self.db.session() as session:
@@ -69,7 +69,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Exit the test database context and release its resources.
-        
+
         Exits the underlying asynchronous context manager for the test database, ensuring connections, transactions, and other resources are properly closed.
         """
         await self._db_ctx.__aexit__(None, None, None)

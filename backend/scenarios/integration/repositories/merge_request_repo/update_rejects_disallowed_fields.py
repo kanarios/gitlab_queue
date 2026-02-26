@@ -15,7 +15,7 @@ class Scenario(vedro.Scenario):
     async def given_database_with_mr(self):
         """
         Set up an initialized test database, create required tables, and seed it with a merge request (iid 42, title "Original Title").
-        
+
         This method initializes the test database context, opens the database connection, creates the schema, and inserts a seeded merge request used by subsequent steps in the scenario.
         """
         self._db_ctx = initialized_test_database()
@@ -28,7 +28,7 @@ class Scenario(vedro.Scenario):
     async def when_update_is_called_with_disallowed_field(self):
         """
         Calls the repository update for IID 42 with a disallowed field (title) and stores the result in self.updated.
-        
+
         Used to verify whether the repository rejects updates to disallowed fields.
         """
         async with self.db.transaction() as session:
@@ -38,7 +38,7 @@ class Scenario(vedro.Scenario):
     def then_update_should_return_true(self):
         """
         Asserts that the repository update operation reported success.
-        
+
         Raises:
             AssertionError: If the recorded update result is not `True`.
         """
@@ -47,7 +47,7 @@ class Scenario(vedro.Scenario):
     async def and_title_should_remain_unchanged(self):
         """
         Verify that the merge request's title remains "Original Title" after an update attempt that included a disallowed title change.
-        
+
         Raises:
             AssertionError: If the merge request is not found or its title is not "Original Title"; the message includes the actual title when different.
         """
@@ -60,7 +60,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Release the initialized test database context and clean up its resources.
-        
+
         This exits the asynchronous database context manager created for the scenario, ensuring connections and temporary state are closed and cleaned up.
         """
         await self._db_ctx.__aexit__(None, None, None)

@@ -23,7 +23,7 @@ def create_mock_notifier() -> MagicMock:
     notifier = MagicMock()
     notifier.notify = AsyncMock()
     notifier.remove_queue_label = AsyncMock()
-    notifier.build_pipeline_url = MagicMock(return_value="https://gitlab.com/pipeline/123")
+    notifier.build_pipeline_url = AsyncMock(return_value="https://gitlab.com/pipeline/123")
     return notifier
 
 

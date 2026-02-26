@@ -16,7 +16,7 @@ from gitlab_queue.models.events import PipelineAttributes, PipelineEvent
 from gitlab_queue.models.queue_item import QueueItem
 
 
-def created_mock_settings():
+def create_mock_settings():
     """Create mock settings."""
     settings = MagicMock()
     settings.queue_label = Labels.MERGE_QUEUE
@@ -27,7 +27,7 @@ def created_mock_settings():
 
 
 # Alias for backward compatibility
-create_mock_settings = created_mock_settings
+created_mock_settings = create_mock_settings
 
 
 def create_mock_gitlab_client():

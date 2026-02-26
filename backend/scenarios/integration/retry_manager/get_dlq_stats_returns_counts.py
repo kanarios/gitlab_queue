@@ -16,7 +16,7 @@ class Scenario(vedro.Scenario):
     async def given_dlq_entries_of_mixed_types(self):
         """
         Populate the test database and retry manager with failed DLQ entries of mixed event types for use in the scenario.
-        
+
         Creates a test database context and retry manager (configured with max attempts = 1 and zero base delay), ensures schema exists, adds two failed "merge_request" entries and one failed "pipeline" entry, and leaves the manager and DB context available on the test instance for later steps.
         """
         self._db_ctx = initialized_test_database()
@@ -54,16 +54,16 @@ class Scenario(vedro.Scenario):
     def then_stats_should_be_dlq_stats_instance(self):
         """
         Asserts that the fetched DLQ statistics object is an instance of DLQStats.
-        
+
         Raises:
-        	AssertionError: If self.stats is not an instance of DLQStats.
+                AssertionError: If self.stats is not an instance of DLQStats.
         """
         assert isinstance(self.stats, DLQStats)
 
     def and_total_count_should_be_3(self):
         """
         Asserts that the DLQ statistics report a total count of 3 entries.
-        
+
         Raises an AssertionError if `self.stats.total_count` is not equal to 3.
         """
         assert self.stats.total_count == 3
@@ -75,7 +75,7 @@ class Scenario(vedro.Scenario):
     def and_oldest_entry_should_be_set(self):
         """
         Assert that the retrieved DLQStats includes an oldest_entry.
-        
+
         Raises:
             AssertionError: If `self.stats.oldest_entry` is None.
         """

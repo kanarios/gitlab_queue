@@ -15,7 +15,7 @@ class Scenario(vedro.Scenario):
     async def given_backdated_dlq_entries(self):
         """
         Prepare test database and insert two dead-letter queue entries timestamped 60 days in the past.
-        
+
         Creates a test retry manager, adds two failed DLQ entries, and adjusts their moved_to_dlq_at timestamps to be 60 days earlier so they qualify as expired for cleanup tests.
         """
         self._db_ctx = initialized_test_database()
@@ -43,7 +43,7 @@ class Scenario(vedro.Scenario):
     async def when_cleanup_is_called_with_30_days(self):
         """
         Invoke cleanup_old_dlq_entries with a 30-day threshold and record the number of deleted DLQ entries.
-        
+
         Stores the resulting deleted-entry count on self.deleted_count.
         """
         self.deleted_count = await self.manager.cleanup_old_dlq_entries(days=30)
@@ -51,7 +51,7 @@ class Scenario(vedro.Scenario):
     def then_all_entries_should_be_deleted(self):
         """
         Assert that exactly two DLQ entries were deleted during the cleanup step.
-        
+
         Raises:
             AssertionError: if self.deleted_count is not 2; the assertion message includes the actual deleted count.
         """
@@ -60,7 +60,7 @@ class Scenario(vedro.Scenario):
     async def and_dlq_should_be_empty(self):
         """
         Verify the dead-letter queue contains no entries after cleanup.
-        
+
         Asserts that retrieving DLQ entries from self.manager yields an empty list; raises an AssertionError with message "Expected 0 DLQ entries after cleanup, got {n}" if any entries remain.
         """
         entries = await self.manager.get_dlq_entries()
@@ -70,7 +70,7 @@ class Scenario(vedro.Scenario):
         # Add another entry (it will have the current timestamp)
         """
         Verifies that running cleanup_old_dlq_entries with a very large day threshold does not remove recently-added DLQ entries.
-        
+
         Adds a new DLQ entry with the current timestamp, invokes cleanup_old_dlq_entries(days=99999), and asserts that zero entries are deleted and exactly one DLQ entry remains.
         """
         retry_id = await self.manager.add_to_retry_queue(
@@ -90,7 +90,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Close the test database context used by the scenario.
-        
+
         Performs asynchronous cleanup of resources allocated for the scenario's test database.
         """
         await self._db_ctx.__aexit__(None, None, None)

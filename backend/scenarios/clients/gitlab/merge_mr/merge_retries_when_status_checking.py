@@ -42,7 +42,7 @@ class Scenario(vedro.Scenario):
     def and_get_mr_called_three_times(self):
         """
         Asserts that the GitLab client's get_mr method was invoked three times.
-        
+
         This verification checks the test's mock_get_mr call count equals 3.
         """
         assert self.mock_get_mr.call_count == 3
@@ -50,7 +50,7 @@ class Scenario(vedro.Scenario):
     def and_put_called_once(self):
         """
         Asserts that the GitLab client's `put` method was awaited exactly once.
-        
+
         This verifies the code under test performed a single asynchronous PUT operation to merge the merge request.
         """
         self.mock_put.assert_awaited_once()

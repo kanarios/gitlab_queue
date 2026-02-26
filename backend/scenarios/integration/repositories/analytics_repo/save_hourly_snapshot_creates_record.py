@@ -15,7 +15,7 @@ class Scenario(vedro.Scenario):
     async def given_empty_database(self):
         """
         Prepare a fresh test database and create required tables for the scenario.
-        
+
         This enters the initialized asynchronous test database context and assigns it to
         self._db_ctx, stores the active database session in self.db, and ensures the
         schema is created by invoking create_tables.
@@ -50,7 +50,7 @@ class Scenario(vedro.Scenario):
     def and_timestamp_should_be_truncated_to_hour(self):
         """
         Asserts that the snapshot timestamp is truncated to the start of its hour.
-        
+
         Parses self.snapshot.timestamp as an ISO-formatted datetime and verifies minute, second, and microsecond are all zero.
         """
         from datetime import datetime
@@ -63,7 +63,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Close the test database context and release its resources.
-        
+
         Used as the scenario teardown step to exit the database context created during setup.
         """
         await self._db_ctx.__aexit__(None, None, None)

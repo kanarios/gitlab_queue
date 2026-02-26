@@ -15,7 +15,7 @@ from gitlab_queue.core.rebase_during_testing import (
 def create_mock_settings() -> MagicMock:
     """
     Create a MagicMock configured with settings used by rebase handler tests.
-    
+
     Returns:
         MagicMock: A mock settings object with attributes:
             - rebase_timeout_seconds = 60
@@ -32,18 +32,18 @@ def create_mock_settings() -> MagicMock:
 def create_mock_gitlab_client_needs_rebase() -> MagicMock:
     """
     Create a MagicMock GitLab client configured to simulate a merge request that requires a rebase and the subsequent rebase flow.
-    
+
     The mock's get_mr call yields, in order:
       1. an MR that needs rebase (sha="old_sha_123", merge_status="cannot_be_merged"),
       2. the same MR after cancellation (sha="old_sha_123"),
       3. and 4. an MR after rebase (sha="new_sha_456", merge_status="can_be_merged").
-    
+
     Also configures:
       - cancel_pipeline: AsyncMock to observe cancellation calls,
       - rebase_mr: AsyncMock to observe rebase initiation,
       - check_rebase_status: AsyncMock returning (False, False),
       - get_latest_mr_pipeline: AsyncMock returning a new pipeline MagicMock with id=200, sha="new_sha_456", status="running".
-    
+
     Returns:
         MagicMock: A mocked GitLab client with the above AsyncMock methods and staged get_mr responses.
     """
@@ -91,7 +91,7 @@ class Scenario(vedro.Scenario):
     def given_handler_with_mr_needing_rebase(self):
         """
         Prepare a RebaseDuringTestingHandler with a mocked GitLab client and settings, and initialize a RebaseDuringTestingContext that simulates an MR requiring a rebase.
-        
+
         The created context has rebase_count=0, max_attempts=3, and current_pipeline_id=100.
         """
         self.gitlab_client = create_mock_gitlab_client_needs_rebase()
@@ -109,7 +109,7 @@ class Scenario(vedro.Scenario):
     async def when_handle_rebase_if_needed_is_called(self):
         """
         Invokes the handler's rebase check for merge request 42 and stores the resulting context and pipeline on the test instance.
-        
+
         The coroutine calls handle_rebase_if_needed(42, self.ctx) and assigns its returned (context, pipeline) tuple to self.new_ctx and self.new_pipeline respectively.
         """
         self.new_ctx, self.new_pipeline = await self.handler.handle_rebase_if_needed(42, self.ctx)
@@ -117,7 +117,7 @@ class Scenario(vedro.Scenario):
     def then_old_pipeline_should_be_cancelled(self):
         """
         Asserts that the original pipeline was cancelled.
-        
+
         Verifies the GitLab client's cancel_pipeline was awaited exactly once with the initial pipeline id 100.
         """
         self.gitlab_client.cancel_pipeline.assert_awaited_once_with(100)
@@ -125,7 +125,7 @@ class Scenario(vedro.Scenario):
     def and_rebase_should_have_been_initiated(self):
         """
         Asserts that a rebase was initiated for the merge request with ID 42.
-        
+
         Raises:
             AssertionError: If the GitLab client's `rebase_mr` was not awaited exactly once with `42`.
         """
@@ -134,7 +134,7 @@ class Scenario(vedro.Scenario):
     def and_new_pipeline_should_be_returned(self):
         """
         Asserts that a new pipeline was returned and its id equals 200.
-        
+
         This verifies the handler produced a pipeline and that its identifier matches the expected scenario value.
         """
         assert self.new_pipeline is not None
@@ -143,7 +143,7 @@ class Scenario(vedro.Scenario):
     def and_rebase_count_should_be_incremented(self):
         """
         Asserts that the rebase count in the updated context has been incremented to 1.
-        
+
         Raises:
             AssertionError: If `self.new_ctx.rebase_count` is not equal to 1.
         """

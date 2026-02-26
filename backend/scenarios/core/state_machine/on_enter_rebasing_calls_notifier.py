@@ -24,7 +24,7 @@ class Scenario(vedro.Scenario):
     async def when_start_processing_is_triggered(self):
         """
         Trigger the scenario's state machine to start processing.
-        
+
         Invokes the state machine's start processing action to advance its workflow.
         """
         await self.sm.trigger_start_processing()
@@ -32,7 +32,7 @@ class Scenario(vedro.Scenario):
     def then_notifier_should_be_called_with_rebasing_template(self):
         """
         Verify that notifier.notify was awaited and invoked with mr_iid 123 and template "rebasing".
-        
+
         Asserts the notify coroutine was awaited and that its first positional argument equals 123 (mr_iid) and its second positional argument equals "rebasing" (template).
         """
         self.notifier.notify.assert_awaited()

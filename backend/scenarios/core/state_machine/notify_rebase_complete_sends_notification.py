@@ -31,7 +31,7 @@ class Scenario(vedro.Scenario):
     def and_notifier_should_be_called_with_rebase_complete_template(self):
         """
         Asserts the notifier was awaited with MR IID 123 and the "rebase_complete" template.
-        
+
         Verifies that notifier.notify was awaited and that its first two positional arguments are 123 (mr_iid) and "rebase_complete" (template).
         """
         self.notifier.notify.assert_awaited()

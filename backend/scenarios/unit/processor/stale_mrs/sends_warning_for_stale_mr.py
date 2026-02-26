@@ -24,7 +24,7 @@ class Scenario(vedro.Scenario):
     def given_processor_with_stale_unwarned_mr(self):
         """
         Prepare a mock processor containing a stale merge request that has not been warned.
-        
+
         Configures:
         - self.processor: a mock processor.
         - self.stale_item: a test queue item for MR IID 42 in state "queued" with stale_warning_sent set to False.

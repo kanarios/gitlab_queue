@@ -29,7 +29,7 @@ class Scenario(vedro.Scenario):
     def given_processor_with_rebase_conflict_during_testing(self):
         """
         Set up a processor and supporting mocks to simulate a rebase conflict occurring during testing.
-        
+
         Creates:
         - a mock processor,
         - a mock state machine and a processing context with mr_iid=42,
@@ -73,7 +73,7 @@ class Scenario(vedro.Scenario):
     def then_result_is_conflict(self):
         """
         Asserts that the processing result indicates a conflict.
-        
+
         Raises:
             AssertionError: If `self.result` is not `ProcessingResult.CONFLICT`.
         """

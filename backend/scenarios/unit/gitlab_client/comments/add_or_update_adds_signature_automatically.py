@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import vedro
+
+from gitlab_queue.clients.gitlab import GitLabClient
 from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, created_test_client
 from scenarios.transports import GitLabMockTransport
 from scenarios.transports.responses import note_response
-
-from gitlab_queue.clients.gitlab import GitLabClient
 
 
 class Scenario(vedro.Scenario):
@@ -35,7 +35,7 @@ class Scenario(vedro.Scenario):
     def then_note_should_be_created(self):
         """
         Assert that the created merge request note includes the bot signature.
-        
+
         Fetches the last JSON request payload from the mock transport and verifies that GitLabClient.BOT_COMMENT_SIGNATURE appears in the payload's "body" field.
         """
         request_body = self.transport.get_request_json()
@@ -44,7 +44,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Close the scenario's test client and release associated resources.
-        
+
         Ensures the underlying client connection used by the scenario is closed.
         """
         await self.client.close()

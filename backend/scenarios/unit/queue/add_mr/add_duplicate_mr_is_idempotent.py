@@ -1,9 +1,9 @@
 """Test scenario for adding duplicate MR (idempotency check)."""
 
 import vedro
-from scenarios.contexts.sqlite_client import initialized_test_database
 
 from gitlab_queue.core.queue import QueueManager
+from scenarios.contexts.sqlite_client import initialized_test_database
 
 from ._helpers import create_test_mr
 
@@ -40,7 +40,7 @@ class Scenario(vedro.Scenario):
     async def and_position_should_still_be_1(self):
         """
         Verifies that the queue position for merge request IID 42 remains 1.
-        
+
         Checks the stored position for MR with IID 42 and asserts it equals 1.
         """
         position = await self.queue.get_queue_position(42)
@@ -49,7 +49,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Close the test database context and release associated resources.
-        
+
         This method awaits the async context manager's exit to ensure the test database is properly closed.
         """
         await self._db_context.__aexit__(None, None, None)

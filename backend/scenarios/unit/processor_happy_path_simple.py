@@ -9,7 +9,6 @@ from __future__ import annotations
 import jj
 import vedro
 from jj.mock import mocked
-from scenarios.contexts.jj_gitlab_mock import get_mock_url
 
 from gitlab_queue.clients.gitlab import GitLabClient
 from gitlab_queue.config import Settings
@@ -18,6 +17,7 @@ from gitlab_queue.core.processor import MergeProcessor, ProcessingResult
 from gitlab_queue.core.queue import QueueManager
 from gitlab_queue.db.database import Database
 from gitlab_queue.models.mr import Author, MergeRequest
+from scenarios.contexts.jj_gitlab_mock import get_mock_url
 
 
 class Scenario(vedro.Scenario):
@@ -76,8 +76,9 @@ class Scenario(vedro.Scenario):
         }
 
         # Settings
+        self.mock_url = get_mock_url()
         self.settings = Settings(
-            gitlab_url=get_mock_url(),
+            gitlab_url=self.mock_url,
             gitlab_project_id=123,
             gitlab_token="test-token",
             target_branch="main",
@@ -94,7 +95,7 @@ class Scenario(vedro.Scenario):
         # Setup mocks
         """
         Sets up HTTP mocks for GitLab API endpoints, runs the merge processor against the queued merge request, and records the outcome.
-        
+
         This method configures mock responses for fetching the MR, triggering a rebase, listing pipelines, performing the merge, reading notes, and posting a comment. It constructs the GitLab client, notifier, and MergeProcessor, retrieves the next MR from the queue, asserts an item was retrieved, invokes the processor on that item, and stores the processing result along with the recorded merge and comment mock histories on the test instance (self.result, self.merge_history, self.comment_history).
         """
         get_mr_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/42")
@@ -116,7 +117,11 @@ class Scenario(vedro.Scenario):
         comment_matcher = jj.match("POST", "/api/v4/projects/123/merge_requests/42/notes")
         comment_response = jj.Response(status=201, json={"id": 1, "body": "test"})
 
+        project_matcher = jj.match("GET", "/api/v4/projects/123")
+        project_response = jj.Response(status=200, json={"id": 123, "web_url": f"{self.mock_url}/test/project"})
+
         async with (
+            mocked(project_matcher, project_response),
             mocked(get_mr_matcher, get_mr_response),
             mocked(rebase_matcher, rebase_response) as self.rebase_mock,
             mocked(pipelines_matcher, pipelines_response),
@@ -148,7 +153,7 @@ class Scenario(vedro.Scenario):
         # Check processing result
         """
         Assert that the merge request was processed and merged successfully.
-        
+
         Checks that processing result is SUCCESS, exactly one merge operation was invoked,
         the MR's queue state is "merged" for IID 42, and at least one comment was posted.
         """
@@ -167,7 +172,7 @@ class Scenario(vedro.Scenario):
     async def cleanup(self):
         """
         Close the database connection if it has been initialized.
-        
+
         If the Scenario instance holds an open database in `self.db`, close it; otherwise do nothing.
         """
         if self.db:

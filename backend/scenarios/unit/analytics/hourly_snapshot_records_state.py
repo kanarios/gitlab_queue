@@ -21,7 +21,7 @@ class Scenario(vedro.Scenario):
     def given_analytics_processor_with_mocked_database(self):
         """
         Prepare an AnalyticsJobProcessor and related mocks for testing hourly snapshot persistence.
-        
+
         Sets up:
         - self.database and self.settings as MagicMocks.
         - self.mock_uow as an async context manager that is returned by UnitOfWork.
@@ -64,7 +64,7 @@ class Scenario(vedro.Scenario):
     async def when_save_hourly_snapshot_is_called(self):
         """
         Runs the processor's hourly snapshot routine while patching UnitOfWork to use the test's mocked unit of work.
-        
+
         Patches gitlab_queue.jobs.analytics.UnitOfWork to return self.mock_uow and then calls self.processor._save_hourly_snapshot() to exercise fetching queue depth, retrieving last-hour stats, and saving the hourly snapshot.
         """
         with patch(
@@ -76,7 +76,7 @@ class Scenario(vedro.Scenario):
     def then_queue_depth_was_fetched(self):
         """
         Assert that the current queue depth was fetched exactly once from the merge requests repository.
-         
+
         Checks that `self.mock_uow.merge_requests.count_active` was awaited exactly one time.
         """
         self.mock_uow.merge_requests.count_active.assert_awaited_once()
@@ -84,7 +84,7 @@ class Scenario(vedro.Scenario):
     def and_hourly_stats_were_fetched(self):
         """
         Asserts that hourly statistics were fetched from the history repository exactly once.
-        
+
         This verifies that history.get_stats_for_last_hour was awaited a single time on the mocked UnitOfWork.
         """
         self.mock_uow.history.get_stats_for_last_hour.assert_awaited_once()
@@ -92,7 +92,7 @@ class Scenario(vedro.Scenario):
     def and_snapshot_was_saved_with_correct_data(self):
         """
         Asserts that an hourly snapshot was saved once with the expected queue and metric values.
-        
+
         Verifies that analytics.save_hourly_snapshot was awaited exactly once with:
         queue_depth=5, processed_count=10, success_count=8, failed_count=2, avg_wait_time_seconds=120.
         """

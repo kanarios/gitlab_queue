@@ -22,12 +22,12 @@ class Scenario(vedro.Scenario):
     async def given_database_with_some_data(self):
         """
         Set up a test database and seed it with sample analytics and MR data for integration tests.
-        
+
         Seeds:
         - two merge requests: iid 1 (status "queued") and iid 2 (status "rebasing")
         - two history records: iid 10 (status "merged", wait_time_seconds=60, processing_time_seconds=120) and iid 11 (status "failed", wait_time_seconds=30, processing_time_seconds=90) with finished timestamps set to now
         - one hourly metrics record for the current hour with queue_depth=5 and processed_count=3
-        
+
         This method initializes and enters the test database context and creates required tables.
         """
         self._db_ctx = initialized_test_database()
@@ -68,7 +68,7 @@ class Scenario(vedro.Scenario):
     async def when_get_metrics_is_called(self):
         """
         Retrieve analytics metrics for the last seven days and assign them to self.metrics for use in subsequent assertions.
-        
+
         This step obtains dashboard metrics (period_days=7) from the analytics repository and stores the result on the scenario instance.
         """
         async with self.db.session() as session:
@@ -78,7 +78,7 @@ class Scenario(vedro.Scenario):
     def then_metrics_should_contain_queue_count(self):
         """
         Assert that the retrieved metrics report exactly two items in the queue.
-        
+
         This will fail the test if `self.metrics.total_in_queue` is not 2.
         """
         assert self.metrics.total_in_queue == 2
@@ -92,7 +92,7 @@ class Scenario(vedro.Scenario):
     def and_success_rate_should_be_calculated(self):
         """
         Verify that the metrics success rate equals 50.0%.
-        
+
         Asserts that self.metrics.success_rate is 50.0.
         """
         assert self.metrics.success_rate == 50.0
@@ -106,7 +106,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Exit and clean up the test database context.
-        
+
         Awaits the scenario's asynchronous database context manager to close connections and release resources allocated for the test.
         """
         await self._db_ctx.__aexit__(None, None, None)

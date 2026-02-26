@@ -20,8 +20,8 @@ from ._helpers import (
     create_gitlab_client_with_transport,
     create_mock_notifier,
     create_mock_queue_manager,
+    create_mock_settings,
     create_pipeline_event,
-    created_mock_settings,
 )
 
 MR_IID = 123
@@ -33,7 +33,7 @@ class Scenario(vedro.Scenario):
     subject = "pipeline event with SHA mismatch is skipped"
 
     def given_handler_with_sha_mismatch(self):
-        self.settings = created_mock_settings()
+        self.settings = create_mock_settings()
         self.gitlab_client, self.transport = create_gitlab_client_with_transport()
         self.queue_manager = create_mock_queue_manager()
         # Queue item with expected_sha set (after rebase)

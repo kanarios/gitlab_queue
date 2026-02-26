@@ -15,7 +15,7 @@ class Scenario(vedro.Scenario):
     async def given_database_with_existing_mr(self):
         """
         Prepare an isolated test database, create required tables, and seed it with an existing merge request (iid=42, title "Existing MR").
-        
+
         Stores the async database context on `self._db_ctx`, the opened database connection on `self.db`, and the seeded merge request on `self.existing` for use by subsequent test steps.
         """
         self._db_ctx = initialized_test_database()
@@ -28,7 +28,7 @@ class Scenario(vedro.Scenario):
     async def when_add_if_not_exists_is_called_with_same_iid(self):
         """
         Invokes MergeRequestRepository.add_if_not_exists with iid 42 and new metadata, storing the returned merge request on self.result.
-        
+
         Executes the repository call inside a database transaction using a session from self.db.
         """
         async with self.db.transaction() as session:
@@ -47,7 +47,7 @@ class Scenario(vedro.Scenario):
     def then_result_should_be_the_existing_mr(self):
         """
         Verify that the repository returned the pre-existing merge request with iid 42 and title "Existing MR".
-        
+
         Asserts that self.result.iid is 42 and self.result.title is "Existing MR".
         """
         assert self.result.iid == 42
@@ -56,7 +56,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Exit the test database context and release its resources.
-        
+
         Performs the asynchronous context manager exit to clean up the initialized database used by the scenario.
         """
         await self._db_ctx.__aexit__(None, None, None)

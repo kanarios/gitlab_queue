@@ -19,7 +19,7 @@ class Scenario(vedro.Scenario):
     def given_processor_with_circuit_open(self):
         """
         Set up a mock processor whose GitLab client simulates an open circuit breaker and an active queued MR.
-        
+
         Configures:
         - self.processor as a mock processor.
         - self.queue_item as a test queue item with mr_iid 42 and state "queued".
@@ -38,7 +38,7 @@ class Scenario(vedro.Scenario):
     async def when_recover_interrupted_state_is_called(self):
         """
         Calls the processor's _recover_interrupted_state and captures any exception raised.
-        
+
         If an exception occurs while running _recover_interrupted_state, stores the exception in self.raised; otherwise leaves self.raised set to None.
         """
         self.raised = None
@@ -50,7 +50,7 @@ class Scenario(vedro.Scenario):
     def then_no_error_is_raised(self):
         """
         Asserts that no exception was captured during the preceding action.
-        
+
         Raises:
             AssertionError: If self.raised is not None (an exception was captured).
         """
@@ -59,7 +59,7 @@ class Scenario(vedro.Scenario):
     def and_mr_state_is_not_updated(self):
         """
         Asserts that the processor did not attempt to update the merge request state.
-        
+
         Raises an AssertionError if queue_manager.update_mr_state was awaited.
         """
         self.processor.queue_manager.update_mr_state.assert_not_awaited()

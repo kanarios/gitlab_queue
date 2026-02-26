@@ -20,8 +20,8 @@ from gitlab_queue.webhooks.handlers import MRWebhookHandler
 from ._helpers import (
     create_gitlab_client_with_transport,
     create_mock_queue_manager,
+    create_mock_settings,
     create_mr_event,
-    created_mock_settings,
 )
 
 
@@ -29,7 +29,7 @@ class Scenario(vedro.Scenario):
     subject = "MR already in queue refreshes metadata on label event"
 
     def given_handler_with_mr_already_in_queue(self):
-        self.settings = created_mock_settings()
+        self.settings = create_mock_settings()
         self.gitlab_client, self.transport = create_gitlab_client_with_transport(
             mr_iid=123,
             labels=[Labels.MERGE_QUEUE],

@@ -5,10 +5,10 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 import vedro
-from scenarios.contexts.gitlab_client_factory import created_test_client
-from scenarios.transports import GitLabMockTransport
 
 from gitlab_queue.clients.gitlab import RateLimitState
+from scenarios.contexts.gitlab_client_factory import created_test_client
+from scenarios.transports import GitLabMockTransport
 
 
 class Scenario(vedro.Scenario):
@@ -17,7 +17,7 @@ class Scenario(vedro.Scenario):
     def given_client_with_high_usage(self):
         """
         Prepare a test GitLab client whose rate limit is at 90% usage.
-        
+
         Creates a GitLabMockTransport-backed test client and sets its internal RateLimitState to limit=100 and remaining=10 (i.e., 90% consumed) so throttling logic treats the client as approaching the rate limit.
         """
         self.transport = GitLabMockTransport()
@@ -28,7 +28,7 @@ class Scenario(vedro.Scenario):
     async def when_throttle_is_applied(self):
         """
         Patches asyncio.sleep with an AsyncMock and invokes the client's rate-limit throttle to exercise its sleep-based backoff.
-        
+
         This step replaces asyncio.sleep with a mock to capture calls, then awaits self.client._apply_rate_limit_throttle() so the test can assert that a delay was scheduled.
         """
         self.mock_sleep = AsyncMock()
@@ -44,7 +44,7 @@ class Scenario(vedro.Scenario):
     def and_delay_should_be_positive(self):
         """
         Asserts that the throttle delay passed to the mocked sleep is greater than zero.
-        
+
         Retrieves the first positional argument from the recorded await call to the mocked sleep and verifies it is > 0.
         """
         args, _ = self.mock_sleep.await_args

@@ -14,7 +14,7 @@ class Scenario(vedro.Scenario):
     async def given_event_in_retry_queue_with_max_attempts_1(self):
         """
         Prepare test state by inserting a retryable event into the retry queue configured with max attempts = 1.
-        
+
         Opens a test SQLite database context, creates a retry manager with max_attempts set to 1 and base_delay_seconds set to 0, ensures the retry schema exists, and enqueues a "merge_request" event with a test payload and an initial error. Stores the database context, database handle, manager, and created retry entry id on the test instance for use by later steps.
         """
         self._db_ctx = initialized_test_database()
@@ -34,7 +34,7 @@ class Scenario(vedro.Scenario):
     async def when_retry_is_marked_failed(self):
         """
         Marks the prepared retry entry as failed and records whether it was moved to the dead-letter queue.
-        
+
         Asserts that exactly one event is ready for retry, then marks the entry identified by self.retry_id as failed with a final error and stores the boolean result in self.moved_to_dlq.
         """
         ready = await self.manager.get_events_ready_for_retry()
@@ -47,7 +47,7 @@ class Scenario(vedro.Scenario):
     def then_should_be_moved_to_dlq(self):
         """
         Assert that the most recently processed retry entry was moved to the dead-letter queue.
-        
+
         Raises:
             AssertionError: If the entry was not moved to the DLQ.
         """
@@ -56,7 +56,7 @@ class Scenario(vedro.Scenario):
     async def and_retry_queue_should_be_empty(self):
         """
         Asserts that there are no events currently ready for retry.
-        
+
         Raises:
             AssertionError: If one or more events are ready for retry.
         """
@@ -66,7 +66,7 @@ class Scenario(vedro.Scenario):
     async def and_dlq_should_have_the_entry(self):
         """
         Asserts the dead-letter queue contains a single entry for the test merge_request with the expected error and attempt count.
-        
+
         Verifies that the DLQ has exactly one entry, that the entry's event_type equals "merge_request", last_error equals "final error", and attempt_count equals 1.
         """
         dlq_entries = await self.manager.get_dlq_entries()
@@ -79,7 +79,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Close the scenario's test database context.
-        
+
         Performs the asynchronous exit of the database context manager created during setup.
         """
         await self._db_ctx.__aexit__(None, None, None)

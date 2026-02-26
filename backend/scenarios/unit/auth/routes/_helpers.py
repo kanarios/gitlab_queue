@@ -10,10 +10,10 @@ def create_mock_token_response(
 ) -> MagicMock:
     """
     Create a mock HTTP response that simulates a successful OAuth token exchange.
-    
+
     Parameters:
         access_token (str): Access token value to include in the response JSON.
-    
+
     Returns:
         MagicMock: A mock response with status_code 200 and json() returning {"access_token": access_token}.
     """
@@ -60,11 +60,11 @@ def create_mock_httpx_client(
 ) -> AsyncMock:
     """
     Create a configured AsyncMock that simulates an httpx.AsyncClient for OAuth token exchange and user info retrieval.
-    
+
     Parameters:
         token_response (MagicMock | None): Mock response returned by client.post(); if None a default token response is created.
         userinfo_response (MagicMock | None): Mock response returned by client.get(); if None a default userinfo response is created.
-    
+
     Returns:
         AsyncMock: An AsyncMock that mimics an httpx.AsyncClient where .post() returns the token response, .get() returns the userinfo response, and asynchronous context manager methods (__aenter__, __aexit__) are configured.
     """

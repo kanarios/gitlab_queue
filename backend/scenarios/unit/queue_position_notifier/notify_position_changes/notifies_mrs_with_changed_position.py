@@ -29,7 +29,7 @@ class Scenario(vedro.Scenario):
     async def when_notify_position_changes_is_called(self):
         """
         Call the position notifier to notify MRs about position changes and store the result.
-        
+
         This coroutine invokes self.position_notifier._notify_position_changes with an excluded MR IID of 999, the previously recorded positions, the previous total count, and an empty log context. Sets self.notified_count to the number of notifications that were sent.
         """
         self.notified_count = await self.position_notifier._notify_position_changes(

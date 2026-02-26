@@ -17,7 +17,7 @@ class Scenario(vedro.Scenario):
     def given_history_model(self):
         """
         Prepare and store a test MergeRequest history model representing a merged MR.
-        
+
         Creates a history model with iid 42, title "Completed MR", author information, state "merged",
         is_hotfix set, labels containing "merge_queue", target branch "main", pipeline info (id and status),
         and queued/started/finished timestamps relative to the current UTC time. The model is stored on
@@ -45,7 +45,7 @@ class Scenario(vedro.Scenario):
     def when_history_model_is_converted(self):
         """
         Convert the stored history model into a QueueItem and store it on the scenario.
-        
+
         This method converts self.history using ModelConverter.history_model_to_queue_item and assigns the resulting QueueItem to self.item.
         """
         self.item = ModelConverter.history_model_to_queue_item(self.history)
@@ -53,7 +53,7 @@ class Scenario(vedro.Scenario):
     def then_queue_item_fields_should_match(self):
         """
         Verify that the converted QueueItem contains the expected values from the test history model.
-        
+
         Asserts that:
         - mr_iid is 42
         - title is "Completed MR"
@@ -87,7 +87,7 @@ class Scenario(vedro.Scenario):
     def and_timestamps_should_be_parsed(self):
         """
         Verify that the converted QueueItem has parsed timestamp fields.
-        
+
         Asserts that `queued_at`, `started_at`, and `finished_at` on the converted item are not None.
         """
         assert self.item.queued_at is not None
@@ -97,7 +97,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Performs any necessary asynchronous cleanup after the scenario completes.
-        
+
         This implementation does nothing; override or extend it to release resources or revert side effects created during the scenario.
         """
         pass

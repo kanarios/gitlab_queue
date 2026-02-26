@@ -19,7 +19,7 @@ class Scenario(vedro.Scenario):
     def given_processor_with_already_warned_stale_mr(self):
         """
         Set up a mock processor containing a stale merge request that has already been warned.
-        
+
         Creates and assigns a mock processor to self.processor, constructs a test queue item with mr_iid=42,
         state="queued" and stale_warning_sent=True (assigned to self.stale_item), and configures the
         processor's queue_manager.get_stale_mrs to return a list containing that item.
@@ -34,7 +34,7 @@ class Scenario(vedro.Scenario):
     async def when_check_stale_mrs_is_called(self):
         """
         Invoke the processor's stale MR checker while patching the state-machine factory.
-        
+
         Patches gitlab_queue.core.processor.create_state_machine_for_mr with an AsyncMock and assigns it to `self.mock_create_sm`, then calls `self.processor._check_stale_mrs()`.
         """
         with patch(
@@ -46,7 +46,7 @@ class Scenario(vedro.Scenario):
     def then_state_machine_is_not_created(self):
         """
         Asserts that no state machine was created for the stale merge request.
-        
+
         Verifies that the patched state-machine creation callable was not awaited, ensuring no new state machine was started.
         """
         self.mock_create_sm.assert_not_awaited()
@@ -54,7 +54,7 @@ class Scenario(vedro.Scenario):
     def and_warning_flag_is_not_marked(self):
         """
         Asserts that the processor's queue manager did not mark the stale-warning flag for the stale merge request.
-        
+
         This verifies that mark_stale_warning_sent was not awaited/called for the already-warned MR.
         """
         self.processor.queue_manager.mark_stale_warning_sent.assert_not_awaited()

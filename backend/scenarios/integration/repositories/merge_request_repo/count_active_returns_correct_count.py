@@ -15,7 +15,7 @@ class Scenario(vedro.Scenario):
     async def given_database_with_active_and_terminal_mrs(self):
         """
         Prepare a test database and seed it with active and terminal merge requests.
-        
+
         Creates and enters an initialized test database context, creates required tables, and inserts three merge requests:
         iid=1 (status "queued"), iid=2 (status "rebasing"), and iid=3 (status "merged").
         """
@@ -39,7 +39,7 @@ class Scenario(vedro.Scenario):
     def then_count_should_be_2(self):
         """
         Assert that the stored merge request count equals two.
-        
+
         Raises:
             AssertionError: If the previously recorded `self.count` is not 2; the message indicates the actual value.
         """
@@ -48,7 +48,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Exit and clean up the test database context used by the scenario.
-        
+
         This awaits the asynchronous context manager teardown created during test setup to release resources and restore state.
         """
         await self._db_ctx.__aexit__(None, None, None)

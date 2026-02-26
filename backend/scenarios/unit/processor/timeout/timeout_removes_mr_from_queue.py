@@ -28,7 +28,7 @@ class Scenario(vedro.Scenario):
     def given_processor_with_elapsed_pipeline_timeout(self):
         """
         Prepare a processor, mock state machine, and processing context with a start time that exceeds the configured timeout.
-        
+
         Sets:
         - self.processor: a mock processor
         - self.mock_sm: a mock state machine
@@ -59,7 +59,7 @@ class Scenario(vedro.Scenario):
     def then_result_is_timeout(self):
         """
         Asserts that the stored processing result indicates a timeout.
-        
+
         Raises:
             AssertionError: If `self.result` is not `ProcessingResult.TIMEOUT`.
         """
@@ -68,7 +68,7 @@ class Scenario(vedro.Scenario):
     def and_timeout_is_triggered_on_state_machine(self):
         """
         Asserts that the state machine's timeout transition was awaited exactly once.
-        
+
         Fails the test if the mock state machine's `trigger_timeout` coroutine was not awaited exactly one time.
         """
         self.mock_sm.trigger_timeout.assert_awaited_once()

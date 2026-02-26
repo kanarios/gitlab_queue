@@ -25,7 +25,7 @@ class Scenario(vedro.Scenario):
     def when_repr_is_called(self):
         """
         Compute and store the current model's string representation.
-        
+
         Sets the instance attribute `self.result` to the result of calling `repr` on `self.model`.
         """
         self.result = repr(self.model)
@@ -42,7 +42,7 @@ class Scenario(vedro.Scenario):
     def and_repr_should_start_with_class_name(self):
         """
         Assert that the stored `result` string begins with the MergeRequest class prefix.
-        
+
         Raises:
             AssertionError: if `self.result` does not start with "<MergeRequest(".
         """
@@ -55,7 +55,7 @@ class Scenario2(vedro.Scenario):
     def given_webhook_retry_model(self):
         """
         Set up self.model as a WebhookRetryModel pre-populated with representative fields.
-        
+
         Assigns a new WebhookRetryModel to self.model and sets id to 5 and event_type to "merge_request".
         """
         self.model = WebhookRetryModel()
@@ -65,7 +65,7 @@ class Scenario2(vedro.Scenario):
     def when_repr_is_called(self):
         """
         Compute and store the current model's string representation.
-        
+
         Sets the instance attribute `self.result` to the result of calling `repr` on `self.model`.
         """
         self.result = repr(self.model)
@@ -85,7 +85,7 @@ class Scenario2(vedro.Scenario):
     def and_repr_should_start_with_class_name(self):
         """
         Asserts that the previously computed repr string begins with the WebhookRetry class name prefix.
-        
+
         Raises an AssertionError if `self.result` does not start with "<WebhookRetry(".
         """
         assert self.result.startswith("<WebhookRetry(")
@@ -97,7 +97,7 @@ class Scenario3(vedro.Scenario):
     def given_webhook_dlq_model(self):
         """
         Create a WebhookDLQModel instance configured for tests.
-        
+
         Initializes self.model with a WebhookDLQModel and sets:
         - id to 10
         - event_type to "pipeline"
@@ -109,7 +109,7 @@ class Scenario3(vedro.Scenario):
     def when_repr_is_called(self):
         """
         Compute and store the current model's string representation.
-        
+
         Sets the instance attribute `self.result` to the result of calling `repr` on `self.model`.
         """
         self.result = repr(self.model)
@@ -123,7 +123,7 @@ class Scenario3(vedro.Scenario):
     def and_repr_should_contain_event_type(self):
         """
         Asserts that the previously stored repr string contains the substring "event_type='pipeline'".
-        
+
         This check verifies that the model's string representation includes the event_type field with value 'pipeline'.
         """
         assert "event_type='pipeline'" in self.result
@@ -131,7 +131,7 @@ class Scenario3(vedro.Scenario):
     def and_repr_should_start_with_class_name(self):
         """
         Asserts that the previously computed representation begins with the WebhookDLQ class prefix.
-        
+
         Raises:
             AssertionError: If the stored representation does not start with "<WebhookDLQ(".
         """
@@ -149,7 +149,7 @@ class Scenario4(vedro.Scenario):
     def when_repr_is_called(self):
         """
         Compute and store the current model's string representation.
-        
+
         Sets the instance attribute `self.result` to the result of calling `repr` on `self.model`.
         """
         self.result = repr(self.model)
@@ -157,7 +157,7 @@ class Scenario4(vedro.Scenario):
     def then_repr_should_contain_iid(self):
         """
         Verifies that the captured representation contains the merge request iid 99.
-        
+
         Asserts that self.result includes the substring "iid=99".
         """
         assert "iid=99" in self.result
@@ -168,7 +168,7 @@ class Scenario4(vedro.Scenario):
     def and_repr_should_start_with_class_name(self):
         """
         Asserts that the previously stored representation string begins with the "<MergeRequestHistory(" prefix.
-        
+
         Raises:
             AssertionError: If `self.result` does not start with "<MergeRequestHistory(".
         """
@@ -181,7 +181,7 @@ class Scenario5(vedro.Scenario):
     def given_hourly_model(self):
         """
         Create an AnalyticsHourlyModel instance and set its `timestamp` to a representative value for repr testing.
-        
+
         Sets:
             self.model: AnalyticsHourlyModel with `timestamp` = "2026-02-23T10:00:00Z".
         """
@@ -191,7 +191,7 @@ class Scenario5(vedro.Scenario):
     def when_repr_is_called(self):
         """
         Compute and store the current model's string representation.
-        
+
         Sets the instance attribute `self.result` to the result of calling `repr` on `self.model`.
         """
         self.result = repr(self.model)
@@ -199,7 +199,7 @@ class Scenario5(vedro.Scenario):
     def then_repr_should_contain_timestamp(self):
         """
         Asserts that the stored representation contains the expected ISO-8601 timestamp string.
-        
+
         Raises:
             AssertionError: If "timestamp='2026-02-23T10:00:00Z'" is not present in self.result.
         """
@@ -208,9 +208,9 @@ class Scenario5(vedro.Scenario):
     def and_repr_should_start_with_class_name(self):
         """
         Asserts that the previously stored representation string begins with the AnalyticsHourly class prefix.
-        
+
         Raises:
-        	AssertionError: If the stored `self.result` does not start with "<AnalyticsHourly(".
+                AssertionError: If the stored `self.result` does not start with "<AnalyticsHourly(".
         """
         assert self.result.startswith("<AnalyticsHourly(")
 
@@ -221,7 +221,7 @@ class Scenario6(vedro.Scenario):
     def given_daily_model(self):
         """
         Prepare an AnalyticsDailyModel fixture with its date set to 2026-02-23.
-        
+
         Assigns the instantiated model to self.model for use by subsequent scenario steps.
         """
         self.model = AnalyticsDailyModel()
@@ -230,7 +230,7 @@ class Scenario6(vedro.Scenario):
     def when_repr_is_called(self):
         """
         Compute and store the current model's string representation.
-        
+
         Sets the instance attribute `self.result` to the result of calling `repr` on `self.model`.
         """
         self.result = repr(self.model)
@@ -241,7 +241,7 @@ class Scenario6(vedro.Scenario):
     def and_repr_should_start_with_class_name(self):
         """
         Asserts that the stored repr result starts with the AnalyticsDaily class name prefix.
-        
+
         Raises:
             AssertionError: If the repr string does not start with "<AnalyticsDaily(".
         """

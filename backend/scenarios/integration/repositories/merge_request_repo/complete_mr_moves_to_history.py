@@ -38,7 +38,7 @@ class Scenario(vedro.Scenario):
     async def when_complete_mr_is_called(self):
         """
         Invoke the merge-request repository to mark MR with iid 42 as merged and store the operation result on the scenario.
-        
+
         The repository call's return value is assigned to self.result for later assertions.
         """
         async with self.db.transaction() as session:
@@ -48,7 +48,7 @@ class Scenario(vedro.Scenario):
     def then_completion_should_succeed(self):
         """
         Asserts that completing the merge request reported success and produced a history identifier.
-        
+
         Verifies that `self.result.success` is True and `self.result.history_id` is not None.
         """
         assert self.result.success is True
@@ -57,7 +57,7 @@ class Scenario(vedro.Scenario):
     async def and_mr_should_be_gone_from_active_queue(self):
         """
         Asserts that the merge request with IID 42 is no longer present in the active queue.
-        
+
         Opens a database session, queries the active merge requests repository for IID 42, and asserts the result is None.
         """
         async with self.db.session() as session:
@@ -68,7 +68,7 @@ class Scenario(vedro.Scenario):
     async def and_mr_should_be_in_history(self):
         """
         Asserts that a history record exists for merge request IID 42 with status "merged".
-        
+
         Performs a database lookup for a history entry with iid 42 and asserts that the entry is present, its `status` equals "merged", and its `iid` equals 42.
         """
         async with self.db.session() as session:
@@ -81,7 +81,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Clean up and close the test database context created during the scenario setup.
-        
+
         This exits the asynchronous database context to release resources opened for testing.
         """
         await self._db_ctx.__aexit__(None, None, None)

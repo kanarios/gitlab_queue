@@ -4,21 +4,24 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import vedro
+from scenarios.library import Labels
 
 from gitlab_queue.models.queue_item import QueueItem
 from gitlab_queue.webhooks.handlers import MRWebhookHandler
-from scenarios.library import Labels
 
-from ._helpers import (create_gitlab_client_with_transport,
-                       create_mock_queue_manager, create_mr_event,
-                       created_mock_settings)
+from ._helpers import (
+    create_gitlab_client_with_transport,
+    create_mock_queue_manager,
+    create_mock_settings,
+    create_mr_event,
+)
 
 
 class Scenario(vedro.Scenario):
     subject = "handle update does not reset MR in processing state"
 
     def given_handler_with_processing_mr(self):
-        self.settings = created_mock_settings()
+        self.settings = create_mock_settings()
         self.gitlab_client, self.transport = create_gitlab_client_with_transport(
             mr_iid=123,
             labels=[Labels.MERGE_QUEUE],

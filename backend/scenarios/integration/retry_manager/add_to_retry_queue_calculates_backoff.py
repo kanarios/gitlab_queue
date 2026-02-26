@@ -14,7 +14,7 @@ class Scenario(vedro.Scenario):
     async def given_retry_manager_with_30s_delay(self):
         """
         Prepare a retry manager configured with a 30-second base delay and attach it to the scenario using a test database.
-        
+
         Sets up a test database context and stores the context on `self._db_ctx`, the opened database connection on `self.db`, and the configured retry manager on `self.manager`. Ensures the manager's schema exists. The retry manager is created with base_delay_seconds=30 and max_delay_seconds=300.
         """
         self._db_ctx = initialized_test_database()
@@ -29,7 +29,7 @@ class Scenario(vedro.Scenario):
     async def when_event_is_added(self):
         """
         Adds a retryable event to the retry queue with a 30-second base delay and stores the created retry record id.
-        
+
         Calls the retry manager to enqueue an event of type "merge_request" with a test payload and error "server error", then assigns the returned retry identifier to self.retry_id for later assertions.
         """
         self.retry_id = await self.manager.add_to_retry_queue(
@@ -41,7 +41,7 @@ class Scenario(vedro.Scenario):
     async def then_event_should_not_be_ready_yet(self):
         """
         Asserts that no retryable events are currently ready for retry.
-        
+
         Raises an AssertionError if any events are ready; the test expects the backoff delay (30 seconds) to keep the event in the future.
         """
         ready_events = await self.manager.get_events_ready_for_retry()
@@ -52,7 +52,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Release resources by exiting the asynchronous database context opened for the scenario.
-        
+
         This invokes the context's asynchronous exit with no exception information to close connections and perform cleanup of test database resources.
         """
         await self._db_ctx.__aexit__(None, None, None)

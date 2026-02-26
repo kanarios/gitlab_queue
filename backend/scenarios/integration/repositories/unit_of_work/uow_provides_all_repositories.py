@@ -20,7 +20,7 @@ class Scenario(vedro.Scenario):
     async def given_initialized_database(self):
         """
         Initialize a test database context, enter it, and create the required tables for tests.
-        
+
         Sets self._db_ctx to the test database context manager and self.db to the entered database connection, then creates the database schema by calling the table-creation routine.
         """
         self._db_ctx = initialized_test_database()
@@ -30,7 +30,7 @@ class Scenario(vedro.Scenario):
     async def when_unit_of_work_is_created(self):
         """
         Create a UnitOfWork and store its repository instances on the scenario.
-        
+
         Sets the following scenario attributes from the UnitOfWork:
         - mr_repo: merge requests repository
         - history_repo: history repository
@@ -44,7 +44,7 @@ class Scenario(vedro.Scenario):
     def then_merge_requests_should_be_available(self):
         """
         Assert that the scenario's merge request repository is available and is a MergeRequestRepository.
-        
+
         Raises:
             AssertionError: If `self.mr_repo` is not an instance of MergeRequestRepository.
         """
@@ -59,7 +59,7 @@ class Scenario(vedro.Scenario):
     def and_analytics_should_be_available(self):
         """
         Verify that the scenario exposes an AnalyticsRepository instance.
-        
+
         Raises:
             AssertionError: If self.analytics_repo is not an instance of AnalyticsRepository.
         """
@@ -68,7 +68,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Exit the test database async context to clean up test resources.
-        
+
         This closes the previously entered database context manager obtained during setup.
         """
         await self._db_ctx.__aexit__(None, None, None)

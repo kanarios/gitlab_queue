@@ -107,7 +107,11 @@ async def restart_recovery_continues_processing():
             comment_matcher = jj.match("POST", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes"))
             comment_response = jj.Response(status=201, json={"id": 1})
 
+            project_matcher = jj.match("GET", "/api/v4/projects/123")
+            project_response = jj.Response(status=200, json={"id": 123, "web_url": f"{mock_url}/test/project"})
+
         async with (
+            mocked(project_matcher, project_response),
             mocked(list_mrs_matcher, list_mrs_response),
             mocked(mr_matchers[0][0], mr_matchers[0][1]),
             mocked(mr_matchers[1][0], mr_matchers[1][1]),
@@ -218,7 +222,11 @@ async def restart_detects_merged_mr_in_gitlab():
             comment_matcher = jj.match("POST", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes"))
             comment_response = jj.Response(status=201, json={"id": 1})
 
+            project_matcher = jj.match("GET", "/api/v4/projects/123")
+            project_response = jj.Response(status=200, json={"id": 123, "web_url": f"{mock_url}/test/project"})
+
         async with (
+            mocked(project_matcher, project_response),
             mocked(get_mr_matcher, get_mr_response),
             mocked(list_mrs_matcher, list_mrs_response),
             mocked(get_notes_matcher, get_notes_response),
@@ -302,7 +310,11 @@ async def restart_detects_closed_mr_in_gitlab():
             comment_matcher = jj.match("POST", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes"))
             comment_response = jj.Response(status=201, json={"id": 1})
 
+            project_matcher = jj.match("GET", "/api/v4/projects/123")
+            project_response = jj.Response(status=200, json={"id": 123, "web_url": f"{mock_url}/test/project"})
+
         async with (
+            mocked(project_matcher, project_response),
             mocked(get_mr_matcher, get_mr_response),
             mocked(list_mrs_matcher, list_mrs_response),
             mocked(get_notes_matcher, get_notes_response),

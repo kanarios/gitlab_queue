@@ -12,12 +12,12 @@ from gitlab_queue.models.queue_item import QueueItem
 def create_mock_settings(**overrides: object) -> MagicMock:
     """
     Create a MagicMock that mimics a Settings object with sensible defaults for processor unit tests.
-    
+
     Accepts attribute overrides which are applied to the default settings before being attached to the mock.
-    
+
     Parameters:
         **overrides (object): Attribute names and values to override the default settings.
-    
+
     Returns:
         MagicMock: A mock configured with Settings-like attributes (defaults plus any provided overrides).
     """
@@ -46,7 +46,7 @@ def create_mock_settings(**overrides: object) -> MagicMock:
 def create_mock_gitlab_client() -> MagicMock:
     """
     Create a MagicMock that simulates a GitLab client with common async methods pre-configured.
-    
+
     The mock includes the following callables with sensible default return values:
     - get_mr(): no return value (AsyncMock)
     - rebase_mr(): no return value (AsyncMock)
@@ -57,7 +57,7 @@ def create_mock_gitlab_client() -> MagicMock:
     - check_rebase_status(): returns (False, False)
     - get_mr_conflicts(): returns an empty list
     - list_mrs_with_label(): returns an empty list
-    
+
     Returns:
         MagicMock: Mocked GitLab client with the above methods and a `circuit_breaker` MagicMock attribute.
     """
@@ -78,7 +78,7 @@ def create_mock_gitlab_client() -> MagicMock:
 def create_mock_queue_manager() -> MagicMock:
     """
     Create a mock QueueManager with common methods pre-configured for tests.
-    
+
     Configured methods and their defaults:
     - get_active_queue -> []
     - get_next_mr -> None
@@ -87,7 +87,7 @@ def create_mock_queue_manager() -> MagicMock:
     - get_stale_mrs -> []
     - mark_stale_warning_sent -> True
     - get_queue_stats -> {}
-    
+
     Returns:
         MagicMock: A MagicMock acting as a QueueManager with the above methods returning the listed defaults.
     """
@@ -105,26 +105,26 @@ def create_mock_queue_manager() -> MagicMock:
 def create_mock_notifier() -> MagicMock:
     """
     Create a MagicMock simulating an MRNotifier with a deterministic pipeline URL.
-    
+
     Returns:
         MagicMock: A mock notifier whose `build_pipeline_url` method returns "https://gitlab.com/pipeline/1".
     """
     notifier = MagicMock()
-    notifier.build_pipeline_url = MagicMock(return_value="https://gitlab.com/pipeline/1")
+    notifier.build_pipeline_url = AsyncMock(return_value="https://gitlab.com/pipeline/1")
     return notifier
 
 
 def create_test_queue_item(mr_iid: int = 42, state: str = "queued", **kwargs: object) -> QueueItem:
     """
     Create a QueueItem pre-populated with sensible defaults for use in tests.
-    
+
     Parameters:
-    	mr_iid (int): Merge request internal ID to assign to the QueueItem.
-    	state (str): Initial queue state for the item.
-    	**kwargs (object): Field overrides merged into the default QueueItem attributes.
-    
+        mr_iid (int): Merge request internal ID to assign to the QueueItem.
+        state (str): Initial queue state for the item.
+        **kwargs (object): Field overrides merged into the default QueueItem attributes.
+
     Returns:
-    	QueueItem: A QueueItem instance configured with defaults merged with any provided overrides.
+        QueueItem: A QueueItem instance configured with defaults merged with any provided overrides.
     """
     defaults: dict[str, object] = {
         "mr_iid": mr_iid,
@@ -150,13 +150,13 @@ def create_mock_mr(
 ) -> MagicMock:
     """
     Create a MagicMock representing a MergeRequest for tests.
-    
+
     Parameters:
         iid (int): Internal MR identifier; used to set the mock's `iid`.
         state (str): MR state such as "opened", "merged", or "closed".
         labels (list[str] | None): Labels to assign; defaults to ["merge_queue"] when None.
         sha (str): Commit SHA to assign to the mock MR.
-    
+
     Returns:
         MagicMock: A mock MergeRequest with `iid`, `state`, `labels`, `sha`, `source_branch`, and `rebase_in_progress` attributes set.
     """
@@ -173,9 +173,9 @@ def create_mock_mr(
 def create_mock_state_machine() -> MagicMock:
     """
     Create a MagicMock that simulates an MRStateMachine with trigger and notification methods.
-    
+
     The mock exposes trigger and notify methods used by the processor and a `current_state` whose `id` is set to "merging".
-    
+
     Returns:
         A MagicMock with trigger and notify methods (e.g., `trigger_merge_success`, `trigger_timeout`, `trigger_rebase_complete`, `trigger_pipeline_success`, `notify_stale_warning`, etc.) and `current_state.id == "merging"`.
     """
@@ -200,10 +200,10 @@ def create_mock_state_machine() -> MagicMock:
 def create_mock_processor(**overrides: object) -> MergeProcessor:
     """
     Create a MergeProcessor instance with mocked collaborators for testing.
-    
+
     Parameters:
         **overrides (object): Keyword arguments to replace default mock dependencies. Keys should match MergeProcessor constructor parameter names (for example: `gitlab_client`, `queue_manager`, `notifier`, `settings`).
-    
+
     Returns:
         MergeProcessor: A processor configured with mock collaborators (defaults used unless overridden).
     """
@@ -223,11 +223,11 @@ def create_processing_context(
 ) -> ProcessingContext:
     """
     Create a ProcessingContext configured for tests.
-    
+
     Parameters:
         mr_iid (int): Merge request internal ID to associate with the context.
         state_machine (MagicMock | None): State machine to use; if None a mock state machine is created.
-    
+
     Returns:
         ProcessingContext: Context with the given `mr_iid`, the provided or mocked `state_machine`, and `start_time` set to the current UTC datetime.
     """
@@ -247,12 +247,12 @@ def create_mock_pipeline(
 ) -> MagicMock:
     """
     Create a mock Pipeline with the given id, commit SHA, and status.
-    
+
     Parameters:
         pipeline_id (int): The pipeline's numeric identifier.
         sha (str): Commit SHA associated with the pipeline.
         status (str): Pipeline status (e.g., "success", "failed").
-    
+
     Returns:
         MagicMock: A MagicMock representing a Pipeline with `id`, `sha`, and `status` attributes set.
     """

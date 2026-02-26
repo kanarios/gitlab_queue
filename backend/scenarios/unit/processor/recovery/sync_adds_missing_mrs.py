@@ -23,7 +23,7 @@ class Scenario(vedro.Scenario):
     def given_processor_with_mr_in_gitlab_but_not_in_queue(self):
         """
         Prepare a mock processor configured with a merge request present in GitLab but absent from the active queue.
-        
+
         Creates a mock processor and a mock merge request (iid=99, state="opened", labels=["merge_queue"], title="Test MR"), configures the processor's GitLab client to return that MR from list_mrs_with_label, configures the queue manager to report an empty active queue, and replaces add_to_queue with an AsyncMock for assertion.
         """
         self.processor = create_mock_processor()
@@ -41,7 +41,7 @@ class Scenario(vedro.Scenario):
     async def when_sync_missing_mrs_from_gitlab_is_called(self):
         """
         Calls the processor's missing-MR synchronization routine for the scenario.
-        
+
         Awaits the processor._sync_missing_mrs_from_gitlab() coroutine to trigger syncing of merge requests from GitLab.
         """
         await self.processor._sync_missing_mrs_from_gitlab()
@@ -49,7 +49,7 @@ class Scenario(vedro.Scenario):
     def then_add_to_queue_is_called_with_the_mr(self):
         """
         Assert that the processor's queue manager was awaited exactly once to add the mock MR with is_hotfix set to False.
-        
+
         Raises:
             AssertionError: if add_to_queue was not awaited exactly once with (mock_mr, is_hotfix=False).
         """

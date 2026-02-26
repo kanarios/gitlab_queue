@@ -14,7 +14,7 @@ class Scenario(vedro.Scenario):
     async def given_event_in_retry_queue(self):
         """
         Populate the test retry queue with a single entry and prepare the retry manager.
-        
+
         Sets up a test database context and binds a test retry manager (with base_delay_seconds=0),
         ensures the retry schema exists, and adds one retry entry with event_type "merge_request",
         a test payload, and error "transient error". Stores the database context, database handle,
@@ -34,7 +34,7 @@ class Scenario(vedro.Scenario):
     async def when_retry_is_marked_successful(self):
         """
         Mark the previously queued retry entry as successful.
-        
+
         Invokes the retry manager to mark the retry identified by self.retry_id as successful so it is removed from the retry queue.
         """
         await self.manager.mark_retry_success(self.retry_id)
@@ -42,7 +42,7 @@ class Scenario(vedro.Scenario):
     async def then_queue_should_be_empty(self):
         """
         Assert that no events are ready for retry.
-        
+
         Raises:
             AssertionError: If one or more retryable events remain in the queue.
         """
@@ -52,7 +52,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Exit the asynchronous test database context used by the scenario.
-        
+
         Performs cleanup by closing the database context acquired in setup, ensuring resources are released.
         """
         await self._db_ctx.__aexit__(None, None, None)

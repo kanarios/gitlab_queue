@@ -31,7 +31,7 @@ class Scenario(vedro.Scenario):
     def given_processor_with_rebase_retry_limit_exceeded(self):
         """
         Prepare a processor and related mocks configured to simulate hitting the rebase retry limit during testing.
-        
+
         Sets up:
         - a mock processor,
         - a mock state machine and processing context with mr_iid=42,

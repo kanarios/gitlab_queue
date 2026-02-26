@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import vedro
-from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, created_test_client
-from scenarios.transports import GitLabMockTransport
 
 from gitlab_queue.clients.gitlab import GitLabConflictError
+from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, created_test_client
+from scenarios.transports import GitLabMockTransport
 
 from ._helpers import create_mr_response
 

@@ -6,6 +6,8 @@ it should mark the MR as 'removed' in the queue.
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import vedro
 
 from .._helpers import (
@@ -20,6 +22,7 @@ class Scenario(vedro.Scenario):
 
     def given_processor_with_closed_mr_in_queue(self):
         self.processor = create_mock_processor()
+        self.processor.queue_manager.complete_mr = AsyncMock(return_value=True)
 
         self.queue_item = create_test_queue_item(mr_iid=42, state="queued")
         self.processor.queue_manager.get_active_queue.return_value = [
@@ -35,7 +38,12 @@ class Scenario(vedro.Scenario):
     def then_mr_is_marked_as_removed(self):
         """
         Assert that the queue marks merge request IID 42 as removed.
-        
-        Verifies that queue_manager.update_mr_state was awaited exactly once with arguments (42, "removed").
+
+        Verifies that queue_manager.complete_mr was awaited exactly once with status "removed"
+        and a failure_reason indicating recovery.
         """
-        self.processor.queue_manager.update_mr_state.assert_awaited_once_with(42, "removed")
+        self.processor.queue_manager.complete_mr.assert_awaited_once_with(
+            42,
+            status="removed",
+            failure_reason="closed_during_recovery",
+        )

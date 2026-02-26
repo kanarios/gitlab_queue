@@ -14,7 +14,7 @@ class Scenario(vedro.Scenario):
     async def given_retry_manager(self):
         """
         Set up a test SQLite database context and initialize a retry manager for the scenario.
-        
+
         This prepares and stores the asynchronous database context, the database connection, and a retry manager configured with zero base delay, and ensures the manager's database schema exists for subsequent test steps.
         """
         self._db_ctx = initialized_test_database()
@@ -25,7 +25,7 @@ class Scenario(vedro.Scenario):
     async def when_event_is_added_to_retry_queue(self):
         """
         Adds a test "merge_request" event to the retry queue and records the created payload and retry entry id on the instance.
-        
+
         After execution, self.payload contains the test payload and self.retry_id contains the id returned by add_to_retry_queue.
         """
         self.payload = create_test_payload()
@@ -38,7 +38,7 @@ class Scenario(vedro.Scenario):
     def then_retry_id_should_be_positive(self):
         """
         Assert that the stored retry_id is greater than zero.
-        
+
         Raises:
             AssertionError: If `retry_id` is not greater than zero.
         """
@@ -47,7 +47,7 @@ class Scenario(vedro.Scenario):
     async def and_entry_should_be_retrievable(self):
         """
         Verify that the previously added retry entry can be retrieved and has the expected fields.
-        
+
         Asserts exactly one event is ready for retry, and that the event's id, event_type, payload, attempt_count, and last_error match the values produced when the event was added.
         """
         ready_events = await self.manager.get_events_ready_for_retry()
@@ -62,7 +62,7 @@ class Scenario(vedro.Scenario):
     async def do_cleanup(self):
         """
         Exit and clean up the test database context used by the scenario.
-        
+
         Ensures the scenario's asynchronous database context is exited and any associated resources are released.
         """
         await self._db_ctx.__aexit__(None, None, None)
