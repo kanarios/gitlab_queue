@@ -23,7 +23,7 @@ def create_mock_notifier() -> MagicMock:
     notifier = MagicMock()
     notifier.notify = AsyncMock()
     notifier.remove_queue_label = AsyncMock()
-    notifier.build_pipeline_url = MagicMock(return_value="https://gitlab.com/pipeline/123")
+    notifier.build_pipeline_url = AsyncMock(return_value="https://gitlab.com/pipeline/123")
     return notifier
 
 
@@ -59,6 +59,7 @@ async def create_state_machine(
     *,
     start_value: str | None = None,
     target_branch: str = "master",
+    skip_initial_enter: bool = True,
 ) -> MRStateMachine:
     """Create and activate a state machine for testing.
 
@@ -68,6 +69,7 @@ async def create_state_machine(
         mr_iid: MR internal ID.
         start_value: Initial state (defaults to 'queued').
         target_branch: Target branch name.
+        skip_initial_enter: If True, skip the first on_enter callback once.
 
     Returns:
         MRStateMachine: Activated state machine ready for testing.
@@ -78,6 +80,7 @@ async def create_state_machine(
         mr_iid=mr_iid,
         start_value=start_value,
         target_branch=target_branch,
+        skip_initial_enter=skip_initial_enter,
     )
     await sm.activate_initial_state()
     return sm

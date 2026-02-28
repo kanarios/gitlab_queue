@@ -125,7 +125,11 @@ async def webhook_pipeline_success_triggers_merge():
         pipelines_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/200/pipelines")
         pipelines_response = jj.Response(status=200, json=[{"id": 6001, "status": "success", "sha": "ready123"}])
 
+        project_matcher = jj.match("GET", "/api/v4/projects/123")
+        project_response = jj.Response(status=200, json={"id": 123, "web_url": f"{mock_url}/test/project"})
+
     async with (
+        mocked(project_matcher, project_response),
         mocked(get_mr_matcher, get_mr_response),
         mocked(merge_matcher, merge_response),
         mocked(comment_matcher, comment_response),
@@ -263,7 +267,11 @@ async def webhook_pipeline_failure_triggers_retry():
         get_notes_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/201/notes")
         get_notes_response = jj.Response(status=200, json=[])
 
+        project_matcher = jj.match("GET", "/api/v4/projects/123")
+        project_response = jj.Response(status=200, json={"id": 123, "web_url": f"{mock_url}/test/project"})
+
     async with (
+        mocked(project_matcher, project_response),
         mocked(get_mr_matcher, get_mr_response),
         mocked(rebase_matcher, rebase_response),
         mocked(retry_pipeline_matcher, retry_pipeline_response),
@@ -399,7 +407,11 @@ async def webhook_concurrent_pipeline_events():
         get_notes_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/202/notes")
         get_notes_response = jj.Response(status=200, json=[])
 
+        project_matcher = jj.match("GET", "/api/v4/projects/123")
+        project_response = jj.Response(status=200, json={"id": 123, "web_url": f"{mock_url}/test/project"})
+
     async with (
+        mocked(project_matcher, project_response),
         mocked(get_mr_matcher, get_mr_response),
         mocked(merge_matcher, merge_response),
         mocked(comment_matcher, comment_response),
@@ -515,7 +527,11 @@ async def webhook_pipeline_canceled_handling():
         get_notes_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/203/notes")
         get_notes_response = jj.Response(status=200, json=[])
 
+        project_matcher = jj.match("GET", "/api/v4/projects/123")
+        project_response = jj.Response(status=200, json={"id": 123, "web_url": f"{mock_url}/test/project"})
+
     async with (
+        mocked(project_matcher, project_response),
         mocked(get_mr_matcher, get_mr_response),
         mocked(comment_matcher, comment_response),
         mocked(get_notes_matcher, get_notes_response),

@@ -120,7 +120,11 @@ async def webhook_mr_labeled_flow():
         get_notes_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/100/notes")
         get_notes_response = jj.Response(status=200, json=[])
 
+        project_matcher = jj.match("GET", "/api/v4/projects/123")
+        project_response = jj.Response(status=200, json={"id": 123, "web_url": f"{mock_url}/test/project"})
+
     async with (
+        mocked(project_matcher, project_response),
         mocked(get_mr_matcher, get_mr_response),
         mocked(rebase_matcher, rebase_response),
         mocked(pipelines_matcher, pipelines_response),
@@ -231,25 +235,40 @@ async def webhook_mr_unlabeled_flow():
             },
         }
 
-    with when("webhook receives MR unlabeled event"):
-        gitlab_client = GitLabClient(settings)
-        webhook_handler = WebhookHandler(
-            queue_manager=queue,
-            gitlab_client=gitlab_client,
-            settings=settings,
-        )
+        # Mocks for state machine notifications (triggered by _handle_unlabeled)
+        project_matcher = jj.match("GET", "/api/v4/projects/123")
+        project_response = jj.Response(status=200, json={"id": 123, "web_url": f"{mock_url}/test/project"})
 
-        # Process webhook
-        await webhook_handler.handle_merge_request_event(webhook_payload)
+        get_notes_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/101/notes")
+        get_notes_response = jj.Response(status=200, json=[])
 
-    with then("MR is removed from queue"):
-        # Verify MR was removed from queue
-        queue_state = await queue.get_active_queue()
-        assert len(queue_state) == 0, "Queue should be empty"
+        comment_matcher = jj.match("POST", "/api/v4/projects/123/merge_requests/101/notes")
+        comment_response = jj.Response(status=201, json={"id": 50})
 
-        # Verify MR state
-        mr_state = await queue.get_mr_state(101)
-        assert mr_state is None or mr_state["status"] == "removed"
+    async with (
+        mocked(project_matcher, project_response),
+        mocked(get_notes_matcher, get_notes_response),
+        mocked(comment_matcher, comment_response),
+    ):
+        with when("webhook receives MR unlabeled event"):
+            gitlab_client = GitLabClient(settings)
+            webhook_handler = WebhookHandler(
+                queue_manager=queue,
+                gitlab_client=gitlab_client,
+                settings=settings,
+            )
+
+            # Process webhook
+            await webhook_handler.handle_merge_request_event(webhook_payload)
+
+        with then("MR is removed from queue"):
+            # Verify MR was removed from queue
+            queue_state = await queue.get_active_queue()
+            assert len(queue_state) == 0, "Queue should be empty"
+
+            # Verify MR state
+            mr_state = await queue.get_mr_state(101)
+            assert mr_state is None or mr_state["status"] == "removed"
 
     # Cleanup
     await db.close()
@@ -309,25 +328,61 @@ async def webhook_mr_closed_flow():
             "labels": [{"title": "merge_queue"}],
         }
 
-    with when("webhook receives MR closed event"):
-        gitlab_client = GitLabClient(settings)
-        webhook_handler = WebhookHandler(
-            queue_manager=queue,
-            gitlab_client=gitlab_client,
-            settings=settings,
+        # Mocks for state machine notifications (triggered by _handle_close)
+        project_matcher = jj.match("GET", "/api/v4/projects/123")
+        project_response = jj.Response(status=200, json={"id": 123, "web_url": f"{mock_url}/test/project"})
+
+        get_notes_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/102/notes")
+        get_notes_response = jj.Response(status=200, json=[])
+
+        comment_matcher = jj.match("POST", "/api/v4/projects/123/merge_requests/102/notes")
+        comment_response = jj.Response(status=201, json={"id": 51})
+
+        # remove_queue_label calls remove_mr_label (PUT to update labels)
+        mr_update_matcher = jj.match("PUT", "/api/v4/projects/123/merge_requests/102")
+        mr_update_response = jj.Response(
+            status=200,
+            json={
+                "iid": 102,
+                "labels": [],
+                "title": "To Be Closed",
+                "state": "closed",
+                "source_branch": "feature/close",
+                "target_branch": "main",
+                "sha": "close123",
+                "author": {"id": 12, "name": "Test User", "username": "testuser"},
+                "merge_status": "can_be_merged",
+                "has_conflicts": False,
+                "rebase_in_progress": False,
+                "web_url": "https://gitlab.com/test/project/-/merge_requests/102",
+            },
         )
 
-        # Process webhook
-        await webhook_handler.handle_merge_request_event(webhook_payload)
+    async with (
+        mocked(project_matcher, project_response),
+        mocked(get_notes_matcher, get_notes_response),
+        mocked(comment_matcher, comment_response),
+        mocked(mr_update_matcher, mr_update_response),
+    ):
+        with when("webhook receives MR closed event"):
+            gitlab_client = GitLabClient(settings)
+            webhook_handler = WebhookHandler(
+                queue_manager=queue,
+                gitlab_client=gitlab_client,
+                settings=settings,
+            )
 
-    with then("MR is removed from queue"):
-        # Verify MR was removed from queue
-        queue_state = await queue.get_active_queue()
-        assert len(queue_state) == 0, "Queue should be empty after MR closed"
+            # Process webhook
+            await webhook_handler.handle_merge_request_event(webhook_payload)
 
-        # Verify MR state
-        mr_state = await queue.get_mr_state(102)
-        assert mr_state is None or mr_state["status"] == "removed"
+        with then("MR is removed from queue"):
+            # Verify MR was removed from queue
+            queue_state = await queue.get_active_queue()
+            assert len(queue_state) == 0, "Queue should be empty after MR closed"
+
+            # Verify MR state
+            mr_state = await queue.get_mr_state(102)
+            assert mr_state is None or mr_state["status"] == "removed"
 
     # Cleanup
     await db.close()

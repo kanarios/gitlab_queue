@@ -3,7 +3,7 @@
 NOTE: Intentionally testing private method _notify_position_changes
 to verify internal logic (return count behavior).
 Public methods notify_affected_mrs_after_completion and
-notify_affected_mrs_after_hotfix_added don't expose the count.
+notify_affected_mrs_after_mr_added don't expose the count.
 """
 
 import vedro
@@ -64,9 +64,16 @@ class Scenario(vedro.Scenario):
         )
 
     async def when_notify_position_changes_is_called(self):
+        """
+        Invoke the position notifier to compute how many merge requests were notified and store the result.
+
+        This awaits a call to the notifier's internal `_notify_position_changes` with the current
+        test inputs and assigns the returned notified count to `self.notified_count`.
+        """
         self.notified_count = await self.position_notifier._notify_position_changes(
             excluded_mr_iid=999,
             positions_before=self.positions_before,
+            old_total=len(self.positions_before),
             log_context="",
         )
 

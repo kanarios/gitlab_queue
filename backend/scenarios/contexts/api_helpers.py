@@ -64,7 +64,7 @@ if TYPE_CHECKING:
 _GENERATE = object()  # Sentinel for "generate this value"
 
 
-def created_mock_settings(
+def create_mock_settings(
     *,
     jwt_secret: str | None = None,
     jwt_expiration_hours: int = 24,
@@ -130,7 +130,7 @@ def created_mock_settings(
 
 
 # Alias for backward compatibility
-create_mock_settings = created_mock_settings
+created_mock_settings = create_mock_settings
 
 
 def created_mock_database(*, connected: bool = True, wal_mode: bool = True) -> MagicMock:
@@ -452,7 +452,7 @@ def created_webhook_state(
         WebhookAppState: Configured app state with all dependencies.
     """
     state = WebhookAppState(
-        settings=settings or created_mock_settings(),
+        settings=settings or create_mock_settings(),
         database=database or created_mock_database(connected=db_healthy),
         gitlab_client=created_mock_gitlab_client(circuit_state=gitlab_circuit_state),
         queue_manager=created_mock_queue_manager(),
@@ -518,7 +518,7 @@ async def created_test_app_with_db() -> AsyncIterator[tuple[FastAPI, WebhookAppS
         Tuple of (FastAPI app, WebhookAppState, Database).
     """
     async with initialized_test_database() as db:
-        settings = created_mock_settings()
+        settings = create_mock_settings()
         state = WebhookAppState(
             settings=settings,
             database=db,

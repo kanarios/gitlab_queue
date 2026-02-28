@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import vedro
+
+from gitlab_queue.clients.gitlab import GitLabConflictError
 from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, created_test_client
 from scenarios.schemas.status_code import ConflictStatusSchema
 from scenarios.transports import GitLabMockTransport
-
-from gitlab_queue.clients.gitlab import GitLabConflictError
 
 
 class Scenario(vedro.Scenario):

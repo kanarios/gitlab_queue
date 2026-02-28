@@ -24,10 +24,21 @@ class Scenario(vedro.Scenario):
         await self.sm.notify_stale_warning(warning_hours=12)
 
     def then_it_should_stay_in_queued_state(self):
+        """
+        Assert that the state machine remains in the 'queued' state.
+
+        Raises:
+            AssertionError: If the state machine's current state's id is not "queued".
+        """
         assert self.sm.current_state.id == "queued"
 
     def and_notifier_should_be_called_with_stale_warning_template(self):
-        self.notifier.notify.assert_called()
+        """
+        Verify the notifier was awaited and called with mr_iid 123 and the "stale_warning" template.
+
+        Checks that notifier.notify was awaited, that the first positional argument equals 123 (mr_iid), and that the second positional argument equals "stale_warning" (template).
+        """
+        self.notifier.notify.assert_awaited()
         call_args = self.notifier.notify.call_args
         assert call_args[0][0] == 123  # mr_iid
         assert call_args[0][1] == "stale_warning"  # template

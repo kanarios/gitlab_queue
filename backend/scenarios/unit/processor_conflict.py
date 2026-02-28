@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import jj
 from jj.mock import mocked
-from scenarios.contexts.jj_gitlab_mock import get_mock_url
 from vedro import given, scenario, then, when
 
 from gitlab_queue.clients.gitlab import GitLabClient
@@ -20,6 +19,8 @@ from gitlab_queue.core.processor import MergeProcessor, ProcessingResult
 from gitlab_queue.core.queue import QueueManager
 from gitlab_queue.db.database import Database
 from gitlab_queue.models.mr import Author, MergeRequest
+from scenarios.contexts.jj_gitlab_mock import get_mock_url
+from scenarios.mocks.gitlab import make_project_mock
 
 
 @scenario()
@@ -102,6 +103,8 @@ async def process_mr_with_immediate_conflict():
         get_notes_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/44/notes")
         get_notes_response = jj.Response(status=200, json=[])
 
+        project_matcher, project_response = make_project_mock(mock_url)
+
         settings = Settings(
             gitlab_url=mock_url,
             gitlab_project_id=123,
@@ -114,6 +117,7 @@ async def process_mr_with_immediate_conflict():
         )
 
     async with (
+        mocked(project_matcher, project_response),
         mocked(get_mr_matcher, get_mr_response),
         mocked(rebase_matcher, rebase_response) as rebase_mock,
         mocked(conflicts_matcher, conflicts_response) as conflicts_mock,
@@ -139,19 +143,21 @@ async def process_mr_with_immediate_conflict():
 
             # Verify rebase was attempted
             rebase_history = await rebase_mock.fetch_history()
-            assert len(rebase_history) == 1, "Rebase should have been attempted"
+            assert len(rebase_history) == 1
 
             # Verify conflicts were fetched
             conflicts_history = await conflicts_mock.fetch_history()
-            assert len(conflicts_history) >= 1, "Conflicts should have been fetched"
+            assert len(conflicts_history) >= 1
 
             # Verify conflict comment was posted
             comment_history = await comment_mock.fetch_history()
-            assert len(comment_history) >= 1, "Conflict comment should be posted"
+            assert len(comment_history) >= 1
 
             # Verify queue state
             mr_state = await queue.get_mr_state(44)
-            assert mr_state["status"] == "conflict", f"MR should be conflict, got {mr_state}"
+            assert mr_state["status"] == "conflict"
+
+    await db.close()
 
 
 @scenario()
@@ -233,6 +239,8 @@ async def process_mr_with_conflict_during_rebase():
         get_notes_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/45/notes")
         get_notes_response = jj.Response(status=200, json=[])
 
+        project_matcher, project_response = make_project_mock(mock_url)
+
         settings = Settings(
             gitlab_url=mock_url,
             gitlab_project_id=123,
@@ -246,6 +254,7 @@ async def process_mr_with_conflict_during_rebase():
         )
 
     async with (
+        mocked(project_matcher, project_response),
         mocked(get_mr_matcher, get_mr_response),
         mocked(rebase_matcher, rebase_response) as rebase_mock,
         mocked(status_check_matcher, status_check_response),
@@ -280,6 +289,8 @@ async def process_mr_with_conflict_during_rebase():
             # Verify state
             mr_state = await queue.get_mr_state(45)
             assert mr_state["status"] == "conflict"
+
+    await db.close()
 
 
 @scenario()
@@ -359,6 +370,8 @@ async def process_mr_with_conflict_after_multiple_mrs():
         get_notes_46_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/46/notes")
         get_notes_46_response = jj.Response(status=200, json=[])
 
+        project_matcher, project_response = make_project_mock(mock_url)
+
         settings = Settings(
             gitlab_url=mock_url,
             gitlab_project_id=123,
@@ -371,6 +384,7 @@ async def process_mr_with_conflict_after_multiple_mrs():
         )
 
     async with (
+        mocked(project_matcher, project_response),
         mocked(get_mr_46_matcher, get_mr_46_response),
         mocked(rebase_46_matcher, rebase_46_response) as rebase_mock,
         mocked(conflicts_46_matcher, conflicts_46_response),
@@ -408,6 +422,8 @@ async def process_mr_with_conflict_after_multiple_mrs():
             # Verify rebase was attempted
             rebase_history = await rebase_mock.fetch_history()
             assert len(rebase_history) == 1
+
+    await db.close()
 
 
 __all__ = [

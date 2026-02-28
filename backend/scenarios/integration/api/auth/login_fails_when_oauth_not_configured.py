@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import vedro
 from scenarios.contexts.api_helpers import (
-    created_mock_settings,
+    create_mock_settings,
     created_test_app,
 )
 from scenarios.schemas.status_code import ServiceUnavailableStatusSchema
@@ -15,7 +15,7 @@ class Scenario(vedro.Scenario):
     subject = "try to login when oauth is not configured"
 
     def given_app_without_oauth(self):
-        settings = created_mock_settings(
+        settings = create_mock_settings(
             oauth_client_id=None,
             oauth_client_secret=None,
         )

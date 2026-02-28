@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import vedro
-from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, create_test_client
-from scenarios.contexts.jj_gitlab_mock import mocked_gitlab_get_mr
-from scenarios.schemas.status_code import NotFoundStatusSchema
 
 from gitlab_queue.clients.gitlab import (
     GitLabAPIError,
     GitLabNotFoundError,
 )
+from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, create_test_client
+from scenarios.contexts.jj_gitlab_mock import mocked_gitlab_get_mr
+from scenarios.schemas.status_code import NotFoundStatusSchema
 
 
 class Scenario(vedro.Scenario):

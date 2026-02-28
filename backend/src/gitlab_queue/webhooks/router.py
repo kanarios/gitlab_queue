@@ -26,6 +26,7 @@ from gitlab_queue.api.websocket import WebSocketManager, ws_router
 from gitlab_queue.auth.middleware import AuthenticationMiddleware
 from gitlab_queue.auth.routes import auth_router
 from gitlab_queue.clients.gitlab import GitLabCircuitOpenError
+from gitlab_queue.core.queue import QueueItemNotFoundError
 from gitlab_queue.health import ApplicationHealth, ComponentStatus, GitLabHealth
 from gitlab_queue.metrics import (
     METRICS_CONTENT_TYPE,
@@ -372,6 +373,7 @@ async def _route_webhook_event(
             settings=state.settings,
             gitlab_client=state.gitlab_client,
             queue_manager=state.queue_manager,
+            notifier=state.notifier,
             position_notifier=state.position_notifier,
             websocket_manager=state.websocket_manager,
         )
@@ -424,7 +426,24 @@ async def handle_gitlab_webhook(
     _validate_webhook_request(state, x_gitlab_token)
 
     payload = await request.json()
-    event = parse_webhook_event(payload)
+
+    try:
+        event = parse_webhook_event(payload)
+    except (ValueError, KeyError) as e:
+        log.warning(
+            "Failed to parse webhook event",
+            error=str(e),
+            object_kind=payload.get("object_kind"),
+        )
+        try:
+            retry_id = await state.retry_manager.add_to_retry_queue(
+                event_type=payload.get("object_kind", "unknown"),
+                payload=payload,
+                error=str(e),
+            )
+            return {"status": "queued_for_retry", "retry_id": str(retry_id)}
+        except Exception:
+            return {"status": "error", "reason": "parse_failed"}
 
     if event is None:
         log.debug("Unknown event type ignored", object_kind=payload.get("object_kind"))
@@ -475,6 +494,13 @@ async def handle_gitlab_webhook(
             status_code=503,
             headers={"Retry-After": str(int(e.retry_after or 30))},
         )
+    except QueueItemNotFoundError as e:
+        log.info(
+            "MR not found in queue, ignoring webhook event",
+            mr_iid=e.mr_iid,
+            event_type=type(event).__name__,
+        )
+        return {"status": "ignored", "reason": "mr_not_in_queue"}
     except Exception as e:
         log.exception(
             "Error handling webhook event",

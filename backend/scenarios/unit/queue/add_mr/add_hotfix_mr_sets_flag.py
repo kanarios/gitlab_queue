@@ -1,9 +1,9 @@
 """Test scenario for adding hotfix MR with is_hotfix flag."""
 
 import vedro
-from scenarios.contexts.sqlite_client import initialized_test_database
 
 from gitlab_queue.core.queue import QueueManager
+from scenarios.contexts.sqlite_client import initialized_test_database
 
 from ._helpers import create_test_mr
 
@@ -22,10 +22,10 @@ class Scenario(vedro.Scenario):
         self.item = await self.queue.add_to_queue(mr, is_hotfix=True)
 
     def then_item_should_have_hotfix_flag(self):
-        assert self.item.is_hotfix is True, f"Expected is_hotfix=True, got {self.item.is_hotfix}"
+        assert self.item.is_hotfix is True
 
     async def and_item_should_be_retrievable_with_flag(self):
-        retrieved = await self.queue.get_queue_item(42)
+        retrieved = await self.queue.get_queue_item(self.item.mr_iid)
         assert retrieved is not None
         assert retrieved.is_hotfix is True
 

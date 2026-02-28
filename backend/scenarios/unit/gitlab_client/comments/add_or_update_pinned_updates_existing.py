@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import vedro
+
+from gitlab_queue.clients.gitlab import GitLabClient
 from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, created_test_client
 from scenarios.transports import GitLabMockTransport
 from scenarios.transports.responses import note_response
-
-from gitlab_queue.clients.gitlab import GitLabClient
 
 from ._helpers import create_note_response as create_note_data
 

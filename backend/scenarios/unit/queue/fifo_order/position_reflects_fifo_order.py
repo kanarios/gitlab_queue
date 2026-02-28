@@ -3,9 +3,9 @@
 import asyncio
 
 import vedro
-from scenarios.contexts.sqlite_client import initialized_test_database
 
 from gitlab_queue.core.queue import QueueManager
+from scenarios.contexts.sqlite_client import initialized_test_database
 
 from ._helpers import create_test_mr
 
@@ -25,21 +25,47 @@ class Scenario(vedro.Scenario):
             await asyncio.sleep(0.01)
 
     async def when_positions_are_queried(self):
+        """
+        Query and store queue positions for merge requests with iids 5, 15, and
+        25.
+
+        Populates or replaces self.positions with a dict mapping each iid to its
+        current position in the queue (e.g. {5: 1, 15: 2, 25: 3}).
+        """
         self.positions = {}
         for iid in [5, 15, 25]:
             self.positions[iid] = await self.queue.get_queue_position(iid)
 
     def then_positions_should_reflect_insertion_order(self):
-        assert self.positions[5] == 1, f"First MR expected at 1, got {self.positions[5]}"
-        assert self.positions[15] == 2, f"Second MR expected at 2, got {self.positions[15]}"
-        assert self.positions[25] == 3, f"Third MR expected at 3, got {self.positions[25]}"
+        """
+        Assert that stored positions reflect FIFO insertion order.
+
+        Checks that merge requests with iids 5, 15, and 25 have queue positions
+        1, 2, and 3 respectively.
+        """
+        assert self.positions[5] == 1
+        assert self.positions[15] == 2
+        assert self.positions[25] == 3
 
     async def and_removing_first_should_shift_positions(self):
+        """
+        Verify that removing the first merge request shifts queue positions of
+        the remaining items.
+
+        Removes the MR with iid 5 from the queue and asserts that the MR with
+        iid 15 is at position 1 and the MR with iid 25 is at position 2.
+        """
         await self.queue.remove_from_queue(5)
         pos_15 = await self.queue.get_queue_position(15)
         pos_25 = await self.queue.get_queue_position(25)
-        assert pos_15 == 1, f"After removal, MR 15 expected at 1, got {pos_15}"
-        assert pos_25 == 2, f"After removal, MR 25 expected at 2, got {pos_25}"
+        assert pos_15 == 1
+        assert pos_25 == 2
 
     async def do_cleanup(self):
+        """
+        Exit and clean up the test database context used by the scenario.
+
+        This asynchronously finalizes and closes the underlying database
+        context manager held in self._db_context.
+        """
         await self._db_context.__aexit__(None, None, None)

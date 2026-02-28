@@ -15,9 +15,8 @@ from jj.mock import mocked
 from scenarios.contexts.gitlab_client_factory import created_test_settings
 from scenarios.contexts.jj_gitlab_mock import get_mock_url
 from scenarios.contexts.sqlite_client import initialized_test_database
-from vedro import given, scenario, then, when
-
 from sqlalchemy.exc import IntegrityError, NoResultFound
+from vedro import given, scenario, then, when
 
 from gitlab_queue.clients.gitlab import GitLabClient
 from gitlab_queue.core.queue import QueueManager
@@ -119,7 +118,9 @@ async def concurrent_webhook_and_polling_no_duplicates():
                 # at least one succeeds and no duplicates are created.
                 # Only IntegrityError/NoResultFound are acceptable - other exceptions are bugs.
                 expected_race_errors = (IntegrityError, NoResultFound)
-                unexpected = [r for r in results if isinstance(r, Exception) and not isinstance(r, expected_race_errors)]
+                unexpected = [
+                    r for r in results if isinstance(r, Exception) and not isinstance(r, expected_race_errors)
+                ]
                 if unexpected:
                     raise unexpected[0]
                 successes = [r for r in results if not isinstance(r, Exception)]
@@ -232,7 +233,9 @@ async def concurrent_multiple_webhooks_same_mr():
                 # This is expected - the key assertion is: no duplicates created.
                 # Only IntegrityError/NoResultFound are acceptable - other exceptions are bugs.
                 expected_race_errors = (IntegrityError, NoResultFound)
-                unexpected = [r for r in results if isinstance(r, Exception) and not isinstance(r, expected_race_errors)]
+                unexpected = [
+                    r for r in results if isinstance(r, Exception) and not isinstance(r, expected_race_errors)
+                ]
                 if unexpected:
                     raise unexpected[0]
                 successes = [r for r in results if not isinstance(r, Exception)]

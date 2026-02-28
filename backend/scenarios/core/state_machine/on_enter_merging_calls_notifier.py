@@ -24,10 +24,20 @@ class Scenario(vedro.Scenario):
         )
 
     async def when_pipeline_success_is_triggered(self):
+        """
+        Trigger a pipeline-success event on the stored state machine.
+
+        Causes the scenario's state machine to handle a successful pipeline notification.
+        """
         await self.sm.trigger_pipeline_success()
 
     def then_notifier_should_be_called_with_merging_template(self):
-        self.notifier.notify.assert_called()
+        """
+        Assert the notifier was awaited and invoked with MR IID 123 and the "merging" template.
+
+        Verifies that `self.notifier.notify` was awaited and that its first positional argument equals 123 (the merge request IID) and its second positional argument equals "merging" (the template name).
+        """
+        self.notifier.notify.assert_awaited()
         call_args = self.notifier.notify.call_args
         assert call_args[0][0] == 123  # mr_iid
         assert call_args[0][1] == "merging"  # template

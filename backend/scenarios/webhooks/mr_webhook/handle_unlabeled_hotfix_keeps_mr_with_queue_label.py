@@ -1,20 +1,23 @@
 """Test: handle unlabeled action keeps MR when hotfix removed but merge_queue remains."""
 
 import vedro
-
-from gitlab_queue.webhooks.handlers import MRWebhookHandler
 from scenarios.library import Labels
 
-from ._helpers import (create_gitlab_client_with_transport,
-                       create_mock_queue_manager, create_mr_event,
-                       created_mock_settings)
+from gitlab_queue.webhooks.handlers import MRWebhookHandler
+
+from ._helpers import (
+    create_gitlab_client_with_transport,
+    create_mock_queue_manager,
+    create_mock_settings,
+    create_mr_event,
+)
 
 
 class Scenario(vedro.Scenario):
     subject = "handle unlabeled action keeps MR when hotfix removed but merge_queue remains"
 
     def given_handler(self):
-        self.settings = created_mock_settings()
+        self.settings = create_mock_settings()
         self.gitlab_client, self.transport = create_gitlab_client_with_transport(
             mr_iid=123,
             labels=[Labels.MERGE_QUEUE],
@@ -38,10 +41,10 @@ class Scenario(vedro.Scenario):
         await self.handler.handle(self.event)
 
     def then_mr_should_not_be_removed_from_queue(self):
-        self.queue_manager.remove_from_queue.assert_not_called()
+        self.queue_manager.remove_from_queue.assert_not_awaited()
 
     def and_hotfix_status_should_be_updated(self):
-        self.queue_manager.update_hotfix_status.assert_called_once_with(
+        self.queue_manager.update_hotfix_status.assert_awaited_once_with(
             mr_iid=123,
             is_hotfix=False,
             labels=["merge_queue"],

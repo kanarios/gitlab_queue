@@ -1,7 +1,8 @@
 """Test PollingConfig is frozen (immutable)."""
 
-import vedro
 from dataclasses import FrozenInstanceError
+
+import vedro
 from vedro import catched
 
 from gitlab_queue.core.polling import PollingConfig

@@ -23,10 +23,20 @@ class Scenario(vedro.Scenario):
         )
 
     async def when_timeout_is_triggered(self):
+        """
+        Trigger a timeout on the scenario's state machine using a 4-hour maximum wait.
+
+        This causes the scenario's state machine (`self.sm`) to handle a timeout event with max_wait_hours set to 4.
+        """
         await self.sm.trigger_timeout(max_wait_hours=4)
 
     def then_notifier_should_be_called_with_timeout_template(self):
-        self.notifier.notify.assert_called()
+        """
+        Asserts that the notifier's notify coroutine was awaited and invoked with the timeout template for mr_iid 123.
+
+        Verifies that notify was awaited, that the first positional argument equals 123 (mr_iid) and the second positional argument equals "timeout" (template).
+        """
+        self.notifier.notify.assert_awaited()
         call_args = self.notifier.notify.call_args
         assert call_args[0][0] == 123  # mr_iid
         assert call_args[0][1] == "timeout"  # template

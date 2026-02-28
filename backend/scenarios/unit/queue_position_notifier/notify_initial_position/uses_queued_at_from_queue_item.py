@@ -32,6 +32,6 @@ class Scenario(vedro.Scenario):
         await self.position_notifier.notify_initial_position(self.mr_iid)
 
     def then_queued_at_matches_queue_item_value(self):
-        self.notifier.notify.assert_called_once()
+        self.notifier.notify.assert_awaited_once()
         call_kwargs = self.notifier.notify.call_args.kwargs
         assert call_kwargs["queued_at"] == self.expected_queued_at

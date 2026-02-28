@@ -1,4 +1,10 @@
-"""Test _notify_position_changes skips MRs not in positions_before."""
+"""Test _notify_position_changes skips MRs not in positions_before.
+
+When a new MR is added to the queue, it won't be in positions_before
+(since it didn't exist before), so it won't be notified.
+However, existing MRs that WERE in positions_before will be notified
+if the total changed.
+"""
 
 import vedro
 
@@ -27,9 +33,15 @@ class Scenario(vedro.Scenario):
         )
 
     async def when_notify_position_changes_is_called(self):
+        """
+        Calls _notify_position_changes on the position_notifier with the prepared test inputs and stores the returned notified count.
+
+        This invokes the notifier with excluded_mr_iid=999, the scenario's positions_before, old_total set to the length of positions_before, and an empty log_context, then assigns the result to self.notified_count.
+        """
         self.notified_count = await self.position_notifier._notify_position_changes(
             excluded_mr_iid=999,
             positions_before=self.positions_before,
+            old_total=len(self.positions_before),
             log_context="",
         )
 
@@ -38,5 +50,18 @@ class Scenario(vedro.Scenario):
         notified_iids = [call.kwargs.get("mr_iid", call.args[0]) for call in calls]
         assert 102 not in notified_iids
 
-    def and_notified_count_is_0(self):
-        assert self.notified_count == 0
+    def and_existing_mr_is_notified_about_total_change(self):
+        # MR 101 was at position 1 with old_total=1
+        # Now it's at position 1 with new_total=2, so it gets notified
+        calls = self.notifier.notify.call_args_list
+        notified_iids = [call.kwargs.get("mr_iid", call.args[0]) for call in calls]
+        assert 101 in notified_iids
+
+    def and_notified_count_is_1(self):
+        """
+        Assert that exactly one merge request was notified.
+
+        Raises:
+            AssertionError: If self.notified_count is not equal to 1.
+        """
+        assert self.notified_count == 1

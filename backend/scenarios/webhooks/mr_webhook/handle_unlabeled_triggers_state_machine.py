@@ -1,0 +1,72 @@
+"""Test: handle unlabeled uses state machine when notifier is available."""
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import vedro
+from scenarios.library import Labels
+
+from gitlab_queue.webhooks.handlers import MRWebhookHandler
+
+from ._helpers import (
+    create_gitlab_client_with_transport,
+    create_mock_queue_manager,
+    create_mock_settings,
+    create_mr_event,
+)
+
+
+class Scenario(vedro.Scenario):
+    subject = "handle unlabeled triggers state machine for notification"
+
+    def given_handler_with_notifier(self):
+        self.settings = create_mock_settings()
+        self.gitlab_client, self.transport = create_gitlab_client_with_transport(
+            mr_iid=123,
+            labels=[],
+        )
+        self.queue_manager = create_mock_queue_manager()
+        self.queue_manager.get_queue_item = AsyncMock(return_value=MagicMock())
+
+        self.notifier = MagicMock()
+        self.notifier.notify = AsyncMock()
+
+        self.handler = MRWebhookHandler(
+            settings=self.settings,
+            gitlab_client=self.gitlab_client,
+            queue_manager=self.queue_manager,
+            notifier=self.notifier,
+        )
+
+    def given_unlabeled_event(self):
+        self.event = create_mr_event(
+            iid=123,
+            action="unlabeled",
+            previous_labels=[Labels.MERGE_QUEUE],
+            current_labels=[],
+        )
+
+    def given_state_machine_patch(self):
+        self.mock_state_machine = MagicMock()
+        self.mock_state_machine.trigger_mark_removed = AsyncMock()
+        self._sm_patcher = patch(
+            "gitlab_queue.webhooks.handlers.create_state_machine_for_mr",
+            new_callable=AsyncMock,
+            return_value=self.mock_state_machine,
+        )
+        self.mock_sm_factory = self._sm_patcher.start()
+
+    async def when_event_is_handled(self):
+        await self.handler.handle(self.event)
+
+    def then_state_machine_should_be_created(self):
+        self.mock_sm_factory.assert_awaited_once()
+
+    def and_trigger_mark_removed_should_be_called(self):
+        self.mock_state_machine.trigger_mark_removed.assert_awaited_once_with(reason="label_removed")
+
+    def and_remove_from_queue_should_not_be_called_directly(self):
+        self.queue_manager.remove_from_queue.assert_not_awaited()
+
+    async def cleanup(self):
+        self._sm_patcher.stop()
+        await self.gitlab_client.close()

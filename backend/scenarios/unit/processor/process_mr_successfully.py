@@ -15,7 +15,6 @@ from datetime import UTC, datetime
 import jj
 import vedro
 from jj.mock import mocked
-from scenarios.contexts.jj_gitlab_mock import get_mock_url
 
 from gitlab_queue.clients.gitlab import GitLabClient
 from gitlab_queue.config import Settings
@@ -24,6 +23,7 @@ from gitlab_queue.core.processor import MergeProcessor, ProcessingResult
 from gitlab_queue.core.queue import QueueManager
 from gitlab_queue.db.database import Database
 from gitlab_queue.models.mr import Author, MergeRequest
+from scenarios.contexts.jj_gitlab_mock import get_mock_url
 
 
 class Scenario(vedro.Scenario):
@@ -108,6 +108,9 @@ class Scenario(vedro.Scenario):
         self.get_notes_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/42/notes")
         self.get_notes_response = jj.Response(status=200, json=[])
 
+        self.project_matcher = jj.match("GET", "/api/v4/projects/123")
+        self.project_response = jj.Response(status=200, json={"id": 123, "web_url": f"{self.mock_url}/test/project"})
+
         # Settings with mock URL
         self.settings = Settings(
             gitlab_url=self.mock_url,
@@ -126,7 +129,16 @@ class Scenario(vedro.Scenario):
         )
 
     async def when_processor_runs_one_processing_cycle(self):
+        """
+        Runs a single MergeProcessor cycle under HTTP mock context and records outcomes.
+
+        Executes one processing iteration using the configured JJ HTTP mocks, creating
+        GitLabClient, MRNotifier, and MergeProcessor, then processing the next MR from
+        the queue. Records the processing result and captures HTTP call histories into
+        self.result, self.merge_history, and self.comment_history for later assertions.
+        """
         async with (
+            mocked(self.project_matcher, self.project_response),
             mocked(self.get_mr_matcher, self.get_mr_response),
             mocked(self.rebase_matcher, self.rebase_response),
             mocked(self.pipelines_matcher, self.pipelines_response),
@@ -146,7 +158,7 @@ class Scenario(vedro.Scenario):
 
             # Process the MR
             queue_item = await self.queue.get_next_mr()
-            assert queue_item is not None, "Queue should have an MR"
+            assert queue_item is not None
 
             self.result = await processor._process_mr(queue_item)
 
@@ -156,18 +168,46 @@ class Scenario(vedro.Scenario):
 
     async def then_mr_should_be_successfully_merged(self):
         # Check processing result
+        """
+        Verify that the merge request processing completed successfully.
+
+        Asserts that self.result is equal to ProcessingResult.SUCCESS.
+        """
         assert self.result == ProcessingResult.SUCCESS
 
     async def and_merge_should_be_called_once(self):
-        assert len(self.merge_history) == 1, "Merge should have been called once"
+        """
+        Verify that exactly one merge API call was recorded during the processing cycle.
+
+        Asserts that the captured merge call history contains exactly one entry.
+        """
+        assert len(self.merge_history) == 1
 
     async def and_queue_state_should_be_merged(self):
+        """
+        Assert that the merge request with IID 42 in the queue has status "merged".
+
+        Raises:
+            AssertionError: If the MR status is not "merged" or the MR is not present in the queue.
+        """
         mr_state = await self.queue.get_mr_state(42)
-        assert mr_state["status"] == "merged", f"MR should be merged, got {mr_state}"
+        assert mr_state is not None, "MR not present in queue"
+        assert mr_state["status"] == "merged"
 
     async def and_at_least_one_comment_should_be_posted(self):
-        assert len(self.comment_history) >= 1, "At least one comment should be posted"
+        """
+        Assert that at least one comment was posted during processing.
+
+        Raises:
+            AssertionError: If no comments were posted (comment history is empty).
+        """
+        assert len(self.comment_history) >= 1
 
     async def and_queue_should_be_empty_after_processing(self):
+        """
+        Assert that the merge request queue contains no remaining items after processing.
+
+        Verifies by attempting to retrieve the next queue entry and asserting that it does not exist.
+        """
         next_item = await self.queue.get_next_mr()
-        assert next_item is None, "Queue should be empty after processing"
+        assert next_item is None

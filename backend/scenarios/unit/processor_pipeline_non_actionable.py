@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import jj
 from jj.mock import mocked
-from scenarios.contexts.jj_gitlab_mock import get_mock_url
 from vedro import given, params, scenario, then, when
 
 from gitlab_queue.clients.gitlab import GitLabClient
@@ -24,6 +23,8 @@ from gitlab_queue.core.processor import MergeProcessor, ProcessingResult
 from gitlab_queue.core.queue import QueueManager
 from gitlab_queue.db.database import Database
 from gitlab_queue.models.mr import Author, MergeRequest
+from scenarios.contexts.jj_gitlab_mock import get_mock_url
+from scenarios.mocks.gitlab import make_project_mock
 
 
 @scenario(
@@ -35,7 +36,14 @@ from gitlab_queue.models.mr import Author, MergeRequest
     ]
 )
 async def process_mr_with_non_actionable_pipeline_status(status: str):
-    """Test MR processing when pipeline is in non-actionable state."""
+    """
+    Exercise processing of a merge request whose pipeline is in a non-actionable status.
+
+    Simulates an MR with the given pipeline status and verifies that processing immediately marks the MR as failed, posts a failure comment, and updates the MR state to "failed" in the database.
+
+    Parameters:
+        status (str): Pipeline status to simulate (e.g., "manual", "skipped", "blocked", "waiting_for_resource").
+    """
 
     with given(f"MR with pipeline in '{status}' status"):
         db = Database(database_url="sqlite+aiosqlite:///:memory:")
@@ -101,6 +109,8 @@ async def process_mr_with_non_actionable_pipeline_status(status: str):
         get_notes_matcher = jj.match("GET", f"/api/v4/projects/123/merge_requests/{mr_iid}/notes")
         get_notes_response = jj.Response(status=200, json=[])
 
+        project_matcher, project_response = make_project_mock(mock_url)
+
         settings = Settings(
             gitlab_url=mock_url,
             gitlab_project_id=123,
@@ -116,6 +126,7 @@ async def process_mr_with_non_actionable_pipeline_status(status: str):
         )
 
     async with (
+        mocked(project_matcher, project_response),
         mocked(get_mr_matcher, get_mr_response),
         mocked(rebase_matcher, rebase_response),
         mocked(pipelines_matcher, pipelines_response),
@@ -142,16 +153,22 @@ async def process_mr_with_non_actionable_pipeline_status(status: str):
 
         with then("failure comment was posted"):
             comment_history = await comment_mock.fetch_history()
-            assert len(comment_history) >= 1, "Failure comment should be posted"
+            assert len(comment_history) >= 1
 
         with then("MR state is failed in database"):
             mr_state = await queue.get_mr_state(mr_iid)
-            assert mr_state["status"] == "failed", f"MR should be failed, got {mr_state['status']}"
+            assert mr_state["status"] == "failed"
+
+    await db.close()
 
 
 @scenario()
 async def non_actionable_status_does_not_retry():
-    """Test that non-actionable status fails immediately without retry attempts."""
+    """
+    Verifies that a merge request with a non-actionable pipeline status (manual) fails immediately and is not retried.
+
+    Asserts that the processor returns ProcessingResult.PIPELINE_FAILED, the rebase endpoint is invoked only once, and pipeline checks occur exactly twice (no retry polling).
+    """
 
     with given("MR with manual pipeline and retry count configured"):
         db = Database(database_url="sqlite+aiosqlite:///:memory:")
@@ -215,6 +232,8 @@ async def non_actionable_status_does_not_retry():
         get_notes_matcher = jj.match("GET", f"/api/v4/projects/123/merge_requests/{mr_iid}/notes")
         get_notes_response = jj.Response(status=200, json=[])
 
+        project_matcher, project_response = make_project_mock(mock_url)
+
         settings = Settings(
             gitlab_url=mock_url,
             gitlab_project_id=123,
@@ -230,6 +249,7 @@ async def non_actionable_status_does_not_retry():
         )
 
     async with (
+        mocked(project_matcher, project_response),
         mocked(get_mr_matcher, get_mr_response),
         mocked(rebase_matcher, rebase_response) as rebase_mock,
         mocked(pipelines_matcher, pipelines_response) as pipelines_mock,
@@ -254,7 +274,7 @@ async def non_actionable_status_does_not_retry():
 
         with then("rebase was only called once (initial rebase, no retry)"):
             rebase_history = await rebase_mock.fetch_history()
-            assert len(rebase_history) == 1, f"Rebase should be called only once, called {len(rebase_history)} times"
+            assert len(rebase_history) == 1
 
         with then("pipeline was checked minimal times (no retry loop)"):
             # Pipeline is checked once in _wait_for_rebase (to get pipeline id)
@@ -264,6 +284,8 @@ async def non_actionable_status_does_not_retry():
             assert len(pipelines_history) == 2, (
                 f"Pipeline should be checked exactly twice (rebase + wait), checked {len(pipelines_history)} times"
             )
+
+    await db.close()
 
 
 __all__ = [

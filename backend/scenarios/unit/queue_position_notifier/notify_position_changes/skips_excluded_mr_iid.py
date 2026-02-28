@@ -3,7 +3,7 @@
 NOTE: Intentionally testing private method _notify_position_changes
 to verify internal logic (excluded_mr_iid handling).
 Public methods notify_affected_mrs_after_completion and
-notify_affected_mrs_after_hotfix_added don't expose this behavior.
+notify_affected_mrs_after_mr_added don't expose this behavior.
 """
 
 import vedro
@@ -34,9 +34,15 @@ class Scenario(vedro.Scenario):
         )
 
     async def when_notify_position_changes_is_called_with_excluded_mr(self):
+        """
+        Invoke the position notifier's _notify_position_changes with the configured excluded MR and record the result.
+
+        Sets self.notified_count to the number of notifications reported by the notifier call.
+        """
         self.notified_count = await self.position_notifier._notify_position_changes(
             excluded_mr_iid=self.excluded_mr_iid,
             positions_before=self.positions_before,
+            old_total=len(self.positions_before),
             log_context="",
         )
 

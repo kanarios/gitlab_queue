@@ -34,10 +34,21 @@ class Scenario(vedro.Scenario):
         )
 
     def then_it_should_stay_in_testing_state(self):
+        """
+        Verify the scenario's state machine remains in the "testing" state.
+
+        Raises:
+            AssertionError: If the state's id is not "testing".
+        """
         assert self.sm.current_state.id == "testing"
 
     def and_notifier_should_be_called_with_pipeline_retry_template(self):
-        self.notifier.notify.assert_called()
+        """
+        Assert that the notifier was awaited and invoked with the "pipeline_retry" template for merge request 123.
+
+        Verifies that notify() was awaited, that the first positional argument equals 123 (mr_iid), and that the second positional argument equals "pipeline_retry" (template).
+        """
+        self.notifier.notify.assert_awaited()
         call_args = self.notifier.notify.call_args
         assert call_args[0][0] == 123  # mr_iid
         assert call_args[0][1] == "pipeline_retry"  # template

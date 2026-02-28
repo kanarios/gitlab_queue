@@ -7,9 +7,12 @@ operations based on label changes and MR state transitions.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from gitlab_queue.core.state_machine import create_state_machine_for_mr
+from statemachine.exceptions import TransitionNotAllowed
+
+from gitlab_queue.core.state_machine import calculate_duration, create_state_machine_for_mr
 from gitlab_queue.models.events import MergeRequestEvent, PipelineEvent
 from gitlab_queue.utils.logging import get_logger
 
@@ -43,6 +46,7 @@ class MRWebhookHandler:
     settings: Settings
     gitlab_client: GitLabClient
     queue_manager: QueueManager
+    notifier: MRNotifier | None = None
     position_notifier: QueuePositionNotifier | None = None
     websocket_manager: WebSocketManager | None = None
 
@@ -51,6 +55,7 @@ class MRWebhookHandler:
         mr_iid: int,
         is_hotfix: bool,
         positions_before: dict[int, int],
+        old_total: int,
     ) -> None:
         """Send position notifications after adding MR to queue.
 
@@ -58,6 +63,7 @@ class MRWebhookHandler:
             mr_iid: The MR's internal ID.
             is_hotfix: Whether the MR is a hotfix.
             positions_before: Positions captured before adding.
+            old_total: Total queue size before adding.
         """
         if not self.position_notifier:
             return
@@ -65,10 +71,12 @@ class MRWebhookHandler:
         try:
             await self.position_notifier.notify_initial_position(mr_iid)
 
-            if is_hotfix and positions_before:
-                await self.position_notifier.notify_affected_mrs_after_hotfix_added(
+            if positions_before:
+                await self.position_notifier.notify_affected_mrs_after_mr_added(
                     mr_iid,
                     positions_before,
+                    old_total,
+                    is_hotfix=is_hotfix,
                 )
         except Exception as e:
             log.warning(
@@ -141,10 +149,12 @@ class MRWebhookHandler:
             await self._refresh_queue_item_metadata(mr_iid, event)
             return
 
-        # Capture positions before adding (for hotfix notification)
+        # Capture positions before adding (for notifying existing MRs about queue changes)
         positions_before: dict[int, int] = {}
-        if is_hotfix and self.position_notifier:
+        old_total: int = 0
+        if self.position_notifier:
             positions_before = await self.position_notifier.capture_queue_positions()
+            old_total = await self.queue_manager.get_queue_length()
 
         # Fetch full MR data from API for new queue entry
         mr = await self.gitlab_client.get_mr(mr_iid)
@@ -160,7 +170,7 @@ class MRWebhookHandler:
         )
 
         # Send position notification
-        await self._notify_position_after_add(mr_iid, is_hotfix, positions_before)
+        await self._notify_position_after_add(mr_iid, is_hotfix, positions_before, old_total)
 
     async def _handle_unlabeled(self, event: MergeRequestEvent) -> None:
         """Handle label removal from MR.
@@ -192,33 +202,130 @@ class MRWebhookHandler:
 
         mr_iid = event.object_attributes.iid
 
-        removed = await self.queue_manager.remove_from_queue(mr_iid)
-
-        if removed:
-            log.info("MR removed from queue via label removal", mr_iid=mr_iid)
-        else:
+        queue_item = await self.queue_manager.get_queue_item(mr_iid)
+        if queue_item is None:
             log.debug("MR was not in queue", mr_iid=mr_iid)
+            return
+
+        if self.notifier:
+            state_machine = await create_state_machine_for_mr(
+                mr_iid=mr_iid,
+                notifier=self.notifier,
+                queue_manager=self.queue_manager,
+                target_branch=event.object_attributes.target_branch,
+                websocket_manager=self.websocket_manager,
+                position_notifier=self.position_notifier,
+            )
+            try:
+                await state_machine.trigger_mark_removed(reason="label_removed")
+                log.info("MR removed from queue via state machine", mr_iid=mr_iid)
+            except TransitionNotAllowed:
+                log.warning(
+                    "SM transition failed (terminal state race), falling back to direct removal",
+                    mr_iid=mr_iid,
+                    current_state=state_machine.current_state.id,
+                )
+                await self.queue_manager.complete_mr(mr_iid, status="removed", failure_reason="label_removed")
+                await self._remove_queue_label(mr_iid)
+                log.info("MR removed from queue via fallback", mr_iid=mr_iid)
+        else:
+            removed = await self.queue_manager.remove_from_queue(mr_iid)
+            if removed:
+                log.info("MR removed from queue via label removal", mr_iid=mr_iid)
+
+        await self._broadcast_queue_update()
 
     async def _handle_merge(self, event: MergeRequestEvent) -> None:
         """Handle MR merge event.
 
-        Cleans up queue entry for merged MR and removes queue label.
+        Cleans up queue entry for merged MR using state machine for proper
+        status tracking and notifications.
 
         Args:
             event: The merge request webhook event.
         """
         mr_iid = event.object_attributes.iid
 
-        # Remove from queue (idempotent)
-        removed = await self.queue_manager.remove_from_queue(mr_iid)
-
-        if removed:
-            log.info("MR cleaned up from queue after merge", mr_iid=mr_iid)
-
-            # Remove queue label to prevent stale labels on merged MRs
-            await self._remove_queue_label(mr_iid)
-        else:
+        queue_item = await self.queue_manager.get_queue_item(mr_iid)
+        if queue_item is None:
             log.debug("Merged MR was not in queue", mr_iid=mr_iid)
+            return
+
+        if self.notifier:
+            state_machine = await create_state_machine_for_mr(
+                mr_iid=mr_iid,
+                notifier=self.notifier,
+                queue_manager=self.queue_manager,
+                target_branch=event.object_attributes.target_branch,
+                websocket_manager=self.websocket_manager,
+                position_notifier=self.position_notifier,
+            )
+            current_state = state_machine.current_state.id
+            if current_state == "merging":
+                try:
+                    await state_machine.trigger_merge_success()
+                except TransitionNotAllowed:
+                    log.warning(
+                        "SM transition failed in _handle_merge (terminal state race), falling back to direct removal",
+                        mr_iid=mr_iid,
+                        current_state=state_machine.current_state.id,
+                    )
+                    await self.queue_manager.complete_mr(mr_iid, status="merged")
+                    await self._remove_queue_label(mr_iid)
+                finally:
+                    await self._broadcast_queue_update()
+                    log.info("MR cleaned up from queue after merge", mr_iid=mr_iid)
+            elif current_state in ("queued", "rebasing", "testing"):
+                # MR merged externally while still active in queue.
+                # Can't use trigger_merge_success (requires merging state),
+                # and trigger_mark_removed sends wrong notification.
+                # Replicate on_enter_merged behavior manually.
+                duration = calculate_duration(queue_item.queued_at)
+
+                await self.notifier.notify(
+                    mr_iid,
+                    "merged",
+                    merged_at=datetime.now(UTC),
+                    duration=duration,
+                    target_branch=event.object_attributes.target_branch,
+                )
+
+                if self.websocket_manager:
+                    await self.websocket_manager.broadcast_mr_completed(
+                        mr_iid,
+                        "merged",
+                        finished_at=datetime.now(UTC),
+                    )
+
+                positions_before: dict[int, int] = {}
+                old_total: int = 0
+                if self.position_notifier:
+                    positions_before = await self.position_notifier.capture_queue_positions()
+                    old_total = await self.queue_manager.get_queue_length()
+
+                await self.queue_manager.complete_mr(mr_iid, status="merged")
+                await self._remove_queue_label(mr_iid)
+
+                if self.position_notifier and positions_before:
+                    await self.position_notifier.notify_affected_mrs_after_completion(
+                        mr_iid,
+                        positions_before,
+                        old_total,
+                    )
+
+                await self._broadcast_queue_update()
+                log.info("MR cleaned up from queue after merge", mr_iid=mr_iid)
+            else:
+                # Terminal state (race condition) — MR is already being handled
+                log.debug(
+                    "MR already in terminal state on merge webhook",
+                    mr_iid=mr_iid,
+                    state=current_state,
+                )
+        else:
+            await self.queue_manager.remove_from_queue(mr_iid)
+            await self._remove_queue_label(mr_iid)
+            log.info("MR cleaned up from queue after merge", mr_iid=mr_iid)
 
     async def _handle_close(self, event: MergeRequestEvent) -> None:
         """Handle MR close event.
@@ -230,15 +337,38 @@ class MRWebhookHandler:
         """
         mr_iid = event.object_attributes.iid
 
-        removed = await self.queue_manager.remove_from_queue(mr_iid)
-
-        if removed:
-            log.info("MR removed from queue after close", mr_iid=mr_iid)
-
-            # Remove queue label to prevent stale labels on closed MRs
-            await self._remove_queue_label(mr_iid)
-        else:
+        queue_item = await self.queue_manager.get_queue_item(mr_iid)
+        if queue_item is None:
             log.debug("Closed MR was not in queue", mr_iid=mr_iid)
+            return
+
+        if self.notifier:
+            state_machine = await create_state_machine_for_mr(
+                mr_iid=mr_iid,
+                notifier=self.notifier,
+                queue_manager=self.queue_manager,
+                target_branch=event.object_attributes.target_branch,
+                websocket_manager=self.websocket_manager,
+                position_notifier=self.position_notifier,
+            )
+            try:
+                await state_machine.trigger_mark_removed(reason="closed")
+            except TransitionNotAllowed:
+                log.warning(
+                    "SM transition failed (terminal state race), falling back to direct removal",
+                    mr_iid=mr_iid,
+                    current_state=state_machine.current_state.id,
+                )
+                await self.queue_manager.complete_mr(mr_iid, status="removed", failure_reason="closed")
+                await self._remove_queue_label(mr_iid)
+            log.info("MR removed from queue after close", mr_iid=mr_iid)
+        else:
+            removed = await self.queue_manager.remove_from_queue(mr_iid)
+            if removed:
+                await self._remove_queue_label(mr_iid)
+                log.info("MR removed from queue after close", mr_iid=mr_iid)
+
+        await self._broadcast_queue_update()
 
     async def _handle_update(self, event: MergeRequestEvent) -> None:
         """Handle MR update event.
@@ -266,10 +396,12 @@ class MRWebhookHandler:
 
         if not is_in_active_queue:
             if has_trigger_label:
-                # Capture positions before adding (for hotfix notification)
+                # Capture positions before adding (for notifying existing MRs about queue changes)
                 positions_before: dict[int, int] = {}
-                if has_hotfix_label and self.position_notifier:
+                old_total: int = 0
+                if self.position_notifier:
                     positions_before = await self.position_notifier.capture_queue_positions()
+                    old_total = await self.queue_manager.get_queue_length()
 
                 # MR has label but not in active queue - add it
                 mr = await self.gitlab_client.get_mr(mr_iid)
@@ -285,7 +417,7 @@ class MRWebhookHandler:
                 await self._broadcast_queue_update()
 
                 # Send position notification
-                await self._notify_position_after_add(mr_iid, is_hotfix, positions_before)
+                await self._notify_position_after_add(mr_iid, is_hotfix, positions_before, old_total)
             else:
                 log.debug("Updated MR not in queue and no trigger label", mr_iid=mr_iid)
             return
@@ -569,6 +701,36 @@ class PipelineWebhookHandler:
         assert mr_iid is not None
         pipeline_id = event.object_attributes.id
 
+        # Re-fetch to detect concurrent state change (e.g. processor already moved to merging)
+        fresh_item = await self.queue_manager.get_queue_item(mr_iid)
+        if fresh_item is None or fresh_item.state != "testing":
+            log.debug(
+                "MR not in testing state, skipping pipeline success transition",
+                mr_iid=mr_iid,
+                pipeline_id=pipeline_id,
+                current_state=fresh_item.state if fresh_item else None,
+            )
+            return
+
+        if fresh_item.pipeline_id is not None and fresh_item.pipeline_id != pipeline_id:
+            log.debug(
+                "Pipeline ID mismatch, skipping stale pipeline success",
+                mr_iid=mr_iid,
+                expected_pipeline=fresh_item.pipeline_id,
+                received_pipeline=pipeline_id,
+            )
+            return
+
+        event_sha = event.object_attributes.sha
+        if fresh_item.expected_sha and fresh_item.expected_sha != event_sha:
+            log.debug(
+                "SHA mismatch, skipping stale pipeline success",
+                mr_iid=mr_iid,
+                expected_sha=fresh_item.expected_sha,
+                received_sha=event_sha,
+            )
+            return
+
         log.info(
             "Pipeline success for MR in testing state",
             mr_iid=mr_iid,
@@ -579,11 +741,18 @@ class PipelineWebhookHandler:
             mr_iid=mr_iid,
             notifier=self.notifier,
             queue_manager=self.queue_manager,
-            target_branch=self.settings.target_branch,
+            target_branch=fresh_item.target_branch,
             websocket_manager=self.websocket_manager,
             position_notifier=self.position_notifier,
         )
-        await state_machine.trigger_pipeline_success()
+        try:
+            await state_machine.trigger_pipeline_success()
+        except TransitionNotAllowed:
+            log.warning(
+                "SM transition failed in _handle_success (concurrent state change)",
+                mr_iid=mr_iid,
+                current_state=state_machine.current_state.id,
+            )
 
     async def _handle_failed(self, event: PipelineEvent) -> None:
         """Handle failed pipeline."""
@@ -595,42 +764,39 @@ class PipelineWebhookHandler:
         mr_iid = event.merge_request_iid
         assert mr_iid is not None
         pipeline_id = event.object_attributes.id
-        current_retry_count = queue_item.retry_count or 0
-        max_retries = self.settings.pipeline_retry_count
 
-        if current_retry_count < max_retries:
-            log.info(
-                "Pipeline failed, marking for retry",
+        # Re-fetch queue item to detect concurrent state changes (e.g. rebase during testing)
+        fresh_item = await self.queue_manager.get_queue_item(mr_iid)
+        if fresh_item is None or fresh_item.state != "testing":
+            log.debug(
+                "MR state changed, skipping pipeline failure",
                 mr_iid=mr_iid,
-                pipeline_id=pipeline_id,
-                retry_count=current_retry_count,
-                max_retries=max_retries,
+                current_state=fresh_item.state if fresh_item else None,
             )
-            await self.queue_manager.update_mr_state(
-                mr_iid,
-                "testing",
-                pipeline_status="failed",
-            )
-        else:
-            log.info(
-                "Pipeline failed, no retries remaining",
+            return
+        if fresh_item.pipeline_id is not None and fresh_item.pipeline_id != pipeline_id:
+            log.debug(
+                "Pipeline ID mismatch after re-fetch, skipping stale failure",
                 mr_iid=mr_iid,
-                pipeline_id=pipeline_id,
-                retry_count=current_retry_count,
+                expected_pipeline=fresh_item.pipeline_id,
+                received_pipeline=pipeline_id,
             )
-            state_machine = await create_state_machine_for_mr(
-                mr_iid=mr_iid,
-                notifier=self.notifier,
-                queue_manager=self.queue_manager,
-                target_branch=self.settings.target_branch,
-                websocket_manager=self.websocket_manager,
-                position_notifier=self.position_notifier,
-            )
-            await state_machine.trigger_pipeline_failed(
-                failed_jobs=[],
-                retry_count=current_retry_count,
-                error_message=f"Pipeline {pipeline_id} failed after {current_retry_count} retries",
-            )
+            return
+
+        current_retry_count = fresh_item.retry_count or 0
+
+        # Mark pipeline as failed; processor handles retry logic
+        log.info(
+            "Pipeline failed, marking as failed",
+            mr_iid=mr_iid,
+            pipeline_id=pipeline_id,
+            retry_count=current_retry_count,
+        )
+        await self.queue_manager.update_mr_state(
+            mr_iid,
+            "testing",
+            pipeline_status="failed",
+        )
 
     async def _handle_canceled(self, event: PipelineEvent) -> None:
         """Handle canceled pipeline."""
@@ -643,24 +809,37 @@ class PipelineWebhookHandler:
         assert mr_iid is not None
         pipeline_id = event.object_attributes.id
 
+        # Re-fetch queue item to detect concurrent state changes (e.g. rebase during testing)
+        fresh_item = await self.queue_manager.get_queue_item(mr_iid)
+        if fresh_item is None or fresh_item.state != "testing":
+            log.debug(
+                "MR state changed, skipping pipeline cancellation",
+                mr_iid=mr_iid,
+                current_state=fresh_item.state if fresh_item else None,
+            )
+            return
+        if fresh_item.pipeline_id is not None and fresh_item.pipeline_id != pipeline_id:
+            log.debug(
+                "Pipeline ID mismatch after re-fetch, skipping stale cancellation",
+                mr_iid=mr_iid,
+                expected_pipeline=fresh_item.pipeline_id,
+                received_pipeline=pipeline_id,
+            )
+            return
+
+        current_retry_count = fresh_item.retry_count or 0
+
+        # Mark pipeline as failed; processor handles retry logic
         log.info(
-            "Pipeline canceled for MR in testing state",
+            "Pipeline canceled, marking as failed",
             mr_iid=mr_iid,
             pipeline_id=pipeline_id,
+            retry_count=current_retry_count,
         )
-
-        state_machine = await create_state_machine_for_mr(
-            mr_iid=mr_iid,
-            notifier=self.notifier,
-            queue_manager=self.queue_manager,
-            target_branch=self.settings.target_branch,
-            websocket_manager=self.websocket_manager,
-            position_notifier=self.position_notifier,
-        )
-        await state_machine.trigger_pipeline_failed(
-            failed_jobs=[],
-            retry_count=queue_item.retry_count or 0,
-            error_message=f"Pipeline {pipeline_id} was canceled",
+        await self.queue_manager.update_mr_state(
+            mr_iid,
+            "testing",
+            pipeline_status="failed",
         )
 
 
@@ -687,6 +866,12 @@ class WebhookHandler:
     position_notifier: QueuePositionNotifier | None = None
     websocket_manager: WebSocketManager | None = None
 
+    def __post_init__(self) -> None:
+        if self.notifier is None:
+            from gitlab_queue.core.notifier import MRNotifier
+
+            self.notifier = MRNotifier(gitlab_client=self.gitlab_client, settings=self.settings)
+
     async def handle_merge_request_event(self, webhook_payload: dict[str, Any]) -> None:
         """Handle merge request webhook event.
 
@@ -697,10 +882,12 @@ class WebhookHandler:
 
         event = parse_webhook_event(webhook_payload)
         if isinstance(event, MergeRequestEvent):
+            assert self.notifier is not None
             handler = MRWebhookHandler(
                 settings=self.settings,
                 gitlab_client=self.gitlab_client,
                 queue_manager=self.queue_manager,
+                notifier=self.notifier,
                 position_notifier=self.position_notifier,
                 websocket_manager=self.websocket_manager,
             )
@@ -714,16 +901,9 @@ class WebhookHandler:
         """
         from gitlab_queue.models.retorts import parse_webhook_event
 
-        if self.notifier is None:
-            from gitlab_queue.core.notifier import MRNotifier
-
-            self.notifier = MRNotifier(
-                gitlab_client=self.gitlab_client,
-                settings=self.settings,
-            )
-
         event = parse_webhook_event(webhook_payload)
         if isinstance(event, PipelineEvent):
+            assert self.notifier is not None
             handler = PipelineWebhookHandler(
                 settings=self.settings,
                 gitlab_client=self.gitlab_client,

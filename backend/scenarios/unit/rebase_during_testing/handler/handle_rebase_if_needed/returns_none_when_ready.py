@@ -20,9 +20,7 @@ class Scenario(vedro.Scenario):
         self.ctx = create_context()
 
     async def when_handle_rebase_if_needed_is_called(self):
-        self.new_ctx, self.pipeline = await self.handler.handle_rebase_if_needed(
-            42, self.ctx
-        )
+        self.new_ctx, self.pipeline = await self.handler.handle_rebase_if_needed(42, self.ctx)
 
     def then_context_is_same(self):
         assert self.new_ctx is self.ctx

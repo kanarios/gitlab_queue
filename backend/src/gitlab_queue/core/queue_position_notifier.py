@@ -95,18 +95,45 @@ class QueuePositionNotifier:
                 positions[item.mr_iid] = i
         return positions
 
+    def _select_notification_template(
+        self,
+        position_changed: bool,
+        is_hotfix: bool,
+    ) -> str:
+        """Select notification template based on what changed.
+
+        Args:
+            position_changed: Whether the position changed.
+            is_hotfix: Whether the triggering MR was a hotfix.
+
+        Returns:
+            Template name to use for notification.
+        """
+        if position_changed and is_hotfix:
+            return "position_changed_hotfix"
+        if position_changed:
+            return "position_changed"
+        if is_hotfix:
+            return "total_changed_hotfix"
+        return "total_changed"
+
     async def _notify_position_changes(
         self,
         excluded_mr_iid: int,
         positions_before: dict[int, int],
+        old_total: int,
         log_context: str,
+        *,
+        is_hotfix: bool = False,
     ) -> int:
-        """Notify MRs whose positions changed, excluding a specific MR.
+        """Notify MRs whose positions or total changed, excluding a specific MR.
 
         Args:
             excluded_mr_iid: IID of MR to exclude from notifications.
             positions_before: Positions captured before the change.
+            old_total: Total queue size before the change.
             log_context: Context string for log messages (e.g., "due to hotfix").
+            is_hotfix: Whether the triggering MR was a hotfix (affects template choice).
 
         Returns:
             Number of MRs notified.
@@ -122,34 +149,39 @@ class QueuePositionNotifier:
 
         notified_count = 0
         for item in queue_items:
-            if item.state != "queued":
-                continue
-
-            if item.mr_iid == excluded_mr_iid:
+            if item.state != "queued" or item.mr_iid == excluded_mr_iid:
                 continue
 
             old_position = positions_before.get(item.mr_iid)
-            if old_position is None:
+            new_position = position_map.get(item.mr_iid)
+            if old_position is None or new_position is None:
                 continue
 
-            new_position = position_map.get(item.mr_iid)
-            if new_position is None or new_position == old_position:
+            position_changed = new_position != old_position
+            total_changed = total != old_total
+            if not position_changed and not total_changed:
                 continue
+
+            template = self._select_notification_template(position_changed, is_hotfix)
 
             log.info(
-                "Notifying position change",
+                "Notifying position/total change",
                 mr_iid=item.mr_iid,
                 old_position=old_position,
                 new_position=new_position,
+                old_total=old_total,
+                new_total=total,
+                template=template,
                 context=log_context.strip() if log_context else None,
             )
 
             await self.notifier.notify(
                 item.mr_iid,
-                "position_changed",
+                template,
                 position=new_position,
                 total=total,
                 old_position=old_position,
+                old_total=old_total,
                 estimated_minutes=new_position * ESTIMATED_MINUTES_PER_POSITION,
             )
             notified_count += 1
@@ -160,6 +192,7 @@ class QueuePositionNotifier:
         self,
         completed_mr_iid: int,
         positions_before: dict[int, int],
+        old_total: int,
     ) -> None:
         """Notify all MRs whose positions changed after an MR completed.
 
@@ -168,10 +201,12 @@ class QueuePositionNotifier:
         Args:
             completed_mr_iid: IID of the MR that was just completed.
             positions_before: Positions captured before completion.
+            old_total: Total queue size before the completion.
         """
         notified_count = await self._notify_position_changes(
             excluded_mr_iid=completed_mr_iid,
             positions_before=positions_before,
+            old_total=old_total,
             log_context="",
         )
 
@@ -182,31 +217,40 @@ class QueuePositionNotifier:
                 completed_mr_iid=completed_mr_iid,
             )
 
-    async def notify_affected_mrs_after_hotfix_added(
+    async def notify_affected_mrs_after_mr_added(
         self,
-        hotfix_mr_iid: int,
+        added_mr_iid: int,
         positions_before: dict[int, int],
+        old_total: int,
+        *,
+        is_hotfix: bool = False,
     ) -> None:
-        """Notify MRs that moved down after a hotfix was added.
+        """Notify MRs whose position or total changed after an MR was added.
 
-        When a hotfix is added, it jumps to the front of the queue,
-        pushing all other MRs back by one position.
+        When an MR is added to the queue, existing MRs need to be notified
+        about the updated queue size. If it's a hotfix, positions also shift.
 
         Args:
-            hotfix_mr_iid: IID of the hotfix MR that was just added.
-            positions_before: Positions captured before hotfix was added.
+            added_mr_iid: IID of the MR that was just added.
+            positions_before: Positions captured before the MR was added.
+            old_total: Total queue size before the MR was added.
+            is_hotfix: Whether the added MR is a hotfix (for logging context).
         """
+        log_context = " due to hotfix" if is_hotfix else ""
         notified_count = await self._notify_position_changes(
-            excluded_mr_iid=hotfix_mr_iid,
+            excluded_mr_iid=added_mr_iid,
             positions_before=positions_before,
-            log_context=" due to hotfix",
+            old_total=old_total,
+            log_context=log_context,
+            is_hotfix=is_hotfix,
         )
 
         if notified_count > 0:
             log.info(
-                "Position change notifications sent after hotfix",
+                "Position/total change notifications sent after MR added",
                 count=notified_count,
-                hotfix_mr_iid=hotfix_mr_iid,
+                added_mr_iid=added_mr_iid,
+                is_hotfix=is_hotfix,
             )
 
 

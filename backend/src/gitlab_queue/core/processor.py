@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from gitlab_queue.core.notifier import MRNotifier
     from gitlab_queue.core.queue import QueueManager
     from gitlab_queue.core.queue_position_notifier import QueuePositionNotifier
+    from gitlab_queue.models.mr import MergeRequest
     from gitlab_queue.models.pipeline import Pipeline
     from gitlab_queue.models.queue_item import QueueItem
 
@@ -57,12 +58,16 @@ QUICK_REBASE_POLL_INTERVAL_SECONDS = 3
 
 # Timeouts (seconds)
 QUICK_REBASE_TIMEOUT_SECONDS = 60
-MERGE_TIMEOUT_SECONDS = 30
 DEFAULT_POST_REBASE_PIPELINE_WAIT_SECONDS = 60
 
-# Terminal pipeline statuses to skip when waiting for post-rebase pipeline
-# These are pipelines that failed/were canceled before rebase and should not be used
+# Failed/canceled pipeline statuses to skip in the fast-forward case
+# (SHA unchanged after rebase — success pipeline is still valid).
 TERMINAL_FAILED_PIPELINE_STATUSES = frozenset(("canceled", "failed"))
+
+# ALL terminal pipeline statuses to skip when SHA changed after rebase.
+# After rebase, ANY terminal pipeline (including success) is stale —
+# it was started before the rebase and doesn't reflect the new code.
+TERMINAL_PIPELINE_STATUSES = frozenset(("canceled", "failed", "success"))
 
 
 # =============================================================================
@@ -327,6 +332,8 @@ class MergeProcessor:
             current_state = "testing"
 
         if current_state == "rebasing":
+            # Capture pre-rebase SHA if not already set (e.g., restart recovery)
+            await self._capture_pre_rebase_sha(ctx)
             # Wait for rebase to complete
             result = await self._wait_for_rebase(ctx)
             if result != ProcessingResult.SUCCESS:
@@ -424,7 +431,7 @@ class MergeProcessor:
                 )
 
                 if pipeline and pipeline.sha == new_sha:
-                    pipeline_url = self.notifier.build_pipeline_url(pipeline.id)
+                    pipeline_url = await self.notifier.build_pipeline_url(pipeline.id)
                     await sm.trigger_rebase_complete(
                         pipeline_id=pipeline.id,
                         pipeline_url=pipeline_url,
@@ -517,7 +524,7 @@ class MergeProcessor:
             # SHA changed, need pipeline with new SHA
             pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
             if pipeline and pipeline.sha == new_sha:
-                if pipeline.status in TERMINAL_FAILED_PIPELINE_STATUSES:
+                if pipeline.status in TERMINAL_PIPELINE_STATUSES:
                     log.info(
                         "Skipping pre-existing terminal pipeline after rebase",
                         mr_iid=mr_iid,
@@ -551,17 +558,30 @@ class MergeProcessor:
         if outcome.shutdown_requested:
             return None, old_sha
 
-        # Timeout - return current state
+        # Timeout - return current state with SHA validation
         mr = await self.gitlab_client.get_mr(mr_iid)
+        new_sha = mr.sha
         pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
         log.warning(
             "Timeout waiting for post-rebase pipeline",
             mr_iid=mr_iid,
             old_sha=old_sha[:8],
-            current_sha=mr.sha[:8] if mr.sha else "unknown",
+            current_sha=new_sha[:8] if new_sha else "unknown",
             pipeline_id=pipeline.id if pipeline else None,
+            pipeline_sha=pipeline.sha[:8] if pipeline and pipeline.sha else None,
         )
-        return pipeline, mr.sha
+
+        # Don't return stale pipeline if SHA doesn't match
+        if pipeline and pipeline.sha != new_sha:
+            log.warning(
+                "Timeout with stale pipeline - SHA mismatch",
+                mr_iid=mr_iid,
+                pipeline_sha=pipeline.sha[:8] if pipeline.sha else "unknown",
+                expected_sha=new_sha[:8] if new_sha else "unknown",
+            )
+            return None, new_sha
+
+        return pipeline, new_sha
 
     # =========================================================================
     # Pipeline Step
@@ -595,7 +615,7 @@ class MergeProcessor:
         log.info("Retrying pipeline", mr_iid=mr_iid, retry_count=retry_count + 1)
 
         old_pipeline_id = pipeline.id
-        old_pipeline_url = self.notifier.build_pipeline_url(old_pipeline_id)
+        old_pipeline_url = await self.notifier.build_pipeline_url(old_pipeline_id)
 
         # Capture old SHA before retry rebase for race condition prevention
         old_sha = await self._capture_pre_rebase_sha(ctx)
@@ -619,7 +639,7 @@ class MergeProcessor:
         )
 
         if new_pipeline and new_pipeline.id != old_pipeline_id and new_pipeline.sha == new_sha:
-            new_pipeline_url = self.notifier.build_pipeline_url(new_pipeline.id)
+            new_pipeline_url = await self.notifier.build_pipeline_url(new_pipeline.id)
             await sm.notify_pipeline_retry(
                 old_pipeline_id=old_pipeline_id,
                 old_pipeline_url=old_pipeline_url,
@@ -665,7 +685,7 @@ class MergeProcessor:
                 )
                 return False, None
 
-            new_pipeline_url = self.notifier.build_pipeline_url(created_pipeline.id)
+            new_pipeline_url = await self.notifier.build_pipeline_url(created_pipeline.id)
             await sm.notify_pipeline_retry(
                 old_pipeline_id=old_pipeline_id,
                 old_pipeline_url=old_pipeline_url,
@@ -894,6 +914,18 @@ class MergeProcessor:
         mr_iid = ctx.mr_iid
 
         if pipeline.status == "success":
+            # Validate SHA before processing success to prevent acting on stale pipeline
+            queue_item = await self.queue_manager.get_queue_item(mr_iid)
+            if queue_item and queue_item.expected_sha and pipeline.sha != queue_item.expected_sha:
+                log.warning(
+                    "Pipeline success but SHA mismatch - waiting for correct pipeline",
+                    mr_iid=mr_iid,
+                    pipeline_id=pipeline.id,
+                    pipeline_sha=pipeline.sha[:8] if pipeline.sha else "unknown",
+                    expected_sha=queue_item.expected_sha[:8],
+                )
+                return None  # Continue polling
+
             log.info("Pipeline succeeded", mr_iid=mr_iid, pipeline_id=pipeline.id)
             await sm.trigger_pipeline_success()
             return ProcessingResult.SUCCESS
@@ -928,6 +960,11 @@ class MergeProcessor:
         """Handle failed/canceled pipeline status."""
         mr_iid = ctx.mr_iid
         failed_jobs = await self._get_failed_jobs(pipeline.id)
+
+        # Sync retry_count with DB to prevent race with webhook handler
+        queue_item = await self.queue_manager.get_queue_item(mr_iid)
+        if queue_item and queue_item.retry_count is not None:
+            retry_count = max(retry_count, queue_item.retry_count)
 
         log.warning(
             "Pipeline failed",
@@ -1006,7 +1043,7 @@ class MergeProcessor:
         except GitLabConflictError as e:
             log.warning("Rebase conflict during testing", mr_iid=mr_iid)
             conflicted_files = await self.gitlab_client.get_mr_conflicts(mr_iid)
-            await sm.trigger_rebase_failed(
+            await sm.trigger_conflict_during_testing(
                 conflicted_files=conflicted_files,
                 error_message=str(e),
             )
@@ -1119,13 +1156,17 @@ class MergeProcessor:
         mr_iid = ctx.mr_iid
         sm = ctx.state_machine
 
-        log.info("Executing merge", mr_iid=mr_iid)
+        # Get expected SHA from queue item for race condition detection
+        queue_item = await self.queue_manager.get_queue_item(mr_iid)
+        expected_sha = queue_item.expected_sha if queue_item else None
+
+        log.info("Executing merge", mr_iid=mr_iid, expected_sha=expected_sha[:8] if expected_sha else None)
 
         try:
             # Add timeout for merge operation to prevent hanging
             merged_mr = await asyncio.wait_for(
-                self.gitlab_client.merge_mr(mr_iid),
-                timeout=float(MERGE_TIMEOUT_SECONDS),
+                self.gitlab_client.merge_mr(mr_iid, expected_sha=expected_sha),
+                timeout=float(self.settings.merge_timeout_seconds),
             )
             log.info("Merge successful", mr_iid=mr_iid, state=merged_mr.state)
             await sm.trigger_merge_success()
@@ -1133,7 +1174,9 @@ class MergeProcessor:
 
         except TimeoutError:
             log.warning("Merge operation timeout", mr_iid=mr_iid)
-            await sm.trigger_timeout(max_wait_hours=0)  # 0 indicates merge timeout
+            await sm.trigger_merge_failed(
+                error_message=f"Merge operation timed out after {self.settings.merge_timeout_seconds} seconds",
+            )
             return ProcessingResult.TIMEOUT
 
         except GitLabConflictError as e:
@@ -1239,8 +1282,8 @@ class MergeProcessor:
                 log.info("MR is no longer open", mr_iid=mr_iid, state=mr.state)
                 return False
 
-            if self.settings.queue_label not in mr.labels:
-                log.info("MR no longer has queue label", mr_iid=mr_iid)
+            if self.settings.queue_label not in mr.labels and self.settings.hotfix_label not in mr.labels:
+                log.info("MR no longer has queue or hotfix label", mr_iid=mr_iid)
                 return False
 
             return True
@@ -1281,18 +1324,26 @@ class MergeProcessor:
                 mr = await self.gitlab_client.get_mr(item.mr_iid)
 
                 if mr.state == "merged":
-                    # Already merged - update DB
-                    await self.queue_manager.update_mr_state(item.mr_iid, "merged")
+                    # Already merged - move to history
+                    await self.queue_manager.complete_mr(item.mr_iid, status="merged")
                     log.info("MR was already merged", mr_iid=item.mr_iid)
 
                 elif mr.state != "opened":
-                    # MR closed - mark as removed
-                    await self.queue_manager.update_mr_state(item.mr_iid, "removed")
+                    # MR closed - move to history as removed
+                    await self.queue_manager.complete_mr(
+                        item.mr_iid,
+                        status="removed",
+                        failure_reason="closed_during_recovery",
+                    )
                     log.info("MR was closed", mr_iid=item.mr_iid)
 
-                elif self.settings.queue_label not in mr.labels:
+                elif self.settings.queue_label not in mr.labels and self.settings.hotfix_label not in mr.labels:
                     # Label removed - mark as removed (orphaned entry cleanup)
-                    await self.queue_manager.update_mr_state(item.mr_iid, "removed")
+                    await self.queue_manager.complete_mr(
+                        item.mr_iid,
+                        status="removed",
+                        failure_reason="label_removed",
+                    )
                     log.info("MR label was removed", mr_iid=item.mr_iid)
 
                 elif item.state in ("rebasing", "testing", "merging"):
@@ -1313,7 +1364,11 @@ class MergeProcessor:
                 continue
 
             except GitLabNotFoundError:
-                await self.queue_manager.update_mr_state(item.mr_iid, "removed")
+                await self.queue_manager.complete_mr(
+                    item.mr_iid,
+                    status="removed",
+                    failure_reason="not_found",
+                )
                 log.warning("MR not found during recovery", mr_iid=item.mr_iid)
 
             except GitLabAPIError as e:
@@ -1326,6 +1381,23 @@ class MergeProcessor:
 
         log.info("State recovery complete")
 
+    async def _fetch_mrs_by_label(self, label: str) -> list[MergeRequest]:
+        """Fetch open MRs with a given label, gracefully handling GitLab errors.
+
+        Args:
+            label: GitLab label to filter by.
+
+        Returns:
+            List of MRs, empty if GitLab is unavailable.
+        """
+        try:
+            return await self.gitlab_client.list_mrs_with_label(label, state="opened")
+        except GitLabCircuitOpenError:
+            log.warning("GitLab circuit open, skipping label sync", label=label)
+        except GitLabAPIError as e:
+            log.warning("Failed to fetch MRs from GitLab during sync", label=label, error=str(e))
+        return []
+
     async def _sync_missing_mrs_from_gitlab(self) -> None:
         """Add MRs that have the queue label in GitLab but aren't in the queue.
 
@@ -1336,17 +1408,18 @@ class MergeProcessor:
         """
         log.info("Syncing missing MRs from GitLab")
 
-        # Get all open MRs with queue label from GitLab
-        try:
-            gitlab_mrs = await self.gitlab_client.list_mrs_with_label(
-                self.settings.queue_label,
-                state="opened",
-            )
-        except GitLabCircuitOpenError:
-            log.warning("GitLab circuit open, skipping initial sync")
-            return
-        except GitLabAPIError as e:
-            log.warning("Failed to fetch MRs from GitLab during sync", error=str(e))
+        queue_mrs = await self._fetch_mrs_by_label(self.settings.queue_label)
+        hotfix_mrs = await self._fetch_mrs_by_label(self.settings.hotfix_label)
+
+        # Merge without duplicates
+        mrs_dict = {mr.iid: mr for mr in queue_mrs}
+        for mr in hotfix_mrs:
+            if mr.iid not in mrs_dict:
+                mrs_dict[mr.iid] = mr
+        gitlab_mrs = list(mrs_dict.values())
+
+        if not gitlab_mrs:
+            log.info("No MRs found with queue or hotfix labels")
             return
 
         # Get current queue IIDs

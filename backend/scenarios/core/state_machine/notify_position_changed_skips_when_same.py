@@ -27,7 +27,16 @@ class Scenario(vedro.Scenario):
         self.notifier.notify.reset_mock()
 
     async def when_notify_position_changed_is_called_with_same_position(self):
+        """
+        Calls the state machine's notify_position_changed with old_position set to the current queue position (2).
+        """
         await self.sm.notify_position_changed(old_position=2)
 
     def then_notifier_should_not_be_called(self):
-        self.notifier.notify.assert_not_called()
+        """
+        Asserts that the notifier's `notify` coroutine was not awaited.
+
+        Raises:
+            AssertionError: If `notifier.notify` was awaited.
+        """
+        self.notifier.notify.assert_not_awaited()

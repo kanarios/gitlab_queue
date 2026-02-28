@@ -4,16 +4,19 @@ import vedro
 
 from gitlab_queue.webhooks.handlers import MRWebhookHandler
 
-from ._helpers import (create_gitlab_client_with_transport,
-                       create_mock_queue_manager, create_mr_event,
-                       created_mock_settings)
+from ._helpers import (
+    create_gitlab_client_with_transport,
+    create_mock_queue_manager,
+    create_mock_settings,
+    create_mr_event,
+)
 
 
 class Scenario(vedro.Scenario):
     subject = "detect queue label not removed"
 
     def given_handler_and_event(self):
-        self.settings = created_mock_settings()
+        self.settings = create_mock_settings()
         self.gitlab_client, _ = create_gitlab_client_with_transport(mr_iid=123)
         self.handler = MRWebhookHandler(
             settings=self.settings,

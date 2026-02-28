@@ -16,7 +16,7 @@ from gitlab_queue.models.events import PipelineAttributes, PipelineEvent
 from gitlab_queue.models.queue_item import QueueItem
 
 
-def created_mock_settings():
+def create_mock_settings():
     """Create mock settings."""
     settings = MagicMock()
     settings.queue_label = Labels.MERGE_QUEUE
@@ -27,7 +27,7 @@ def created_mock_settings():
 
 
 # Alias for backward compatibility
-create_mock_settings = created_mock_settings
+created_mock_settings = create_mock_settings
 
 
 def create_mock_gitlab_client():
@@ -86,6 +86,7 @@ def create_pipeline_event(
     status: str = "success",
     mr_iid: int | None = None,
     include_mr_iid: bool = True,
+    sha: str | None = None,
 ) -> PipelineEvent:
     """Create a PipelineEvent for testing.
 
@@ -97,6 +98,7 @@ def create_pipeline_event(
         status: Pipeline status (success, failed, etc.).
         mr_iid: MR IID (generated if not provided and include_mr_iid is True).
         include_mr_iid: Whether to include merge_request_iid in the event.
+        sha: Pipeline commit SHA (generated if not provided).
     """
     event_data = fake(
         PipelineEventSchema
@@ -120,7 +122,7 @@ def create_pipeline_event(
         object_attributes=PipelineAttributes(
             id=actual_pipeline_id,
             status=status,
-            sha=event_data["object_attributes"]["sha"],
+            sha=sha if sha is not None else event_data["object_attributes"]["sha"],
             ref=event_data["object_attributes"]["ref"],
         ),
         merge_request_iid=actual_mr_iid,

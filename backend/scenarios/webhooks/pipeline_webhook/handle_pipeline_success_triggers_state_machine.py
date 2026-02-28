@@ -10,9 +10,9 @@ from ._helpers import (
     create_gitlab_client_with_transport,
     create_mock_notifier,
     create_mock_queue_manager,
+    create_mock_settings,
     create_pipeline_event,
     create_queue_item_in_state,
-    created_mock_settings,
 )
 
 
@@ -20,7 +20,7 @@ class Scenario(vedro.Scenario):
     subject = "handle pipeline success triggers state machine"
 
     def given_handler_and_event(self):
-        self.settings = created_mock_settings()
+        self.settings = create_mock_settings()
         self.gitlab_client, self.transport = create_gitlab_client_with_transport()
         self.queue_manager = create_mock_queue_manager()
         self.queue_manager.get_queue_item = AsyncMock(return_value=create_queue_item_in_state("testing", mr_iid=123))
@@ -43,10 +43,10 @@ class Scenario(vedro.Scenario):
             self.mock_state_machine = mock_state_machine
 
     def then_state_machine_should_be_created(self):
-        self.mock_sm.assert_called_once()
+        self.mock_sm.assert_awaited_once()
 
     def and_pipeline_success_should_be_triggered(self):
-        self.mock_state_machine.trigger_pipeline_success.assert_called_once()
+        self.mock_state_machine.trigger_pipeline_success.assert_awaited_once()
 
     async def cleanup(self):
         await self.gitlab_client.close()

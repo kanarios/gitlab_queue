@@ -3,9 +3,9 @@
 import asyncio
 
 import vedro
-from scenarios.contexts.sqlite_client import initialized_test_database
 
 from gitlab_queue.core.queue import QueueManager
+from scenarios.contexts.sqlite_client import initialized_test_database
 
 from ._helpers import create_test_mr
 
@@ -31,8 +31,9 @@ class Scenario(vedro.Scenario):
 
     def then_hotfix_should_be_returned(self):
         assert self.next_item is not None
-        assert self.next_item.mr_iid == 2, f"Expected hotfix (iid=2), got iid={self.next_item.mr_iid}"
+        assert self.next_item.mr_iid == 2
         assert self.next_item.is_hotfix is True
 
     async def do_cleanup(self):
+        """Clean up the test DB context."""
         await self._db_context.__aexit__(None, None, None)

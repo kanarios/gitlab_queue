@@ -14,7 +14,6 @@ import contextlib
 
 import jj
 from jj.mock import mocked
-from scenarios.contexts.jj_gitlab_mock import get_mock_url
 from vedro import given, scenario, then, when
 
 from gitlab_queue.clients.gitlab import GitLabClient
@@ -24,6 +23,8 @@ from gitlab_queue.core.processor import MergeProcessor, ProcessingResult
 from gitlab_queue.core.queue import QueueManager
 from gitlab_queue.db.database import Database
 from gitlab_queue.models.mr import Author, MergeRequest
+from scenarios.contexts.jj_gitlab_mock import get_mock_url
+from scenarios.mocks.gitlab import make_project_mock
 
 
 @scenario()
@@ -79,10 +80,12 @@ async def graceful_shutdown_with_no_processing():
                 await processor_task
 
     with then("processor shuts down cleanly"):
-        assert shutdown_complete, "Shutdown should complete within timeout"
-        assert processor.is_shutdown_requested, "Shutdown flag should be set"
-        assert not processor.is_processing, "No MR should be processing"
-        assert processor.current_mr_iid is None, "No current MR"
+        assert shutdown_complete
+        assert processor.is_shutdown_requested
+        assert not processor.is_processing
+        assert processor.current_mr_iid is None
+
+    await db.close()
 
 
 @scenario()
@@ -146,6 +149,8 @@ async def graceful_shutdown_during_rebase():
         get_notes_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/70/notes")
         get_notes_response = jj.Response(status=200, json=[])
 
+        project_matcher, project_response = make_project_mock(mock_url)
+
         settings = Settings(
             gitlab_url=mock_url,
             gitlab_project_id=123,
@@ -160,6 +165,7 @@ async def graceful_shutdown_during_rebase():
         )
 
     async with (
+        mocked(project_matcher, project_response),
         mocked(get_mr_matcher, get_mr_response),
         mocked(rebase_matcher, rebase_response) as rebase_mock,
         mocked(status_matcher, status_response),
@@ -203,7 +209,7 @@ async def graceful_shutdown_during_rebase():
 
             # Verify rebase was started
             rebase_history = await rebase_mock.fetch_history()
-            assert len(rebase_history) == 1, "Rebase should have been initiated"
+            assert len(rebase_history) == 1
 
             # Check MR state - should be in rebasing state
             mr_state = await queue.get_mr_state(70)
@@ -215,6 +221,8 @@ async def graceful_shutdown_during_rebase():
 
             # Verify shutdown flag
             assert processor.is_shutdown_requested
+
+    await db.close()
 
 
 @scenario()
@@ -310,7 +318,10 @@ async def processor_state_recovery_after_shutdown():
         response = jj.Response(status=200, json=mr_data)
         mr_mocks.append(mocked(matcher, response))
 
+    project_matcher, project_response = make_project_mock(mock_url)
+
     async with (
+        mocked(project_matcher, project_response),
         mr_mocks[0],
         mr_mocks[1],
         mr_mocks[2],
@@ -333,26 +344,32 @@ async def processor_state_recovery_after_shutdown():
         with then("intermediate states are reset to queued"):
             # Check states after recovery
             mr_71_state = await queue.get_mr_state(71)
-            assert mr_71_state["status"] == "queued", "Queued MR should remain queued"
+            assert mr_71_state["status"] == "queued"
 
             mr_72_state = await queue.get_mr_state(72)
-            assert mr_72_state["status"] == "queued", "Rebasing MR should be reset to queued"
+            assert mr_72_state["status"] == "queued"
 
             mr_73_state = await queue.get_mr_state(73)
-            assert mr_73_state["status"] == "queued", "Testing MR should be reset to queued"
+            assert mr_73_state["status"] == "queued"
 
             mr_74_state = await queue.get_mr_state(74)
-            assert mr_74_state["status"] == "queued", "Merging MR should be reset to queued"
+            assert mr_74_state["status"] == "queued"
 
             # Verify queue order is maintained
             next_mr = await queue.get_next_mr()
             assert next_mr is not None
-            assert next_mr.mr_iid == 71, "First MR should be next"
+            assert next_mr.mr_iid == 71
+
+    await db.close()
 
 
 @scenario()
 async def shutdown_timeout_handling():
-    """Test handling of shutdown timeout when processor doesn't stop quickly."""
+    """
+    Test processor behavior when the shutdown wait times out.
+
+    Sets up an in-memory database, queue manager, GitLab client, notifier, and MergeProcessor, starts the processor, requests shutdown with a very short wait timeout, and asserts that the processor's shutdown flag is set.
+    """
 
     with given("processor that takes time to shutdown"):
         db = Database(database_url="sqlite+aiosqlite:///:memory:")
@@ -404,7 +421,9 @@ async def shutdown_timeout_handling():
     with then("timeout is handled properly"):
         # Shutdown may complete quickly on fast machines, so we only verify
         # that the shutdown flag is properly set
-        assert processor.is_shutdown_requested, "Shutdown should be requested"
+        assert processor.is_shutdown_requested
+
+    await db.close()
 
 
 @scenario()
@@ -466,6 +485,8 @@ async def concurrent_processing_during_shutdown():
         get_notes_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/75/notes")
         get_notes_response = jj.Response(status=200, json=[])
 
+        project_matcher, project_response = make_project_mock(mock_url)
+
         settings = Settings(
             gitlab_url=mock_url,
             gitlab_project_id=123,
@@ -479,6 +500,7 @@ async def concurrent_processing_during_shutdown():
         )
 
     async with (
+        mocked(project_matcher, project_response),
         mocked(get_mr_matcher, get_mr_response),
         mocked(rebase_matcher, rebase_response),
         mocked(pipelines_matcher, pipelines_response),
@@ -526,10 +548,12 @@ async def concurrent_processing_during_shutdown():
         with then("processing state is tracked correctly"):
             # During shutdown, processor may have finished early
             # We check that shutdown was properly requested and processed
-            assert processor.is_shutdown_requested, "Shutdown should be requested"
+            assert processor.is_shutdown_requested
             # Result should indicate error due to shutdown
-            assert result == ProcessingResult.ERROR, f"Should return error due to shutdown, got {result}"
-            assert not processor.is_processing, "Should not be processing after shutdown"
+            assert result == ProcessingResult.ERROR
+            assert not processor.is_processing
+
+    await db.close()
 
 
 __all__ = [

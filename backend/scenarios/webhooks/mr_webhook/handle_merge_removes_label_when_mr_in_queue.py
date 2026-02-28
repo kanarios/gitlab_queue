@@ -4,8 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import vedro
 
-from gitlab_queue.models.events import (MergeRequestAttributes,
-                                        MergeRequestEvent)
+from gitlab_queue.models.events import MergeRequestAttributes, MergeRequestEvent
 from gitlab_queue.webhooks.handlers import MRWebhookHandler
 
 
@@ -22,7 +21,8 @@ class Scenario(vedro.Scenario):
 
     def given_queue_manager(self):
         self.queue_manager = AsyncMock()
-        self.queue_manager.remove_from_queue.return_value = True
+        self.queue_manager.get_queue_item = AsyncMock(return_value=MagicMock())
+        self.queue_manager.remove_from_queue = AsyncMock(return_value=True)
 
     def given_handler(self):
         self.handler = MRWebhookHandler(
@@ -54,7 +54,7 @@ class Scenario(vedro.Scenario):
         await self.handler._handle_merge(self.event)
 
     def then_it_should_remove_mr_from_queue(self):
-        self.queue_manager.remove_from_queue.assert_called_once_with(123)
+        self.queue_manager.remove_from_queue.assert_awaited_once_with(123)
 
     def then_it_should_remove_queue_label(self):
-        self.gitlab_client.remove_mr_label.assert_called_once_with(123, "merge_queue")
+        self.gitlab_client.remove_mr_label.assert_awaited_once_with(123, "merge_queue")

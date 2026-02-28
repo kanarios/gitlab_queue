@@ -24,12 +24,25 @@ class Scenario(vedro.Scenario):
         self.manager._connections.add(self.mock_ws)
 
     async def when_queue_updated_is_broadcast(self):
+        """
+        Trigger the manager to broadcast a "queue:updated" event using prepared test data.
+
+        Prepares self.queue_data as a single-item list (mr_iid=42, title="Test", status=QueueState.REBASING) and self.stats_data mapping QueueState.QUEUED to 0 and QueueState.REBASING to 1, then calls manager.broadcast_queue_updated with those values.
+        """
         self.queue_data = [{"mr_iid": 42, "title": "Test", "status": QueueState.REBASING}]
         self.stats_data = {QueueState.QUEUED: 0, QueueState.REBASING: 1}
         await self.manager.broadcast_queue_updated(self.queue_data, self.stats_data)
 
     def then_broadcast_should_be_sent_to_connection(self):
-        self.mock_ws.send_json.assert_called_once()
+        """
+        Assert that a "queue:updated" broadcast was sent to the mock WebSocket with the expected payload.
+
+        Verifies that send_json was awaited exactly once and that the sent message has:
+        - "type" equal to "queue:updated"
+        - "data.queue" equal to self.queue_data
+        - "data.stats" equal to self.stats_data
+        """
+        self.mock_ws.send_json.assert_awaited_once()
         call_args = self.mock_ws.send_json.call_args[0][0]
         assert call_args["type"] == "queue:updated"
         assert call_args["data"]["queue"] == self.queue_data

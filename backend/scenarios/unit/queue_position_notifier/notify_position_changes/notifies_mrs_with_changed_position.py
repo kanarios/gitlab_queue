@@ -27,9 +27,15 @@ class Scenario(vedro.Scenario):
         )
 
     async def when_notify_position_changes_is_called(self):
+        """
+        Call the position notifier to notify MRs about position changes and store the result.
+
+        This coroutine invokes self.position_notifier._notify_position_changes with an excluded MR IID of 999, the previously recorded positions, the previous total count, and an empty log context. Sets self.notified_count to the number of notifications that were sent.
+        """
         self.notified_count = await self.position_notifier._notify_position_changes(
             excluded_mr_iid=999,
             positions_before=self.positions_before,
+            old_total=len(self.positions_before),
             log_context="",
         )
 
@@ -41,8 +47,5 @@ class Scenario(vedro.Scenario):
 
     def and_notifications_use_position_changed_template(self):
         calls = self.notifier.notify.call_args_list
-        statuses = [
-            c.kwargs.get("status", c.args[1] if len(c.args) > 1 else None)
-            for c in calls
-        ]
+        statuses = [c.kwargs.get("status", c.args[1] if len(c.args) > 1 else None) for c in calls]
         assert all(s == "position_changed" for s in statuses)

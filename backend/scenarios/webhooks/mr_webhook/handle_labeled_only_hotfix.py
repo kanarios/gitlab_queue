@@ -1,20 +1,23 @@
 """Test: handle labeled action with only hotfix label (no merge_queue)."""
 
 import vedro
-
-from gitlab_queue.webhooks.handlers import MRWebhookHandler
 from scenarios.library import Labels
 
-from ._helpers import (create_gitlab_client_with_transport,
-                       create_mock_queue_manager, create_mr_event,
-                       created_mock_settings)
+from gitlab_queue.webhooks.handlers import MRWebhookHandler
+
+from ._helpers import (
+    create_gitlab_client_with_transport,
+    create_mock_queue_manager,
+    create_mock_settings,
+    create_mr_event,
+)
 
 
 class Scenario(vedro.Scenario):
     subject = "handle labeled action with only hotfix label adds MR to queue"
 
     def given_handler(self):
-        self.settings = created_mock_settings()
+        self.settings = create_mock_settings()
         self.gitlab_client, self.transport = create_gitlab_client_with_transport(
             mr_iid=123,
             labels=[Labels.HOTFIX],
@@ -41,7 +44,7 @@ class Scenario(vedro.Scenario):
         self.transport.assert_called_with_path("/api/v4/projects/123/merge_requests/123")
 
     def and_mr_should_be_added_to_queue(self):
-        self.queue_manager.add_to_queue.assert_called_once()
+        self.queue_manager.add_to_queue.assert_awaited_once()
 
     def and_mr_should_be_marked_as_hotfix(self):
         call_args = self.queue_manager.add_to_queue.call_args

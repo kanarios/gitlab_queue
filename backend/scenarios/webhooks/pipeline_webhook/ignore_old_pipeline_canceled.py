@@ -10,9 +10,9 @@ from ._helpers import (
     create_gitlab_client_with_transport,
     create_mock_notifier,
     create_mock_queue_manager,
+    create_mock_settings,
     create_pipeline_event,
     create_queue_item_in_state,
-    created_mock_settings,
 )
 
 OLD_PIPELINE_ID = 1000
@@ -24,7 +24,7 @@ class Scenario(vedro.Scenario):
     subject = "ignore old pipeline canceled webhook after rebase"
 
     def given_handler_and_event(self):
-        self.settings = created_mock_settings()
+        self.settings = create_mock_settings()
         self.gitlab_client, self.transport = create_gitlab_client_with_transport()
         self.queue_manager = create_mock_queue_manager()
         # Queue item tracking the NEW pipeline (after rebase)
@@ -60,13 +60,13 @@ class Scenario(vedro.Scenario):
             self.mock_state_machine = mock_state_machine
 
     def then_queue_item_should_be_checked(self):
-        self.queue_manager.get_queue_item.assert_called_once_with(MR_IID)
+        self.queue_manager.get_queue_item.assert_awaited_once_with(MR_IID)
 
     def and_state_machine_should_not_be_created(self):
-        self.mock_create_sm.assert_not_called()
+        self.mock_create_sm.assert_not_awaited()
 
     def and_pipeline_failed_should_not_be_triggered(self):
-        self.mock_state_machine.trigger_pipeline_failed.assert_not_called()
+        self.mock_state_machine.trigger_pipeline_failed.assert_not_awaited()
 
     async def cleanup(self):
         await self.gitlab_client.close()

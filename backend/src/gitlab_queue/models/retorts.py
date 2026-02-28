@@ -41,11 +41,31 @@ def _extract_labels(labels: list[Any]) -> list[str]:
     """
     if not labels:
         return []
-    first = labels[0]
-    if isinstance(first, dict):
-        # Handle both API format (name) and webhook format (title)
-        return [str(label.get("name") or label.get("title", "")) for label in labels]
-    return [str(label) for label in labels]
+
+    extracted: list[str] = []
+    for label in labels:
+        if label is None:
+            continue
+
+        value: str | None = None
+        if isinstance(label, dict):
+            raw = label.get("name") or label.get("title")
+            if raw is not None:
+                value = str(raw)
+        elif isinstance(label, str):
+            value = label
+        else:
+            # Unknown label format: ignore instead of raising.
+            continue
+
+        if value is None:
+            continue
+        value = value.strip()
+        if not value:
+            continue
+        extracted.append(value)
+
+    return extracted
 
 
 # Retort for parsing GitLab API responses into dataclass models
@@ -124,6 +144,9 @@ def _parse_datetime(value: str | None) -> datetime | None:
     """
     if not value:
         return None
+    # Handle "YYYY-MM-DD HH:MM:SS UTC" format from GitLab pipeline webhooks
+    if value.endswith(" UTC"):
+        return datetime.fromisoformat(value[:-4] + "+00:00")
     # Handle Z suffix (UTC timezone)
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 

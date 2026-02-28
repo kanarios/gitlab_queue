@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import jj
 from jj.mock import mocked
-from scenarios.contexts.jj_gitlab_mock import get_mock_url
 from vedro import given, scenario, then, when
 
 from gitlab_queue.clients.gitlab import GitLabClient
@@ -21,6 +20,8 @@ from gitlab_queue.core.processor import MergeProcessor, ProcessingResult
 from gitlab_queue.core.queue import QueueManager
 from gitlab_queue.db.database import Database
 from gitlab_queue.models.mr import Author, MergeRequest
+from scenarios.contexts.jj_gitlab_mock import get_mock_url
+from scenarios.mocks.gitlab import make_project_mock
 
 
 @scenario()
@@ -123,6 +124,8 @@ async def process_mr_with_pipeline_failure_and_retry():
         get_notes_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/50/notes")
         get_notes_response = jj.Response(status=200, json=[])
 
+        project_matcher, project_response = make_project_mock(mock_url)
+
         settings = Settings(
             gitlab_url=mock_url,
             gitlab_project_id=123,
@@ -139,6 +142,7 @@ async def process_mr_with_pipeline_failure_and_retry():
 
     # Mock sequence: first pipeline check fails, rebase retry, second pipeline succeeds
     async with (
+        mocked(project_matcher, project_response),
         mocked(get_mr_matcher, get_mr_response),
         mocked(rebase_matcher, rebase_response_1) as _rebase_mock_1,
         mocked(pipelines_matcher, pipelines_response_1),
@@ -168,11 +172,13 @@ async def process_mr_with_pipeline_failure_and_retry():
 
             # Verify merge was eventually called
             merge_history = await merge_mock.fetch_history()
-            assert len(merge_history) == 1, "Merge should be called after retry"
+            assert len(merge_history) == 1
 
             # Verify final state
             mr_state = await queue.get_mr_state(50)
             assert mr_state["status"] == "merged"
+
+    await db.close()
 
 
 @scenario()
@@ -258,6 +264,8 @@ async def process_mr_with_pipeline_failure_max_retries():
         get_notes_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/51/notes")
         get_notes_response = jj.Response(status=200, json=[])
 
+        project_matcher, project_response = make_project_mock(mock_url)
+
         settings = Settings(
             gitlab_url=mock_url,
             gitlab_project_id=123,
@@ -286,6 +294,7 @@ async def process_mr_with_pipeline_failure_max_retries():
         pipeline_mocks.append(mocked(pipelines_matcher, response))
 
     async with (
+        mocked(project_matcher, project_response),
         mocked(get_mr_matcher, get_mr_response),
         mocked(rebase_matcher, rebase_response) as _rebase_mock,
         pipeline_mocks[0],
@@ -315,7 +324,7 @@ async def process_mr_with_pipeline_failure_max_retries():
 
             # Verify failure comment was posted
             comment_history = await comment_mock.fetch_history()
-            assert len(comment_history) >= 1, "Failure comment should be posted"
+            assert len(comment_history) >= 1
 
             # Final state depends on mock response ordering (see NOTE above)
             mr_state = await queue.get_mr_state(51)
@@ -324,6 +333,8 @@ async def process_mr_with_pipeline_failure_max_retries():
                 "testing",
                 "timeout",
             ), f"MR should be failed, testing, or timeout, got {mr_state['status']}"
+
+    await db.close()
 
 
 @scenario()
@@ -402,6 +413,8 @@ async def process_mr_with_canceled_pipeline():
         get_notes_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/52/notes")
         get_notes_response = jj.Response(status=200, json=[])
 
+        project_matcher, project_response = make_project_mock(mock_url)
+
         settings = Settings(
             gitlab_url=mock_url,
             gitlab_project_id=123,
@@ -416,6 +429,7 @@ async def process_mr_with_canceled_pipeline():
         )
 
     async with (
+        mocked(project_matcher, project_response),
         mocked(get_mr_matcher, get_mr_response),
         mocked(rebase_matcher, rebase_response),
         mocked(pipelines_matcher, pipelines_response),
@@ -443,7 +457,7 @@ async def process_mr_with_canceled_pipeline():
 
             # Verify canceled jobs were fetched
             jobs_history = await jobs_mock.fetch_history()
-            assert len(jobs_history) >= 1, "Canceled jobs should be fetched"
+            assert len(jobs_history) >= 1
 
             # Check final state
             mr_state = await queue.get_mr_state(52)
@@ -453,6 +467,8 @@ async def process_mr_with_canceled_pipeline():
                 "merged",
                 "testing",
             ), f"MR should be failed, merged, or testing after retry, got {mr_state['status']}"
+
+    await db.close()
 
 
 __all__ = [

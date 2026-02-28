@@ -33,9 +33,15 @@ class Scenario(vedro.Scenario):
         assert self.result.state == "merged"
 
     def and_get_mr_called_once(self):
-        assert self.mock_get_mr.call_count == 1
+        self.mock_get_mr.assert_awaited_once()
 
     def and_put_called_with_merge_endpoint(self):
-        self.mock_put.assert_called_once()
+        """
+        Verify the GitLab client's PUT was awaited once and targeted the merge endpoint for the MR with iid 42.
+
+        Raises:
+                AssertionError: If the PUT was not awaited exactly once or if the request URL does not include '/merge_requests/42/merge'.
+        """
+        self.mock_put.assert_awaited_once()
         call_args = self.mock_put.call_args
         assert "/merge_requests/42/merge" in call_args.args[0]

@@ -23,10 +23,7 @@ class Scenario(vedro.Scenario):
 
     async def given_queue_with_mr_at_specified_position(self):
         self.mr_iid = 100 + self.position
-        queue_items = [
-            MockQueueItem(mr_iid=100 + i)
-            for i in range(1, self.position + 1)
-        ]
+        queue_items = [MockQueueItem(mr_iid=100 + i) for i in range(1, self.position + 1)]
         self.notifier = create_mock_notifier()
         self.queue_manager = create_mock_queue_manager(queue_items)
         self.position_notifier = create_position_notifier(
@@ -35,9 +32,12 @@ class Scenario(vedro.Scenario):
         )
 
     async def when_notify_initial_position_is_called(self):
+        """
+        Invoke notify_initial_position on the prepared position notifier using the stored merge request IID.
+        """
         await self.position_notifier.notify_initial_position(self.mr_iid)
 
     def then_estimated_minutes_equals_position_times_15(self):
-        assert self.notifier.notify.called, "notify was not called"
+        self.notifier.notify.assert_awaited_once()
         call_kwargs = self.notifier.notify.call_args.kwargs
         assert call_kwargs["estimated_minutes"] == self.expected_minutes

@@ -232,21 +232,31 @@ class GitLabMockTransport(httpx.AsyncBaseTransport):
         assert len(self._history) > 0, "Expected at least one request, but none were made"
 
     def assert_called_once(self) -> None:
-        """Assert that exactly one request was made.
+        """
+        Assert that exactly one request was recorded in the transport history.
 
         Raises:
-            AssertionError: If request count is not exactly 1.
+            AssertionError: If the number of recorded requests is not exactly 1.
         """
         assert len(self._history) == 1, f"Expected exactly 1 request, but {len(self._history)} were made"
 
-    def assert_called_with_path(self, path: str) -> None:
-        """Assert that a request was made to the specified path.
-
-        Args:
-            path: Expected URL path.
+    def assert_not_called(self) -> None:
+        """Assert that no requests were made.
 
         Raises:
-            AssertionError: If no request to the path was found.
+            AssertionError: If any requests were made.
+        """
+        assert len(self._history) == 0, f"Expected no requests, but {len(self._history)} were made"
+
+    def assert_called_with_path(self, path: str) -> None:
+        """
+        Verify that at least one recorded request targeted the given URL path.
+
+        Parameters:
+            path (str): URL path to look for (for example, "/api/v4/projects").
+
+        Raises:
+            AssertionError: If no recorded request matches the provided path.
         """
         paths = [str(r.url.path) for r in self._history]
         assert path in paths, f"Expected request to {path}, but got requests to: {paths}"

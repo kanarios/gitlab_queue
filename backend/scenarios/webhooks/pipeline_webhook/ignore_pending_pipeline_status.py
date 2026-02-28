@@ -8,8 +8,8 @@ from ._helpers import (
     create_gitlab_client_with_transport,
     create_mock_notifier,
     create_mock_queue_manager,
+    create_mock_settings,
     create_pipeline_event,
-    created_mock_settings,
 )
 
 
@@ -17,7 +17,7 @@ class Scenario(vedro.Scenario):
     subject = "ignore pending pipeline status"
 
     def given_handler_and_event(self):
-        self.settings = created_mock_settings()
+        self.settings = create_mock_settings()
         self.gitlab_client, self.transport = create_gitlab_client_with_transport()
         self.queue_manager = create_mock_queue_manager()
         self.handler = PipelineWebhookHandler(
@@ -33,7 +33,7 @@ class Scenario(vedro.Scenario):
 
     def then_queue_item_should_not_be_checked(self):
         # pending status is not in handled statuses
-        self.queue_manager.get_queue_item.assert_not_called()
+        self.queue_manager.get_queue_item.assert_not_awaited()
 
     async def cleanup(self):
         await self.gitlab_client.close()

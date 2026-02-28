@@ -23,10 +23,20 @@ class Scenario(vedro.Scenario):
         )
 
     async def when_mark_removed_is_triggered_with_closed(self):
+        """
+        Triggers the state machine's "mark removed" transition using reason "closed".
+        """
         await self.sm.trigger_mark_removed(reason="closed")
 
     def then_notifier_should_be_called_with_removed_closed_template(self):
-        self.notifier.notify.assert_called()
+        """
+        Asserts that the notifier was awaited with mr_iid 123 and the "removed_closed" template.
+
+        Raises:
+            AssertionError: If the notifier was not awaited or if the last call's first positional
+            argument is not 123 (mr_iid) or the second positional argument is not "removed_closed" (template).
+        """
+        self.notifier.notify.assert_awaited_once()
         call_args = self.notifier.notify.call_args
         assert call_args[0][0] == 123  # mr_iid
         assert call_args[0][1] == "removed_closed"  # template

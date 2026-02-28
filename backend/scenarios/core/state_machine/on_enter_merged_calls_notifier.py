@@ -24,10 +24,21 @@ class Scenario(vedro.Scenario):
         )
 
     async def when_merge_success_is_triggered(self):
+        """
+        Trigger a merge success event on the scenario's state machine.
+
+        This causes the state machine to process a successful merge, producing observable side effects (for example, notifier invocations and state transitions) that subsequent test steps verify.
+        """
         await self.sm.trigger_merge_success()
 
     def then_notifier_should_be_called_with_merged_template(self):
-        self.notifier.notify.assert_called()
+        """
+        Assert that notifier.notify was awaited and was called with mr_iid 123 and template "merged".
+
+        Verifies the recorded call to `notifier.notify` has the first positional argument equal to 123 (mr_iid)
+        and the second positional argument equal to "merged" (template).
+        """
+        self.notifier.notify.assert_awaited()
         call_args = self.notifier.notify.call_args
         assert call_args[0][0] == 123  # mr_iid
         assert call_args[0][1] == "merged"  # template

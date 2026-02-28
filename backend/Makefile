@@ -41,7 +41,7 @@ test-changed:
 	uv run vedro run scenarios/ --changed-against-branch=main
 
 test-cov:
-	uv run coverage run -m vedro run scenarios/
+	uv run coverage run -m vedro run scenarios/ -f
 	uv run coverage report -m
 	uv run coverage html
 

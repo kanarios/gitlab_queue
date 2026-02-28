@@ -21,10 +21,18 @@ class Scenario(vedro.Scenario):
         )
 
     async def when_mark_removed_is_triggered_with_label_removed(self):
+        """
+        Trigger the state machine's mark-removed transition with reason "label_removed".
+        """
         await self.sm.trigger_mark_removed(reason="label_removed")
 
     def then_notifier_should_be_called_with_removed_label_template(self):
-        self.notifier.notify.assert_called()
+        """
+        Assert that the notifier was awaited with mr_iid 123 and the "removed_label" template.
+
+        Verifies that notifier.notify was awaited and that the first positional argument (mr_iid) is 123 and the second positional argument (template) is "removed_label".
+        """
+        self.notifier.notify.assert_awaited_once()
         call_args = self.notifier.notify.call_args
         assert call_args[0][0] == 123  # mr_iid
         assert call_args[0][1] == "removed_label"  # template

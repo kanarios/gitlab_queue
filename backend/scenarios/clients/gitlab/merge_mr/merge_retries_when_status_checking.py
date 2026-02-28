@@ -40,7 +40,12 @@ class Scenario(vedro.Scenario):
         assert self.result.state == "merged"
 
     def and_get_mr_called_three_times(self):
-        assert self.mock_get_mr.call_count == 3
+        assert self.mock_get_mr.await_count == 3
 
     def and_put_called_once(self):
-        self.mock_put.assert_called_once()
+        """
+        Asserts that the GitLab client's `put` method was awaited exactly once.
+
+        This verifies the code under test performed a single asynchronous PUT operation to merge the merge request.
+        """
+        self.mock_put.assert_awaited_once()

@@ -1,9 +1,9 @@
 """Test scenario: remove non-existent MR."""
 
 import vedro
-from scenarios.contexts.sqlite_client import initialized_test_database
 
 from gitlab_queue.core.queue import QueueManager
+from scenarios.contexts.sqlite_client import initialized_test_database
 
 
 class Scenario(vedro.Scenario):
@@ -16,14 +16,36 @@ class Scenario(vedro.Scenario):
         await self.queue.ensure_schema()
 
     async def when_nonexistent_mr_is_removed(self):
+        """
+        Attempts to remove a merge request with ID 999 from the queue and stores the operation result on self.result.
+
+        The stored value will indicate whether the removal succeeded (`True`) or failed (`False`).
+        """
         self.result = await self.queue.remove_from_queue(999)
 
     def then_result_should_be_false(self):
-        assert self.result is False, f"Expected False, got {self.result}"
+        """
+        Assert that the previously stored result is False.
+
+        Raises:
+            AssertionError: If `self.result` is not `False`.
+        """
+        assert self.result is False
 
     async def and_queue_should_still_be_empty(self):
+        """
+        Assert that the queue contains no items.
+
+        Raises:
+            AssertionError: if the queue length is not zero.
+        """
         length = await self.queue.get_queue_length()
-        assert length == 0, f"Expected 0, got {length}"
+        assert length == 0
 
     async def do_cleanup(self):
+        """
+        Exit the test database context to release resources used by the scenario.
+
+        This method asynchronously exits the internal database context manager, performing any necessary cleanup after the scenario runs.
+        """
         await self._db_context.__aexit__(None, None, None)
