@@ -50,12 +50,11 @@ class Scenario(vedro.Scenario):
 
         This awaits the asynchronous call using retry_count=0 and max_retries=1 and assigns its result to the instance attribute `self.result` for later assertions.
         """
-        self.result = await self.processor._handle_pipeline_status(
+        self.result = await self.processor._pipeline_handler.handle_pipeline_status(
             ctx=self.ctx,
             sm=self.mock_sm,
             pipeline=self.pipeline,
-            retry_count=0,
-            max_retries=1,
+            retried_jobs={},
         )
 
     def then_result_is_success(self):

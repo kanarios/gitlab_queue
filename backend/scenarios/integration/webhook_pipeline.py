@@ -202,7 +202,7 @@ async def webhook_pipeline_failure_triggers_retry():
             hotfix_label="hotfix",
             jwt_secret="a" * 64,
             webhook_secret="test-secret",
-            pipeline_retry_count=2,  # Allow retries
+            job_retry_count=2,  # Allow retries
         )
 
         # Pipeline failure webhook payload

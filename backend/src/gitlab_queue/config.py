@@ -13,6 +13,8 @@ Example:
 from __future__ import annotations
 
 import hmac
+import os
+import warnings
 from enum import Enum
 from typing import Any
 from urllib.parse import urlparse
@@ -199,7 +201,8 @@ class Settings:
     stale_mr_warning_hours: int = var(default=24, converter=int)  # 24 hours
 
     # Retry Logic
-    pipeline_retry_count: int = var(default=1, converter=int)
+    # Renamed from PIPELINE_RETRY_COUNT → JOB_RETRY_COUNT (env: GITLAB_QUEUE_JOB_RETRY_COUNT)
+    job_retry_count: int = var(default=1, converter=int)
     api_max_retries: int = var(default=5, converter=int)
     merge_status_retry_max: int = var(default=10, converter=int)
     merge_status_retry_delay_seconds: float = var(default=5.0, converter=float)
@@ -290,7 +293,7 @@ def _settings_repr(self: Settings) -> str:
         "rebase_timeout_seconds",
         "post_rebase_pipeline_wait_seconds",
         "stale_mr_warning_hours",
-        "pipeline_retry_count",
+        "job_retry_count",
         "api_max_retries",
         "merge_status_retry_max",
         "merge_status_retry_delay_seconds",
@@ -379,8 +382,8 @@ def _validate_timing_settings(settings: Settings, errors: list[str]) -> None:
 
 def _validate_retry_settings(settings: Settings, errors: list[str]) -> None:
     """Validate retry count settings."""
-    if settings.pipeline_retry_count < 0:
-        errors.append(f"pipeline_retry_count cannot be negative, got: {settings.pipeline_retry_count}")
+    if settings.job_retry_count < 0:
+        errors.append(f"job_retry_count cannot be negative, got: {settings.job_retry_count}")
     if settings.api_max_retries < 0:
         errors.append(f"api_max_retries cannot be negative, got: {settings.api_max_retries}")
     if settings.max_rebase_during_testing < 0:
@@ -563,7 +566,16 @@ def load_settings() -> Settings:
         >>> settings.gitlab_url
         'https://gitlab.com'
     """
-    settings = environ.to_config(Settings)
+    env = dict(os.environ)
+    if "GITLAB_QUEUE_JOB_RETRY_COUNT" not in env and "GITLAB_QUEUE_PIPELINE_RETRY_COUNT" in env:
+        env["GITLAB_QUEUE_JOB_RETRY_COUNT"] = env["GITLAB_QUEUE_PIPELINE_RETRY_COUNT"]
+        warnings.warn(
+            "GITLAB_QUEUE_PIPELINE_RETRY_COUNT is deprecated, use GITLAB_QUEUE_JOB_RETRY_COUNT",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+    settings = environ.to_config(Settings, environ=env)
     _validate_settings(settings)
     return settings
 

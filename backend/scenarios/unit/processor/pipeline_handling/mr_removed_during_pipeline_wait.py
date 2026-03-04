@@ -60,7 +60,7 @@ class Scenario(vedro.Scenario):
             new_callable=AsyncMock,
             return_value=False,
         ):
-            self.result = await self.processor._check_pipeline_termination_conditions(
+            self.result = await self.processor._pipeline_handler.check_pipeline_termination_conditions(
                 ctx=self.ctx,
                 sm=self.mock_sm,
                 timeout=self.timeout,

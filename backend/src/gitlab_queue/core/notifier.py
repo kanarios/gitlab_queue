@@ -103,18 +103,20 @@ _Pipeline should start automatically._
 Waiting for pipeline to complete...
 
 ---
-_If pipeline fails, bot will retry once before removing from queue._
+_If pipeline fails, bot will retry failed jobs before removing from queue._
 """,
-    "pipeline_retry": """## 🤖 Merge Queue Bot
+    "job_retry": """## 🤖 Merge Queue Bot
 
-**Status:** 🔁 Pipeline retry ({retry_count}/{max_retries})
-**Previous pipeline:** [{old_pipeline_id}]({old_pipeline_url}) - Failed
-**New pipeline:** [{pipeline_id}]({pipeline_url})
+**Status:** 🔁 Retrying failed jobs
+**Pipeline:** [{pipeline_id}]({pipeline_url})
 
-Retrying due to failed jobs: {failed_jobs}
+**Jobs being retried:**
+{retried_jobs_formatted}
+
+**Retry attempts per job:** {retried_counts_formatted} / {max_retries}
 
 ---
-{final_attempt_text}
+_Pipeline is still running. Monitoring results..._
 """,
     "rebase_during_testing": """## 🤖 Merge Queue Bot
 
@@ -170,7 +172,7 @@ _MR has been removed from queue._
 **Pipeline:** [{pipeline_id}]({pipeline_url})
 **Failed at:** {failed_at}
 
-Pipeline failed after {retry_count} attempt(s).
+Pipeline failed. Retry attempts: {retry_summary}.
 
 **Failed jobs:**
 {failed_jobs}
@@ -375,14 +377,20 @@ class MRNotifier:
             elif key == "failed_jobs" and isinstance(value, list):
                 full_context[key] = self._format_job_list(value)
 
-        # Add final attempt text for pipeline_retry
-        if status == "pipeline_retry":
-            retry_count = full_context.get("retry_count", 0)
-            max_retries = full_context.get("max_retries", 0)
-            if retry_count >= max_retries:
-                full_context["final_attempt_text"] = "_This is the last retry attempt._"
+        # Format pipeline_failed: derive retry_summary from raw retried_jobs dict
+        if status == "pipeline_failed":
+            retried_jobs = full_context.get("retried_jobs", {})
+            if isinstance(retried_jobs, dict):
+                full_context["retry_summary"] = ", ".join(f"{j}: {c}" for j, c in retried_jobs.items()) or "0"
             else:
-                full_context["final_attempt_text"] = ""
+                full_context["retry_summary"] = "0"
+
+        # Format job_retry specific fields
+        if status == "job_retry":
+            retried_jobs = full_context.get("retried_jobs", [])
+            retried_counts = full_context.get("retried_counts", {})
+            full_context["retried_jobs_formatted"] = self._format_job_list(retried_jobs)
+            full_context["retried_counts_formatted"] = ", ".join(f"{j}: {c}" for j, c in retried_counts.items()) or "0"
 
         # Add final attempt text for rebase_during_testing
         if status == "rebase_during_testing":

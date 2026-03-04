@@ -35,7 +35,8 @@ class QueueItem:
         pipeline_id: Current pipeline ID if running
         pipeline_status: Current pipeline status
         expected_sha: SHA expected for current pipeline (for race condition prevention)
-        retry_count: Number of retry attempts for pipeline failures
+        retry_count: Max number of retry attempts made across all jobs
+        retried_jobs: Per-job retry counts {job_name: count} persisted to DB
         last_error: Most recent error message if any
         stale_warning_sent: Whether stale warning has been sent for this MR
     """
@@ -58,9 +59,21 @@ class QueueItem:
     pipeline_id: int | None = None
     pipeline_status: str | None = None
     expected_sha: str | None = None
-    retry_count: int = 0
+    retry_count: int = 0  # legacy: kept for DB compat; prefer get_max_job_retry_count()
+    retried_jobs: dict[str, int] = field(default_factory=dict)
     last_error: str | None = None
     stale_warning_sent: bool = False
+
+    def get_max_job_retry_count(self) -> int:
+        """Return the highest retry count across all retried jobs.
+
+        When ``retried_jobs`` is populated, returns the maximum per-job
+        retry count (e.g. ``{"lint": 2, "test": 1}`` → ``2``).
+        Falls back to legacy ``retry_count`` for backward compatibility.
+        """
+        if self.retried_jobs:
+            return max(self.retried_jobs.values())
+        return self.retry_count
 
 
 @dataclass(frozen=True, slots=True)

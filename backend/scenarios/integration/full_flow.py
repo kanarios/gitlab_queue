@@ -38,7 +38,7 @@ async def full_flow_with_failures_and_recovery():
 
             mock_url = get_mock_url()
 
-            settings = created_test_settings(mock_url, pipeline_retry_count=2)
+            settings = created_test_settings(mock_url, job_retry_count=2)
 
             # MRs with different failure scenarios
             mrs_data = [

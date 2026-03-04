@@ -43,12 +43,11 @@ class Scenario(vedro.Scenario):
 
         This invokes the handler with retry_count=0 and max_retries=1 to capture the handler's response for a pipeline in the "running" state.
         """
-        self.result = await self.processor._handle_pipeline_status(
+        self.result = await self.processor._pipeline_handler.handle_pipeline_status(
             ctx=self.ctx,
             sm=self.mock_sm,
             pipeline=self.pipeline,
-            retry_count=0,
-            max_retries=1,
+            retried_jobs={},
         )
 
     def then_result_is_none_indicating_continue_polling(self):

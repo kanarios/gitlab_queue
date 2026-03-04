@@ -53,7 +53,7 @@ class Scenario(vedro.Scenario):
         """
         self.raised = None
         try:
-            await self.processor._wait_for_rebase_quick(self.ctx)
+            await self.processor._rebase_handler.wait_for_rebase_quick(self.ctx)
         except GitLabConflictError as exc:
             self.raised = exc
 

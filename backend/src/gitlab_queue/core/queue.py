@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import IntegrityError
 
 from gitlab_queue.metrics import OPERATIONS_TOTAL
 from gitlab_queue.models.queue_item import DashboardStats, QueueItem
@@ -25,6 +25,18 @@ if TYPE_CHECKING:
     from gitlab_queue.models.mr import MergeRequest
 
 log = get_logger(__name__)
+
+_ALLOWED_UPDATE_FIELDS = frozenset(
+    {
+        "pipeline_id",
+        "pipeline_status",
+        "last_error",
+        "retry_count",
+        "expected_sha",
+        "retried_jobs",
+    }
+)
+_JSON_SERIALIZED_FIELDS = frozenset({"retried_jobs"})
 
 
 # =============================================================================
@@ -50,6 +62,7 @@ CREATE TABLE IF NOT EXISTS merge_requests (
     pipeline_status TEXT,
     expected_sha TEXT,
     retry_count INTEGER DEFAULT 0,
+    retried_jobs TEXT DEFAULT '{}',
     last_error TEXT,
     stale_warning_sent INTEGER DEFAULT 0,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -157,14 +170,6 @@ _MARK_STALE_WARNING_SENT_SQL = """
 UPDATE merge_requests
 SET stale_warning_sent = 1
 WHERE iid = :iid
-"""
-
-_ALTER_TABLE_STALE_WARNING_SQL = """
-ALTER TABLE merge_requests ADD COLUMN stale_warning_sent INTEGER DEFAULT 0
-"""
-
-_ALTER_TABLE_EXPECTED_SHA_SQL = """
-ALTER TABLE merge_requests ADD COLUMN expected_sha TEXT
 """
 
 _SELECT_RECENT_HISTORY_SQL = """
@@ -338,31 +343,7 @@ class QueueManager:
             for index_sql in _CREATE_HISTORY_INDEXES_SQL:
                 await session.execute(text(index_sql))
 
-            # Run migrations for new columns
-            migrations = [
-                (_ALTER_TABLE_STALE_WARNING_SQL, "stale_warning_sent"),
-                (_ALTER_TABLE_EXPECTED_SHA_SQL, "expected_sha"),
-            ]
-            for alter_sql, column_name in migrations:
-                await self._safe_add_column(session, alter_sql, column_name)
-
         log.info("Database schema ensured")
-
-    @staticmethod
-    async def _safe_add_column(session: Any, alter_sql: str, column_name: str) -> None:
-        """Execute ALTER TABLE, ignoring 'duplicate column' errors.
-
-        Args:
-            session: Active database session.
-            alter_sql: ALTER TABLE SQL statement.
-            column_name: Column name for logging.
-        """
-        try:
-            await session.execute(text(alter_sql))
-            log.info("Added column to merge_requests table", column=column_name)
-        except OperationalError as e:
-            if "duplicate column" not in str(e).lower():
-                raise
 
     async def add_to_queue(
         self,
@@ -676,11 +657,20 @@ class QueueManager:
             params["finished_at"] = now.isoformat()
 
         # Handle extra fields
-        allowed_fields = ("pipeline_id", "pipeline_status", "last_error", "retry_count", "expected_sha")
         for field_name, value in extra.items():
-            if field_name in allowed_fields:
-                set_clauses.append(f"{field_name} = :{field_name}")
-                params[field_name] = value
+            if field_name not in _ALLOWED_UPDATE_FIELDS:
+                continue
+            if field_name in _JSON_SERIALIZED_FIELDS and isinstance(value, dict):
+                value = json.dumps(value)
+            set_clauses.append(f"{field_name} = :{field_name}")
+            params[field_name] = value
+
+        # Auto-derive retry_count from retried_jobs (single source of truth)
+        if "retried_jobs" in extra and "retry_count" not in params:
+            rj = extra["retried_jobs"]
+            if isinstance(rj, dict) and rj:
+                set_clauses.append("retry_count = :retry_count")
+                params["retry_count"] = max(rj.values())
 
         sql = f"UPDATE merge_requests SET {', '.join(set_clauses)} WHERE iid = :iid"
 
@@ -1109,6 +1099,17 @@ class QueueManager:
         else:
             labels = labels_raw
 
+        retried_jobs_raw = row.get("retried_jobs")
+        retried_jobs: dict[str, int]
+        if not retried_jobs_raw:
+            retried_jobs = {}
+        else:
+            try:
+                parsed = json.loads(retried_jobs_raw)
+                retried_jobs = parsed if isinstance(parsed, dict) else {}
+            except (json.JSONDecodeError, TypeError):
+                retried_jobs = {}
+
         return QueueItem(
             mr_iid=row["iid"],
             title=row["title"],
@@ -1126,6 +1127,7 @@ class QueueManager:
             pipeline_status=row.get("pipeline_status"),
             expected_sha=row.get("expected_sha"),
             retry_count=row.get("retry_count", 0),
+            retried_jobs=retried_jobs,
             last_error=row.get("last_error"),
             stale_warning_sent=bool(row.get("stale_warning_sent", 0)),
         )

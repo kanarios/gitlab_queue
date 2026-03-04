@@ -43,7 +43,7 @@ class Scenario(vedro.Scenario):
 
         Sets self.result to `True` if the pipeline should be skipped (stale) for MR IID 42, `False` otherwise.
         """
-        self.result = await self.processor._should_skip_stale_pipeline(42, self.pipeline)
+        self.result = await self.processor._pipeline_handler.should_skip_stale_pipeline(42, self.pipeline)
 
     def then_pipeline_should_be_skipped(self):
         """

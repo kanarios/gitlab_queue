@@ -11,7 +11,7 @@ class Scenario(vedro.Scenario):
     subject = "try to validate settings with negative retry count"
 
     def given_settings_with_negative_retry(self):
-        self.settings = create_valid_settings(pipeline_retry_count=-1)
+        self.settings = create_valid_settings(job_retry_count=-1)
 
     def when_validating_settings(self):
         try:
@@ -22,4 +22,4 @@ class Scenario(vedro.Scenario):
 
     def then_it_should_raise_configuration_error(self):
         assert self.error is not None
-        assert "pipeline_retry_count" in str(self.error)
+        assert "job_retry_count" in str(self.error)

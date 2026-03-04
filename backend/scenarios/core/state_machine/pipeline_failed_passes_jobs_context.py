@@ -25,7 +25,7 @@ class Scenario(vedro.Scenario):
     async def when_pipeline_failed_is_triggered(self):
         await self.sm.trigger_pipeline_failed(
             failed_jobs=["unit_test", "integration_test"],
-            retry_count=3,
+            retried_jobs={"unit_test": 2, "integration_test": 1},
             error_message="Tests failed",
         )
 
@@ -35,5 +35,5 @@ class Scenario(vedro.Scenario):
     def and_context_should_contain_failed_jobs(self):
         assert self.sm._context.get("failed_jobs") == ["unit_test", "integration_test"]
 
-    def and_context_should_contain_retry_count(self):
-        assert self.sm._context.get("retry_count") == 3
+    def and_context_should_contain_retried_jobs(self):
+        assert self.sm._context.get("retried_jobs") == {"unit_test": 2, "integration_test": 1}

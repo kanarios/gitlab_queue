@@ -783,7 +783,7 @@ class PipelineWebhookHandler:
             )
             return
 
-        current_retry_count = fresh_item.retry_count or 0
+        current_retry_count = fresh_item.get_max_job_retry_count()
 
         # Mark pipeline as failed; processor handles retry logic
         log.info(
@@ -827,7 +827,7 @@ class PipelineWebhookHandler:
             )
             return
 
-        current_retry_count = fresh_item.retry_count or 0
+        current_retry_count = fresh_item.get_max_job_retry_count()
 
         # Mark pipeline as failed; processor handles retry logic
         log.info(

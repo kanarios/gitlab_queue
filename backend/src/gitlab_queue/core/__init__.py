@@ -9,15 +9,11 @@ Contains the main business logic components:
 """
 
 from gitlab_queue.core.notifier import COMMENT_TEMPLATES, MRNotifier
-from gitlab_queue.core.processor import (
-    MergeProcessor,
-    ProcessingContext,
-    ProcessingResult,
-    create_processor,
-)
+from gitlab_queue.core.processor import MergeProcessor, create_processor
 from gitlab_queue.core.queue import QueueError, QueueItemNotFoundError, QueueManager
 from gitlab_queue.core.queue_position_notifier import QueuePositionNotifier
 from gitlab_queue.core.state_machine import MRStateMachine, create_state_machine_for_mr
+from gitlab_queue.core.types import ProcessingContext, ProcessingResult
 
 __all__: list[str] = [
     "COMMENT_TEMPLATES",

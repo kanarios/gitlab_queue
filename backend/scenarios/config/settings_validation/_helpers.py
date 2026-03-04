@@ -25,7 +25,7 @@ def create_valid_settings(**overrides) -> Settings:
         "pipeline_timeout_seconds": 7200,
         "rebase_timeout_seconds": 300,
         "stale_mr_warning_hours": 24,
-        "pipeline_retry_count": 1,
+        "job_retry_count": 1,
         "api_max_retries": 5,
         "rate_limit_warning_threshold": 0.8,
         "rate_limit_throttle_delay_seconds": 1.0,

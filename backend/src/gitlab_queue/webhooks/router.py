@@ -833,7 +833,7 @@ def _queue_item_to_dict(item: QueueItem, position: int | None = None) -> dict[st
     # Add error info for failed items
     if item.last_error:
         result["last_error"] = item.last_error
-        result["retry_count"] = item.retry_count
+        result["retry_count"] = item.get_max_job_retry_count()
 
     return result
 
