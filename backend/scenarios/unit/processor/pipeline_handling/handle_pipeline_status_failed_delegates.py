@@ -56,5 +56,6 @@ class Scenario(vedro.Scenario):
         self.mock_handle_failure.assert_awaited_once()
         call_args = self.mock_handle_failure.await_args
         args = call_args.args
+        assert args[0] is self.ctx
         assert args[1] is self.pipeline
         assert args[2] == {}

@@ -45,7 +45,7 @@ class Scenario(vedro.Scenario):
         self.last_rebase_check = datetime(2020, 1, 1, tzinfo=UTC)  # Old timestamp → will check
 
     async def when_maybe_rebase_during_testing_is_called(self):
-        # _check_and_handle_rebase_during_testing returns None → no rebase needed
+        # check_and_handle_rebase_during_testing returns None → no rebase needed
         state = create_pipeline_wait_state(
             rebase_ctx=self.rebase_ctx,
             last_rebase_check=self.last_rebase_check,
