@@ -49,11 +49,11 @@ class Scenario(vedro.Scenario):
     async def when_wait_for_rebase_quick_is_called(self):
         self.raised = None
         with patch(
-            "gitlab_queue.core.processor.poll_until_done",
+            "gitlab_queue.core.handler_utils.poll_until_done",
             return_value=self.timed_out_outcome,
         ):
             try:
-                await self.processor._wait_for_rebase_quick(self.ctx)
+                await self.processor._rebase_handler.wait_for_rebase_quick(self.ctx)
             except GitLabAPIError as exc:
                 self.raised = exc
 

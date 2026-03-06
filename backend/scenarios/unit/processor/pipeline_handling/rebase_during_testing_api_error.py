@@ -13,12 +13,14 @@ import vedro
 
 from gitlab_queue.clients.gitlab import GitLabAPIError
 from gitlab_queue.core.processor import ProcessingResult
+from gitlab_queue.core.rebase_coordinator import check_and_handle_rebase_during_testing
 from gitlab_queue.core.rebase_during_testing import RebaseDuringTestingContext
 
 from .._helpers import (
     create_mock_pipeline,
     create_mock_processor,
     create_mock_state_machine,
+    create_pipeline_wait_state,
     create_processing_context,
 )
 
@@ -56,13 +58,15 @@ class Scenario(vedro.Scenario):
 
         Awaits the call and stores its return value in self.result for later assertions.
         """
-        self.result = await self.processor._check_and_handle_rebase_during_testing(
-            ctx=self.ctx,
-            sm=self.mock_sm,
+        state = create_pipeline_wait_state(
             rebase_handler=self.rebase_handler,
             rebase_ctx=self.rebase_ctx,
+        )
+        self.result = await check_and_handle_rebase_during_testing(
+            gitlab_client=self.processor.gitlab_client,
+            ctx=self.ctx,
+            state=state,
             pipeline=self.pipeline,
-            retry_count=0,
         )
 
     def then_result_is_pipeline_failed(self):

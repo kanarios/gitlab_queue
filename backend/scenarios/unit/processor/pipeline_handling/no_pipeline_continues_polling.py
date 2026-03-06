@@ -51,13 +51,13 @@ class Scenario(vedro.Scenario):
         """
         with (
             patch.object(
-                self.processor,
-                "_check_pipeline_termination_conditions",
+                self.processor._pipeline_handler,
+                "check_pipeline_termination_conditions",
                 new_callable=AsyncMock,
                 side_effect=[None, ProcessingResult.ERROR],
             ),
             patch.object(
-                self.processor,
+                self.processor._pipeline_handler,
                 "_interruptible_sleep",
                 new_callable=AsyncMock,
                 return_value=True,

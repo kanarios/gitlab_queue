@@ -5,7 +5,10 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
-from gitlab_queue.core.processor import MergeProcessor, ProcessingContext
+from gitlab_queue.core.processor import MergeProcessor
+from gitlab_queue.core.rebase_coordinator import PipelineWaitState
+from gitlab_queue.core.rebase_during_testing import RebaseDuringTestingContext
+from gitlab_queue.core.types import ProcessingContext
 from gitlab_queue.models.queue_item import QueueItem
 
 
@@ -32,7 +35,7 @@ def create_mock_settings(**overrides: object) -> MagicMock:
         "pipeline_timeout_seconds": 3600,
         "rebase_timeout_seconds": 600,
         "merge_timeout_seconds": 120,
-        "pipeline_retry_count": 1,
+        "job_retry_count": 1,
         "rebase_check_interval_seconds": 300,
         "max_rebase_during_testing": 3,
         "post_rebase_pipeline_wait_seconds": 60,
@@ -71,6 +74,7 @@ def create_mock_gitlab_client() -> MagicMock:
     client.check_rebase_status = AsyncMock(return_value=(False, False))
     client.get_mr_conflicts = AsyncMock(return_value=[])
     client.list_mrs_with_label = AsyncMock(return_value=[])
+    client.retry_pipeline_job = AsyncMock()
     client.circuit_breaker = MagicMock()
     return client
 
@@ -190,7 +194,7 @@ def create_mock_state_machine() -> MagicMock:
     sm.trigger_pipeline_failed = AsyncMock()
     sm.trigger_mark_removed = AsyncMock()
     sm.notify_stale_warning = AsyncMock()
-    sm.notify_pipeline_retry = AsyncMock()
+    sm.notify_job_retry = AsyncMock()
     sm.notify_rebase_during_testing = AsyncMock()
     sm.trigger_conflict_during_testing = AsyncMock()
     sm.current_state = MagicMock()
@@ -264,6 +268,23 @@ def create_mock_pipeline(
     return pipeline
 
 
+def create_pipeline_wait_state(
+    rebase_handler: MagicMock | None = None,
+    rebase_ctx: RebaseDuringTestingContext | None = None,
+    retried_jobs: dict[str, int] | None = None,
+    last_rebase_check: datetime | None = None,
+    start_time: datetime | None = None,
+) -> PipelineWaitState:
+    """Create a PipelineWaitState for tests with sensible defaults."""
+    return PipelineWaitState(
+        retried_jobs=retried_jobs if retried_jobs is not None else {},
+        start_time=start_time or datetime.now(UTC),
+        rebase_ctx=rebase_ctx or RebaseDuringTestingContext(max_attempts=3),
+        last_rebase_check=last_rebase_check or datetime.now(UTC),
+        rebase_handler=rebase_handler or MagicMock(),
+    )
+
+
 __all__ = [
     "create_mock_gitlab_client",
     "create_mock_mr",
@@ -273,6 +294,7 @@ __all__ = [
     "create_mock_queue_manager",
     "create_mock_settings",
     "create_mock_state_machine",
+    "create_pipeline_wait_state",
     "create_processing_context",
     "create_test_queue_item",
 ]

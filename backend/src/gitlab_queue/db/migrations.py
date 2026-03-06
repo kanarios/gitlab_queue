@@ -16,7 +16,7 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from sqlalchemy import pool, text
+from sqlalchemy import inspect, pool, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from gitlab_queue.utils.logging import get_logger
@@ -69,10 +69,8 @@ async def get_current_revision(database_url: str) -> str | None:
     try:
         async with engine.connect() as conn:
             # Check if alembic_version table exists
-            result = await conn.execute(
-                text("SELECT name FROM sqlite_master WHERE type='table' AND name='alembic_version'")
-            )
-            if result.fetchone() is None:
+            has_table = await conn.run_sync(lambda sync_conn: inspect(sync_conn).has_table("alembic_version"))
+            if not has_table:
                 return None
 
             # Get current revision
@@ -123,6 +121,49 @@ def _run_upgrade(database_url: str, revision: str = "head") -> None:
     command.upgrade(config, revision)
 
 
+async def _stamp_legacy_database_if_needed(database_url: str) -> bool:
+    """Stamp a legacy database with the current Alembic head revision.
+
+    Detects databases created before Alembic was introduced: they have
+    the ``merge_requests`` table but no ``alembic_version`` table.
+    For such databases we run ``alembic stamp head`` so that future
+    migrations start from the correct baseline.
+
+    Args:
+        database_url: SQLAlchemy database URL.
+
+    Returns:
+        True if stamping was performed, False otherwise.
+    """
+    engine = create_async_engine(database_url, poolclass=pool.NullPool)
+
+    try:
+        async with engine.connect() as conn:
+            # Check if merge_requests table exists (i.e. DB was created by ensure_schema)
+            has_merge_requests = await conn.run_sync(lambda sync_conn: inspect(sync_conn).has_table("merge_requests"))
+
+            # Check if alembic_version table exists
+            has_alembic_version = await conn.run_sync(lambda sync_conn: inspect(sync_conn).has_table("alembic_version"))
+    finally:
+        await engine.dispose()
+
+    if has_merge_requests and not has_alembic_version:
+        log.info("Legacy database detected, stamping with current head revision")
+        config = _get_alembic_config(database_url)
+        try:
+            await asyncio.to_thread(command.stamp, config, "head")
+            log.info("Legacy database stamped successfully")
+        except Exception:
+            current = await get_current_revision(database_url)
+            if current is not None:
+                log.info("Database already stamped by another process", revision=current)
+            else:
+                raise
+        return True
+
+    return False
+
+
 async def run_migrations(database_url: str, revision: str = "head") -> bool:
     """Run all pending Alembic migrations.
 
@@ -142,6 +183,9 @@ async def run_migrations(database_url: str, revision: str = "head") -> bool:
     """
     log.info("Checking database migrations", database_url=database_url[:50] + "...")
 
+    # Stamp legacy databases that were created before Alembic was introduced
+    await _stamp_legacy_database_if_needed(database_url)
+
     # Check pending migrations
     pending = await get_pending_migrations(database_url)
 
@@ -156,8 +200,7 @@ async def run_migrations(database_url: str, revision: str = "head") -> bool:
     )
 
     # Run migrations in thread pool (alembic is synchronous)
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, _run_upgrade, database_url, revision)
+    await asyncio.to_thread(_run_upgrade, database_url, revision)
 
     log.info("Database migrations completed successfully")
     return True

@@ -195,44 +195,19 @@ class RebaseDuringTestingHandler:
             GitLabConflictError: If rebase results in conflicts.
             GitLabAPIError: If rebase times out or shutdown requested.
         """
-        # Exception holder for capturing errors from poll function.
-        # poll_until_done doesn't propagate exceptions from poll_fn,
-        # so we capture them here and raise after the poll completes.
-        captured_error: Exception | None = None
+        from gitlab_queue.core.handler_utils import wait_for_rebase_completion
 
-        async def check_rebase() -> tuple[PollStatus, bool | None]:
-            """Poll rebase status until complete or conflict detected."""
-            nonlocal captured_error
-            rebase_in_progress, has_conflicts = await self.gitlab_client.check_rebase_status(mr_iid)
-
-            if has_conflicts:
-                captured_error = GitLabConflictError("Rebase conflict during testing")
-                return PollStatus.DONE, False
-
-            if not rebase_in_progress:
-                return PollStatus.DONE, True
-
-            return PollStatus.CONTINUE, None
-
-        config = PollingConfig(
+        await wait_for_rebase_completion(
+            self.gitlab_client,
+            mr_iid,
             timeout_seconds=self.settings.rebase_timeout_seconds,
             poll_interval_seconds=REBASE_POLL_INTERVAL_SECONDS,
             operation_name="rebase_during_testing",
+            shutdown_event=self._shutdown_event,
+            conflict_error_prefix="Rebase conflict during testing",
+            timeout_error_message=f"Rebase timeout after {self.settings.rebase_timeout_seconds}s",
+            shutdown_error_message="Shutdown requested during rebase wait",
         )
-        outcome = await poll_until_done(config, check_rebase, self._shutdown_event)
-
-        # Check for captured exception
-        if captured_error is not None:
-            raise captured_error
-
-        if outcome.completed and outcome.result:
-            return
-
-        if outcome.shutdown_requested:
-            raise GitLabAPIError("Shutdown requested during rebase wait")
-
-        if outcome.timed_out:
-            raise GitLabAPIError(f"Rebase timeout after {self.settings.rebase_timeout_seconds}s")
 
     async def _wait_for_new_pipeline(
         self,

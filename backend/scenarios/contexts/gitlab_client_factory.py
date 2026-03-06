@@ -54,7 +54,7 @@ def created_test_settings(
     hotfix_label: str = Labels.HOTFIX,
     poll_interval_seconds: int = 1,
     pipeline_timeout_seconds: int = 10,
-    pipeline_retry_count: int = 1,
+    job_retry_count: int = 1,
     stale_mr_warning_hours: int = 24,
     api_max_retries: int = 1,
 ) -> Settings:
@@ -72,7 +72,7 @@ def created_test_settings(
         hotfix_label: Label for hotfix priority (default: hotfix).
         poll_interval_seconds: Polling interval (default: 1).
         pipeline_timeout_seconds: Pipeline timeout (default: 10).
-        pipeline_retry_count: Pipeline retry count (default: 1).
+        job_retry_count: Job retry count (default: 1).
         stale_mr_warning_hours: Hours before stale warning (default: 24).
         api_max_retries: Max API retries (default: 1).
 
@@ -92,7 +92,7 @@ def created_test_settings(
         hotfix_label=hotfix_label,
         poll_interval_seconds=poll_interval_seconds,
         pipeline_timeout_seconds=pipeline_timeout_seconds,
-        pipeline_retry_count=pipeline_retry_count,
+        job_retry_count=job_retry_count,
         stale_mr_warning_hours=stale_mr_warning_hours,
         api_max_retries=api_max_retries,
     )

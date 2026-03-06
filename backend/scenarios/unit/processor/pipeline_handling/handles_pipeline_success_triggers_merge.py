@@ -1,8 +1,8 @@
-"""Test _handle_pipeline_status triggers pipeline_success on success status.
+"""Test handle_pipeline_status triggers pipeline_success on success status.
 
 When a pipeline has status "success" and the SHA matches the expected SHA
-in the queue item, _handle_pipeline_status should trigger trigger_pipeline_success
-on the state machine and return ProcessingResult.SUCCESS.
+in the queue item, pipeline_handler.handle_pipeline_status should trigger
+trigger_pipeline_success on the state machine and return ProcessingResult.SUCCESS.
 """
 
 from __future__ import annotations
@@ -46,16 +46,13 @@ class Scenario(vedro.Scenario):
 
     async def when_handle_pipeline_status_is_called(self):
         """
-        Invoke the processor's _handle_pipeline_status with the prepared context, state machine, and pipeline, and store the returned processing result on self.result.
-
-        This awaits the asynchronous call using retry_count=0 and max_retries=1 and assigns its result to the instance attribute `self.result` for later assertions.
+        Invoke the pipeline handler's handle_pipeline_status with the prepared context, state machine, pipeline, and retried_jobs={}, and store the returned processing result on self.result.
         """
-        self.result = await self.processor._handle_pipeline_status(
+        self.result = await self.processor._pipeline_handler.handle_pipeline_status(
             ctx=self.ctx,
             sm=self.mock_sm,
             pipeline=self.pipeline,
-            retry_count=0,
-            max_retries=1,
+            retried_jobs={},
         )
 
     def then_result_is_success(self):

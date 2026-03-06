@@ -13,9 +13,8 @@ without stopping the main loop.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime, timedelta
-from enum import Enum
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from gitlab_queue.clients.gitlab import (
@@ -24,13 +23,9 @@ from gitlab_queue.clients.gitlab import (
     GitLabConflictError,
     GitLabNotFoundError,
 )
-from gitlab_queue.core.polling import PollingConfig, PollOutcome, PollStatus, poll_until_done
-from gitlab_queue.core.rebase_during_testing import (
-    RebaseDuringTestingContext,
-    RebaseDuringTestingHandler,
-    RebaseRetryLimitExceeded,
-)
-from gitlab_queue.core.state_machine import MRStateMachine, create_state_machine_for_mr
+from gitlab_queue.core.handler_utils import interruptible_sleep, verify_mr_in_queue
+from gitlab_queue.core.state_machine import create_state_machine_for_mr
+from gitlab_queue.core.types import ProcessingContext, ProcessingResult
 from gitlab_queue.metrics import MR_DURATION
 from gitlab_queue.utils.logging import LogContext, get_logger
 
@@ -39,97 +34,14 @@ if TYPE_CHECKING:
     from gitlab_queue.clients.gitlab import GitLabClient
     from gitlab_queue.config import Settings
     from gitlab_queue.core.notifier import MRNotifier
+    from gitlab_queue.core.pipeline_handler import PipelineHandler
     from gitlab_queue.core.queue import QueueManager
     from gitlab_queue.core.queue_position_notifier import QueuePositionNotifier
+    from gitlab_queue.core.rebase_handler import RebaseHandler
     from gitlab_queue.models.mr import MergeRequest
-    from gitlab_queue.models.pipeline import Pipeline
     from gitlab_queue.models.queue_item import QueueItem
 
 log = get_logger(__name__)
-
-
-# =============================================================================
-# Constants (eliminates magic numbers)
-# =============================================================================
-
-# Polling intervals (seconds)
-REBASE_POLL_INTERVAL_SECONDS = 5
-QUICK_REBASE_POLL_INTERVAL_SECONDS = 3
-
-# Timeouts (seconds)
-QUICK_REBASE_TIMEOUT_SECONDS = 60
-DEFAULT_POST_REBASE_PIPELINE_WAIT_SECONDS = 60
-
-# Failed/canceled pipeline statuses to skip in the fast-forward case
-# (SHA unchanged after rebase — success pipeline is still valid).
-TERMINAL_FAILED_PIPELINE_STATUSES = frozenset(("canceled", "failed"))
-
-# ALL terminal pipeline statuses to skip when SHA changed after rebase.
-# After rebase, ANY terminal pipeline (including success) is stale —
-# it was started before the rebase and doesn't reflect the new code.
-TERMINAL_PIPELINE_STATUSES = frozenset(("canceled", "failed", "success"))
-
-
-# =============================================================================
-# Result Types
-# =============================================================================
-
-
-class ProcessingResult(Enum):
-    """Result of processing a single MR."""
-
-    SUCCESS = "success"  # MR merged successfully
-    CONFLICT = "conflict"  # Rebase failed due to conflicts
-    PIPELINE_FAILED = "pipeline_failed"  # Pipeline failed after retries
-    MERGE_FAILED = "merge_failed"  # Merge operation failed
-    TIMEOUT = "timeout"  # Operation timed out
-    REMOVED = "removed"  # MR removed during processing
-    ERROR = "error"  # Unexpected error
-
-
-@dataclass
-class RebaseContext:
-    """Context for rebase operation tracking.
-
-    Tracks SHA before rebase to detect race conditions where
-    GitLab returns stale pipeline data after rebase completes.
-    """
-
-    old_sha: str = ""
-
-
-@dataclass
-class ProcessingContext:
-    """Context for current MR processing."""
-
-    mr_iid: int
-    state_machine: MRStateMachine
-    start_time: datetime
-    rebase_ctx: RebaseContext = field(default_factory=RebaseContext)
-
-
-@dataclass
-class RebaseCheckOutcome:
-    """Result of checking if rebase is needed during testing.
-
-    Separates success context from error result for clearer API.
-    """
-
-    context: RebaseDuringTestingContext | None
-    result: ProcessingResult | None
-    last_check: datetime
-    should_reset: bool
-
-
-@dataclass
-class RetrySignal:
-    """Signal to retry pipeline with updated state.
-
-    Used instead of tuple[int, datetime] for type clarity.
-    """
-
-    retry_count: int
-    new_start_time: datetime
 
 
 # =============================================================================
@@ -168,6 +80,41 @@ class MergeProcessor:
     _current_mr_iid: int | None = field(default=None, init=False)
     _processing_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False)
     _websocket_manager: WebSocketManager | None = field(default=None, init=False)
+    _ph: PipelineHandler | None = field(default=None, init=False, repr=False)
+    _rh: RebaseHandler | None = field(default=None, init=False, repr=False)
+
+    @property
+    def _pipeline_handler(self) -> PipelineHandler:
+        """Lazy-cached PipelineHandler.
+
+        Created on first access so tests that replace processor attributes
+        after creation still work. Cached so tests can patch handler methods.
+        """
+        if self._ph is None:
+            from gitlab_queue.core.pipeline_handler import PipelineHandler
+
+            self._ph = PipelineHandler(
+                gitlab_client=self.gitlab_client,
+                queue_manager=self.queue_manager,
+                notifier=self.notifier,
+                settings=self.settings,
+                shutdown_event=self._shutdown_event,
+            )
+        return self._ph
+
+    @property
+    def _rebase_handler(self) -> RebaseHandler:
+        """Lazy-cached RebaseHandler."""
+        if self._rh is None:
+            from gitlab_queue.core.rebase_handler import RebaseHandler
+
+            self._rh = RebaseHandler(
+                gitlab_client=self.gitlab_client,
+                notifier=self.notifier,
+                settings=self.settings,
+                shutdown_event=self._shutdown_event,
+            )
+        return self._rh
 
     def set_websocket_manager(self, manager: WebSocketManager) -> None:
         """Set WebSocket manager for broadcasting queue updates.
@@ -355,790 +302,17 @@ class MergeProcessor:
         return ProcessingResult.ERROR
 
     # =========================================================================
-    # Rebase Step
+    # Rebase Step (delegated to RebaseHandler)
     # =========================================================================
 
     async def _process_rebase(self, ctx: ProcessingContext) -> ProcessingResult:
-        """Initiate rebase and wait for completion.
-
-        Args:
-            ctx: Processing context.
-
-        Returns:
-            ProcessingResult.SUCCESS if rebase completed,
-            or appropriate error result.
-        """
-        mr_iid = ctx.mr_iid
-        sm = ctx.state_machine
-
-        log.info("Starting rebase", mr_iid=mr_iid)
-
-        # Capture old SHA before rebase for race condition prevention
-        await self._capture_pre_rebase_sha(ctx)
-
-        try:
-            # Initiate rebase (async operation)
-            await self.gitlab_client.rebase_mr(mr_iid)
-        except GitLabConflictError as e:
-            log.warning("Rebase conflict on initiation", mr_iid=mr_iid, error=str(e))
-            # Try to get conflicted files for better reporting
-            conflicted_files = await self.gitlab_client.get_mr_conflicts(mr_iid)
-            await sm.trigger_rebase_failed(
-                conflicted_files=conflicted_files,
-                error_message=str(e),
-            )
-            return ProcessingResult.CONFLICT
-
-        # Wait for rebase to complete
-        return await self._wait_for_rebase(ctx)
+        return await self._rebase_handler.process_rebase(ctx)
 
     async def _wait_for_rebase(self, ctx: ProcessingContext) -> ProcessingResult:
-        """Poll rebase status until complete or timeout.
-
-        Args:
-            ctx: Processing context.
-
-        Returns:
-            ProcessingResult indicating outcome.
-        """
-        mr_iid = ctx.mr_iid
-        sm = ctx.state_machine
-
-        log.debug(
-            "Waiting for rebase to complete",
-            mr_iid=mr_iid,
-            timeout_seconds=self.settings.rebase_timeout_seconds,
-        )
-
-        async def check_rebase() -> tuple[PollStatus, ProcessingResult | None]:
-            """Poll rebase status until complete or conflict detected."""
-            rebase_in_progress, has_conflicts = await self.gitlab_client.check_rebase_status(mr_iid)
-
-            if has_conflicts:
-                log.warning("Rebase has conflicts", mr_iid=mr_iid)
-                conflicted_files = await self.gitlab_client.get_mr_conflicts(mr_iid)
-                await sm.trigger_rebase_failed(
-                    conflicted_files=conflicted_files,
-                    error_message="Rebase failed due to merge conflicts",
-                )
-                return PollStatus.DONE, ProcessingResult.CONFLICT
-
-            if not rebase_in_progress:
-                log.info("Rebase completed", mr_iid=mr_iid)
-                old_sha = ctx.rebase_ctx.old_sha
-                pipeline, new_sha = await self._wait_for_post_rebase_pipeline(
-                    mr_iid, old_sha, timeout_seconds=self.settings.post_rebase_pipeline_wait_seconds
-                )
-
-                if pipeline and pipeline.sha == new_sha:
-                    pipeline_url = await self.notifier.build_pipeline_url(pipeline.id)
-                    await sm.trigger_rebase_complete(
-                        pipeline_id=pipeline.id,
-                        pipeline_url=pipeline_url,
-                        expected_sha=new_sha,
-                    )
-                    return PollStatus.DONE, ProcessingResult.SUCCESS
-
-                log.debug(
-                    "Waiting for pipeline with correct SHA after rebase",
-                    mr_iid=mr_iid,
-                    expected_sha=new_sha[:8] if new_sha else "unknown",
-                )
-
-            return PollStatus.CONTINUE, None
-
-        config = PollingConfig(
-            timeout_seconds=self.settings.rebase_timeout_seconds,
-            poll_interval_seconds=REBASE_POLL_INTERVAL_SECONDS,
-            operation_name="rebase",
-        )
-        outcome = await poll_until_done(config, check_rebase, self._shutdown_event)
-
-        if outcome.completed and outcome.result:
-            return outcome.result
-
-        if outcome.shutdown_requested:
-            log.info("Shutdown requested during rebase", mr_iid=mr_iid)
-            return ProcessingResult.ERROR
-
-        if outcome.timed_out:
-            timeout_hours = max(1, int(self.settings.rebase_timeout_seconds / 3600))
-            log.warning(
-                "Rebase timeout",
-                mr_iid=mr_iid,
-                timeout_seconds=self.settings.rebase_timeout_seconds,
-            )
-            await sm.trigger_timeout(max_wait_hours=timeout_hours)
-            return ProcessingResult.TIMEOUT
-
-        return ProcessingResult.ERROR
-
-    async def _wait_for_post_rebase_pipeline(
-        self,
-        mr_iid: int,
-        old_sha: str,
-        timeout_seconds: int | None = None,
-    ) -> tuple[Pipeline | None, str]:
-        """Wait for a new pipeline after rebase with the correct SHA.
-
-        After rebase completes, GitLab may still return an old pipeline
-        due to API caching or the new pipeline not yet being created.
-        This method waits until we find a pipeline whose SHA matches
-        the MR's current (post-rebase) SHA.
-
-        Args:
-            mr_iid: MR IID to wait for.
-            old_sha: SHA before rebase started.
-            timeout_seconds: Maximum time to wait (default 60s).
-
-        Returns:
-            Tuple of (pipeline, new_sha). Pipeline may be None if not found.
-        """
-        if timeout_seconds is None:
-            timeout_seconds = DEFAULT_POST_REBASE_PIPELINE_WAIT_SECONDS
-
-        async def check_pipeline() -> tuple[PollStatus, tuple[Pipeline | None, str] | None]:
-            """Poll for new pipeline on updated SHA after rebase."""
-            mr = await self.gitlab_client.get_mr(mr_iid)
-
-            if mr.rebase_in_progress:
-                return PollStatus.CONTINUE, None
-
-            new_sha = mr.sha
-
-            # Fast-forward case: SHA unchanged (no commits ahead of target)
-            if new_sha == old_sha:
-                pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
-                if pipeline and pipeline.sha == new_sha:
-                    if pipeline.status in TERMINAL_FAILED_PIPELINE_STATUSES:
-                        log.info(
-                            "Skipping pre-existing terminal pipeline in fast-forward case",
-                            mr_iid=mr_iid,
-                            pipeline_id=pipeline.id,
-                            pipeline_status=pipeline.status,
-                        )
-                        return PollStatus.CONTINUE, None
-                    return PollStatus.DONE, (pipeline, new_sha)
-                return PollStatus.CONTINUE, None
-
-            # SHA changed, need pipeline with new SHA
-            pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
-            if pipeline and pipeline.sha == new_sha:
-                if pipeline.status in TERMINAL_PIPELINE_STATUSES:
-                    log.info(
-                        "Skipping pre-existing terminal pipeline after rebase",
-                        mr_iid=mr_iid,
-                        pipeline_id=pipeline.id,
-                        pipeline_status=pipeline.status,
-                    )
-                    return PollStatus.CONTINUE, None
-                log.info(
-                    "Found pipeline with new SHA after rebase",
-                    mr_iid=mr_iid,
-                    pipeline_id=pipeline.id,
-                    old_sha=old_sha[:8],
-                    new_sha=new_sha[:8],
-                )
-                return PollStatus.DONE, (pipeline, new_sha)
-
-            return PollStatus.CONTINUE, None
-
-        config = PollingConfig(
-            timeout_seconds=timeout_seconds,
-            poll_interval_seconds=self.settings.pipeline_poll_interval_seconds,
-            operation_name="post_rebase_pipeline",
-        )
-        outcome: PollOutcome[tuple[Pipeline | None, str]] = await poll_until_done(
-            config, check_pipeline, self._shutdown_event
-        )
-
-        if outcome.completed and outcome.result:
-            return outcome.result
-
-        if outcome.shutdown_requested:
-            return None, old_sha
-
-        # Timeout - return current state with SHA validation
-        mr = await self.gitlab_client.get_mr(mr_iid)
-        new_sha = mr.sha
-        pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
-        log.warning(
-            "Timeout waiting for post-rebase pipeline",
-            mr_iid=mr_iid,
-            old_sha=old_sha[:8],
-            current_sha=new_sha[:8] if new_sha else "unknown",
-            pipeline_id=pipeline.id if pipeline else None,
-            pipeline_sha=pipeline.sha[:8] if pipeline and pipeline.sha else None,
-        )
-
-        # Don't return stale pipeline if SHA doesn't match
-        if pipeline and pipeline.sha != new_sha:
-            log.warning(
-                "Timeout with stale pipeline - SHA mismatch",
-                mr_iid=mr_iid,
-                pipeline_sha=pipeline.sha[:8] if pipeline.sha else "unknown",
-                expected_sha=new_sha[:8] if new_sha else "unknown",
-            )
-            return None, new_sha
-
-        return pipeline, new_sha
-
-    # =========================================================================
-    # Pipeline Step
-    # =========================================================================
-
-    async def _handle_pipeline_failure_retry(
-        self,
-        ctx: ProcessingContext,
-        pipeline: Pipeline,
-        failed_jobs: list[str],
-        retry_count: int,
-        max_retries: int,
-    ) -> tuple[bool, datetime | None]:
-        """Handle pipeline failure with potential retry.
-
-        Returns:
-            Tuple of (should_continue, new_start_time). If should_continue is True,
-            the pipeline wait loop should continue with the new start time.
-        """
-        mr_iid = ctx.mr_iid
-        sm = ctx.state_machine
-
-        if retry_count >= max_retries:
-            await sm.trigger_pipeline_failed(
-                failed_jobs=failed_jobs,
-                retry_count=retry_count,
-                error_message=f"Pipeline {pipeline.status}",
-            )
-            return False, None
-
-        log.info("Retrying pipeline", mr_iid=mr_iid, retry_count=retry_count + 1)
-
-        old_pipeline_id = pipeline.id
-        old_pipeline_url = await self.notifier.build_pipeline_url(old_pipeline_id)
-
-        # Capture old SHA before retry rebase for race condition prevention
-        old_sha = await self._capture_pre_rebase_sha(ctx)
-
-        try:
-            await self.gitlab_client.rebase_mr(mr_iid)
-            await self._wait_for_rebase_quick(ctx)
-        except (GitLabConflictError, GitLabAPIError) as e:
-            log.exception("Retry rebase failed", mr_iid=mr_iid, error=str(e))
-            await sm.trigger_pipeline_failed(
-                failed_jobs=failed_jobs,
-                retry_count=retry_count + 1,
-                error_message=str(e),
-            )
-            return False, None
-
-        # Wait for new pipeline with correct SHA using the robust method
-        timeout_seconds = self.settings.post_rebase_pipeline_wait_seconds
-        new_pipeline, new_sha = await self._wait_for_post_rebase_pipeline(
-            mr_iid, old_sha, timeout_seconds=timeout_seconds
-        )
-
-        if new_pipeline and new_pipeline.id != old_pipeline_id and new_pipeline.sha == new_sha:
-            new_pipeline_url = await self.notifier.build_pipeline_url(new_pipeline.id)
-            await sm.notify_pipeline_retry(
-                old_pipeline_id=old_pipeline_id,
-                old_pipeline_url=old_pipeline_url,
-                new_pipeline_id=new_pipeline.id,
-                new_pipeline_url=new_pipeline_url,
-                retry_count=retry_count + 1,
-                max_retries=max_retries,
-                failed_jobs=failed_jobs,
-                expected_sha=new_sha,
-            )
-            return True, datetime.now(UTC)
-
-        # No auto-created pipeline - try to force-create one via API
-        log.warning(
-            "No auto-created pipeline after retry rebase, attempting force-create",
-            mr_iid=mr_iid,
-            old_pipeline_id=old_pipeline_id,
-            old_sha=old_sha[:8],
-            new_sha=new_sha[:8] if new_sha else "unknown",
-        )
-
-        # Get MR to fetch source_branch and current SHA
-        mr = await self.gitlab_client.get_mr(mr_iid)
-        source_branch = mr.source_branch
-        current_sha = mr.sha
-
-        try:
-            created_pipeline = await self.gitlab_client.create_pipeline(source_branch)
-
-            # Validate created pipeline has correct SHA (race condition protection)
-            if created_pipeline.sha != current_sha:
-                log.error(
-                    "Force-created pipeline has wrong SHA (race condition)",
-                    mr_iid=mr_iid,
-                    pipeline_id=created_pipeline.id,
-                    expected_sha=current_sha[:8],
-                    actual_sha=created_pipeline.sha[:8],
-                )
-                await sm.trigger_pipeline_failed(
-                    failed_jobs=failed_jobs,
-                    retry_count=retry_count + 1,
-                    error_message="Force-created pipeline has wrong SHA (race condition)",
-                )
-                return False, None
-
-            new_pipeline_url = await self.notifier.build_pipeline_url(created_pipeline.id)
-            await sm.notify_pipeline_retry(
-                old_pipeline_id=old_pipeline_id,
-                old_pipeline_url=old_pipeline_url,
-                new_pipeline_id=created_pipeline.id,
-                new_pipeline_url=new_pipeline_url,
-                retry_count=retry_count + 1,
-                max_retries=max_retries,
-                failed_jobs=failed_jobs,
-                expected_sha=current_sha,
-            )
-            log.info(
-                "Force-created pipeline after retry rebase",
-                mr_iid=mr_iid,
-                pipeline_id=created_pipeline.id,
-                sha=current_sha[:8],
-            )
-            return True, datetime.now(UTC)
-
-        except (GitLabAPIError, GitLabNotFoundError) as e:
-            log.exception(
-                "Failed to force-create pipeline",
-                mr_iid=mr_iid,
-                source_branch=source_branch,
-                error=str(e),
-            )
-            await sm.trigger_pipeline_failed(
-                failed_jobs=failed_jobs,
-                retry_count=retry_count + 1,
-                error_message=f"Failed to create pipeline: {e}",
-            )
-            return False, None
+        return await self._rebase_handler.wait_for_rebase(ctx)
 
     async def _wait_for_pipeline(self, ctx: ProcessingContext) -> ProcessingResult:
-        """Poll pipeline status until success/failure or timeout."""
-        mr_iid = ctx.mr_iid
-        sm = ctx.state_machine
-        timeout = timedelta(seconds=self.settings.pipeline_timeout_seconds)
-        start_time = datetime.now(UTC)
-        retry_count = 0
-        max_retries = self.settings.pipeline_retry_count
-
-        rebase_handler = RebaseDuringTestingHandler(
-            gitlab_client=self.gitlab_client,
-            settings=self.settings,
-        )
-        rebase_handler.set_shutdown_event(self._shutdown_event)
-
-        rebase_ctx = RebaseDuringTestingContext(
-            max_attempts=self.settings.max_rebase_during_testing,
-        )
-        last_rebase_check = datetime.now(UTC)
-
-        log.info("Waiting for pipeline", mr_iid=mr_iid, timeout_seconds=timeout.total_seconds())
-
-        while True:
-            # Check termination conditions
-            result = await self._check_pipeline_termination_conditions(ctx, sm, timeout, start_time)
-            if result is not None:
-                return result
-
-            pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
-            if pipeline is None:
-                log.warning("No pipeline found", mr_iid=mr_iid)
-                await self._interruptible_sleep(self.settings.pipeline_poll_interval_seconds)
-                continue
-
-            rebase_ctx = replace(rebase_ctx, current_pipeline_id=pipeline.id)
-
-            log.debug("Pipeline status", mr_iid=mr_iid, pipeline_id=pipeline.id, status=pipeline.status)
-
-            # Check if rebase needed
-            outcome = await self._maybe_rebase_during_testing(
-                ctx, sm, rebase_handler, rebase_ctx, pipeline, retry_count, last_rebase_check
-            )
-            last_rebase_check = outcome.last_check
-            if outcome.result is not None:
-                return outcome.result
-            if outcome.should_reset and outcome.context is not None:
-                rebase_ctx = outcome.context
-                start_time = datetime.now(UTC)
-                # Skip current (old) pipeline - wait for new one after rebase
-                await self._interruptible_sleep(self.settings.pipeline_poll_interval_seconds)
-                continue
-            if outcome.context is not None:
-                rebase_ctx = outcome.context
-
-            # Skip stale pipelines using pipeline_id/SHA validation (not time-based)
-            if await self._should_skip_stale_pipeline(mr_iid, pipeline):
-                await self._interruptible_sleep(self.settings.pipeline_poll_interval_seconds)
-                continue
-
-            # Handle pipeline status
-            status_result = await self._handle_pipeline_status(ctx, sm, pipeline, retry_count, max_retries)
-            if status_result is None:
-                await self._interruptible_sleep(self.settings.pipeline_poll_interval_seconds)
-                continue
-
-            if isinstance(status_result, RetrySignal):
-                retry_count = status_result.retry_count
-                start_time = status_result.new_start_time
-                continue
-
-            return status_result
-
-    async def _check_pipeline_termination_conditions(
-        self,
-        ctx: ProcessingContext,
-        sm: MRStateMachine,
-        timeout: timedelta,
-        start_time: datetime,
-    ) -> ProcessingResult | None:
-        """Check if pipeline wait should terminate early."""
-        mr_iid = ctx.mr_iid
-
-        if self._shutdown_event.is_set():
-            log.info("Shutdown requested during pipeline wait", mr_iid=mr_iid)
-            return ProcessingResult.ERROR
-
-        elapsed = datetime.now(UTC) - start_time
-        if elapsed > timeout:
-            log.warning("Pipeline timeout", mr_iid=mr_iid, elapsed_seconds=elapsed.total_seconds())
-            hours = max(1, int(timeout.total_seconds() / 3600))
-            await sm.trigger_timeout(max_wait_hours=hours)
-            return ProcessingResult.TIMEOUT
-
-        if not await self._verify_mr_in_queue(mr_iid):
-            await sm.trigger_mark_removed(reason="label_removed")
-            return ProcessingResult.REMOVED
-
-        return None
-
-    async def _should_skip_stale_pipeline(self, mr_iid: int, pipeline: Pipeline) -> bool:
-        """Check if pipeline should be skipped as stale.
-
-        Uses pipeline_id/SHA validation to detect old pipelines from before
-        rebase/retry. This matches the approach in PipelineWebhookHandler.
-
-        Args:
-            mr_iid: MR IID to check.
-            pipeline: Current pipeline from GitLab API.
-
-        Returns:
-            True if pipeline should be skipped, False otherwise.
-        """
-        queue_item = await self.queue_manager.get_queue_item(mr_iid)
-        if queue_item is None:
-            return False
-
-        # Skip if pipeline_id doesn't match (old pipeline from before rebase/retry)
-        if queue_item.pipeline_id is not None and queue_item.pipeline_id != pipeline.id:
-            log.debug(
-                "Skipping old pipeline (pipeline_id mismatch)",
-                mr_iid=mr_iid,
-                current_pipeline_id=pipeline.id,
-                expected_pipeline_id=queue_item.pipeline_id,
-            )
-            return True
-
-        # Skip if SHA doesn't match (pipeline for wrong commit after rebase)
-        if queue_item.expected_sha is not None and pipeline.sha != queue_item.expected_sha:
-            log.debug(
-                "Skipping pipeline with wrong SHA",
-                mr_iid=mr_iid,
-                pipeline_id=pipeline.id,
-                pipeline_sha=pipeline.sha[:8] if pipeline.sha else "unknown",
-                expected_sha=queue_item.expected_sha[:8],
-            )
-            return True
-
-        return False
-
-    async def _maybe_rebase_during_testing(
-        self,
-        ctx: ProcessingContext,
-        sm: MRStateMachine,
-        rebase_handler: RebaseDuringTestingHandler,
-        rebase_ctx: RebaseDuringTestingContext,
-        pipeline: Pipeline,
-        retry_count: int,
-        last_rebase_check: datetime,
-    ) -> RebaseCheckOutcome:
-        """Check and handle rebase during testing if interval elapsed.
-
-        Returns:
-            RebaseCheckOutcome with either updated context or error result.
-        """
-        now = datetime.now(UTC)
-        check_interval = self.settings.rebase_check_interval_seconds
-
-        if (now - last_rebase_check).total_seconds() < check_interval:
-            return RebaseCheckOutcome(context=rebase_ctx, result=None, last_check=last_rebase_check, should_reset=False)
-
-        rebase_result = await self._check_and_handle_rebase_during_testing(
-            ctx, sm, rebase_handler, rebase_ctx, pipeline, retry_count
-        )
-
-        if rebase_result is None:
-            return RebaseCheckOutcome(context=rebase_ctx, result=None, last_check=now, should_reset=False)
-
-        if isinstance(rebase_result, RebaseDuringTestingContext):
-            # Only reset start_time if we got a new pipeline (current_pipeline_id changed to a valid value)
-            # If rebase happened but pipeline wait timed out, preserve the timing
-            got_new_pipeline = (
-                rebase_result.current_pipeline_id is not None
-                and rebase_result.current_pipeline_id != rebase_ctx.current_pipeline_id
-            )
-            return RebaseCheckOutcome(context=rebase_result, result=None, last_check=now, should_reset=got_new_pipeline)
-
-        return RebaseCheckOutcome(context=None, result=rebase_result, last_check=now, should_reset=False)
-
-    async def _handle_pipeline_status(
-        self,
-        ctx: ProcessingContext,
-        sm: MRStateMachine,
-        pipeline: Pipeline,
-        retry_count: int,
-        max_retries: int,
-    ) -> ProcessingResult | RetrySignal | None:
-        """Handle pipeline status and return result or continue signal.
-
-        Returns:
-            - ProcessingResult: Final result, return from caller
-            - RetrySignal: Retry with new count and start time, continue loop
-            - None: No action needed, continue polling
-        """
-        mr_iid = ctx.mr_iid
-
-        if pipeline.status == "success":
-            # Validate SHA before processing success to prevent acting on stale pipeline
-            queue_item = await self.queue_manager.get_queue_item(mr_iid)
-            if queue_item and queue_item.expected_sha and pipeline.sha != queue_item.expected_sha:
-                log.warning(
-                    "Pipeline success but SHA mismatch - waiting for correct pipeline",
-                    mr_iid=mr_iid,
-                    pipeline_id=pipeline.id,
-                    pipeline_sha=pipeline.sha[:8] if pipeline.sha else "unknown",
-                    expected_sha=queue_item.expected_sha[:8],
-                )
-                return None  # Continue polling
-
-            log.info("Pipeline succeeded", mr_iid=mr_iid, pipeline_id=pipeline.id)
-            await sm.trigger_pipeline_success()
-            return ProcessingResult.SUCCESS
-
-        if pipeline.status in ("failed", "canceled"):
-            return await self._handle_pipeline_failure(ctx, pipeline, retry_count, max_retries)
-
-        non_actionable_statuses = ("skipped", "manual", "waiting_for_resource", "blocked")
-        if pipeline.status in non_actionable_statuses:
-            log.warning(
-                "Pipeline in non-actionable state",
-                mr_iid=mr_iid,
-                pipeline_id=pipeline.id,
-                status=pipeline.status,
-            )
-            await sm.trigger_pipeline_failed(
-                failed_jobs=[],
-                retry_count=retry_count,
-                error_message=f"Pipeline status is '{pipeline.status}' - requires manual intervention",
-            )
-            return ProcessingResult.PIPELINE_FAILED
-
-        return None
-
-    async def _handle_pipeline_failure(
-        self,
-        ctx: ProcessingContext,
-        pipeline: Pipeline,
-        retry_count: int,
-        max_retries: int,
-    ) -> ProcessingResult | RetrySignal:
-        """Handle failed/canceled pipeline status."""
-        mr_iid = ctx.mr_iid
-        failed_jobs = await self._get_failed_jobs(pipeline.id)
-
-        # Sync retry_count with DB to prevent race with webhook handler
-        queue_item = await self.queue_manager.get_queue_item(mr_iid)
-        if queue_item and queue_item.retry_count is not None:
-            retry_count = max(retry_count, queue_item.retry_count)
-
-        log.warning(
-            "Pipeline failed",
-            mr_iid=mr_iid,
-            pipeline_id=pipeline.id,
-            pipeline_status=pipeline.status,
-            failed_jobs=failed_jobs,
-            retry_count=retry_count,
-            max_retries=max_retries,
-        )
-
-        should_continue, new_start = await self._handle_pipeline_failure_retry(
-            ctx, pipeline, failed_jobs, retry_count, max_retries
-        )
-
-        if should_continue and new_start:
-            return RetrySignal(retry_count=retry_count + 1, new_start_time=new_start)
-
-        return ProcessingResult.PIPELINE_FAILED
-
-    async def _check_and_handle_rebase_during_testing(
-        self,
-        ctx: ProcessingContext,
-        sm: MRStateMachine,
-        rebase_handler: RebaseDuringTestingHandler,
-        rebase_ctx: RebaseDuringTestingContext,
-        pipeline: Pipeline,
-        retry_count: int,
-    ) -> ProcessingResult | RebaseDuringTestingContext | None:
-        """Check if rebase is needed during testing and handle it.
-
-        Returns:
-            - RebaseDuringTestingContext if rebase happened (continue polling)
-            - ProcessingResult if error occurred (return from _wait_for_pipeline)
-            - None if no rebase needed (continue polling)
-        """
-        mr_iid = ctx.mr_iid
-
-        try:
-            new_ctx, new_pipeline = await rebase_handler.handle_rebase_if_needed(
-                mr_iid=mr_iid,
-                ctx=rebase_ctx,
-            )
-
-            if new_pipeline:
-                # Rebase happened, notify and continue
-                await sm.notify_rebase_during_testing(
-                    old_pipeline_id=pipeline.id,
-                    new_pipeline_id=new_pipeline.id,
-                    rebase_count=new_ctx.rebase_count,
-                    max_attempts=new_ctx.max_attempts,
-                )
-                return new_ctx
-
-            # Context may have been updated even without new pipeline (e.g., timeout waiting for pipeline)
-            # Preserve the updated state for max_attempts tracking
-            if new_ctx.rebase_count > rebase_ctx.rebase_count:
-                log.debug(
-                    "Rebase context updated but no new pipeline",
-                    mr_iid=mr_iid,
-                    rebase_count=new_ctx.rebase_count,
-                )
-                return new_ctx
-
-            return None
-
-        except RebaseRetryLimitExceeded as e:
-            log.warning("Rebase retry limit exceeded", mr_iid=mr_iid, error=str(e))
-            await sm.trigger_pipeline_failed(
-                failed_jobs=[],
-                retry_count=retry_count,
-                error_message=str(e),
-            )
-            return ProcessingResult.PIPELINE_FAILED
-
-        except GitLabConflictError as e:
-            log.warning("Rebase conflict during testing", mr_iid=mr_iid)
-            conflicted_files = await self.gitlab_client.get_mr_conflicts(mr_iid)
-            await sm.trigger_conflict_during_testing(
-                conflicted_files=conflicted_files,
-                error_message=str(e),
-            )
-            return ProcessingResult.CONFLICT
-
-        except GitLabAPIError as e:
-            # Handle API errors from rebase wait, new pipeline wait, or API calls
-            log.warning("GitLab API error during rebase in testing", mr_iid=mr_iid, error=str(e))
-            await sm.trigger_pipeline_failed(
-                failed_jobs=[],
-                retry_count=retry_count,
-                error_message=f"Rebase during testing failed: {e}",
-            )
-            return ProcessingResult.PIPELINE_FAILED
-
-    async def _wait_for_rebase_quick(self, ctx: ProcessingContext) -> None:
-        """Wait for rebase with a short timeout (for retry scenarios).
-
-        Args:
-            ctx: Processing context.
-
-        Raises:
-            GitLabAPIError: If rebase times out or fails.
-            GitLabConflictError: If rebase has conflicts.
-        """
-        mr_iid = ctx.mr_iid
-
-        # Exception holder for capturing errors from poll function.
-        # poll_until_done doesn't propagate exceptions from poll_fn,
-        # so we capture them here and raise after the poll completes.
-        captured_error: Exception | None = None
-
-        async def check_rebase() -> tuple[PollStatus, bool | None]:
-            """Poll rebase status for quick retry scenario."""
-            nonlocal captured_error
-            rebase_in_progress, has_conflicts = await self.gitlab_client.check_rebase_status(mr_iid)
-
-            if has_conflicts:
-                conflicted_files = await self.gitlab_client.get_mr_conflicts(mr_iid)
-                files_info = f": {conflicted_files}" if conflicted_files else ""
-                captured_error = GitLabConflictError(f"Rebase conflict during retry{files_info}")
-                return PollStatus.DONE, False
-
-            if not rebase_in_progress:
-                return PollStatus.DONE, True
-
-            return PollStatus.CONTINUE, None
-
-        config = PollingConfig(
-            timeout_seconds=QUICK_REBASE_TIMEOUT_SECONDS,
-            poll_interval_seconds=QUICK_REBASE_POLL_INTERVAL_SECONDS,
-            operation_name="quick_rebase",
-        )
-        outcome = await poll_until_done(config, check_rebase, self._shutdown_event)
-
-        # Check for captured exception
-        if captured_error is not None:
-            raise captured_error
-
-        if outcome.completed and outcome.result:
-            return
-
-        if outcome.shutdown_requested:
-            raise GitLabAPIError("Shutdown requested during quick rebase")
-
-        if outcome.timed_out:
-            raise GitLabAPIError("Rebase timeout during retry")
-
-    async def _get_failed_jobs(self, pipeline_id: int) -> list[str]:
-        """Get list of failed job names from a pipeline.
-
-        Args:
-            pipeline_id: Pipeline ID to check.
-
-        Returns:
-            List of failed job names (may be empty).
-        """
-        try:
-            jobs = await self.gitlab_client.get_pipeline_jobs(pipeline_id)
-            failed_jobs = [job.name for job in jobs if job.status in ("failed", "canceled")]
-            if failed_jobs:
-                log.info(
-                    "Found failed jobs in pipeline",
-                    pipeline_id=pipeline_id,
-                    failed_jobs=failed_jobs,
-                    count=len(failed_jobs),
-                )
-            return failed_jobs
-        except Exception as e:
-            log.warning(
-                "Failed to fetch pipeline jobs",
-                pipeline_id=pipeline_id,
-                error=str(e),
-            )
-            return []
+        return await self._pipeline_handler.wait_for_pipeline(ctx)
 
     # =========================================================================
     # Merge Step
@@ -1229,68 +403,15 @@ class MergeProcessor:
                     )
 
     async def _capture_pre_rebase_sha(self, ctx: ProcessingContext) -> str:
-        """Capture SHA before rebase for race condition prevention.
-
-        Stores the SHA in the processing context and returns it.
-        This is used to detect stale pipeline data after rebase.
-
-        Args:
-            ctx: Processing context to store SHA in.
-
-        Returns:
-            The captured SHA.
-        """
-        mr = await self.gitlab_client.get_mr(ctx.mr_iid)
-        old_sha = mr.sha
-        ctx.rebase_ctx.old_sha = old_sha
-        log.debug("Captured pre-rebase SHA", mr_iid=ctx.mr_iid, old_sha=old_sha[:8])
-        return old_sha
+        return await self._rebase_handler.capture_pre_rebase_sha(ctx)
 
     async def _interruptible_sleep(self, seconds: float) -> bool:
-        """Sleep that can be interrupted by shutdown event.
-
-        Args:
-            seconds: Number of seconds to sleep.
-
-        Returns:
-            True if sleep completed, False if interrupted by shutdown.
-        """
-        try:
-            await asyncio.wait_for(
-                self._shutdown_event.wait(),
-                timeout=seconds,
-            )
-            # Event was set - shutdown requested
-            return False
-        except TimeoutError:
-            # Normal timeout - sleep completed
-            return True
+        """Sleep that can be interrupted by shutdown event."""
+        return await interruptible_sleep(self._shutdown_event, seconds)
 
     async def _verify_mr_in_queue(self, mr_iid: int) -> bool:
-        """Verify MR still has queue label and is open.
-
-        Args:
-            mr_iid: MR IID to verify.
-
-        Returns:
-            True if MR is still valid for processing.
-        """
-        try:
-            mr = await self.gitlab_client.get_mr(mr_iid)
-
-            if mr.state != "opened":
-                log.info("MR is no longer open", mr_iid=mr_iid, state=mr.state)
-                return False
-
-            if self.settings.queue_label not in mr.labels and self.settings.hotfix_label not in mr.labels:
-                log.info("MR no longer has queue or hotfix label", mr_iid=mr_iid)
-                return False
-
-            return True
-
-        except GitLabNotFoundError:
-            log.warning("MR not found", mr_iid=mr_iid)
-            return False
+        """Verify MR still has queue label and is open."""
+        return await verify_mr_in_queue(self.gitlab_client, self.settings, mr_iid)
 
     async def _recover_interrupted_state(self) -> None:
         """Recover MRs that were in intermediate states when processor stopped.
@@ -1573,7 +694,6 @@ def create_processor(
 
 __all__: list[str] = [
     "MergeProcessor",
-    "ProcessingContext",
     "ProcessingResult",
     "create_processor",
 ]

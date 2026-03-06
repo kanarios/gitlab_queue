@@ -120,7 +120,7 @@ async def process_mr_with_non_actionable_pipeline_status(status: str):
             hotfix_label="hotfix",
             jwt_secret="a" * 64,
             webhook_secret="test-webhook-secret",
-            pipeline_retry_count=3,  # Even with retries, non-actionable should fail immediately
+            job_retry_count=3,  # Even with retries, non-actionable should fail immediately
             poll_interval_seconds=0.1,
             pipeline_timeout_seconds=60,
         )
@@ -243,7 +243,7 @@ async def non_actionable_status_does_not_retry():
             hotfix_label="hotfix",
             jwt_secret="a" * 64,
             webhook_secret="test-webhook-secret",
-            pipeline_retry_count=5,  # High retry count - should NOT be used
+            job_retry_count=5,  # High retry count - should NOT be used
             poll_interval_seconds=0.1,
             pipeline_timeout_seconds=60,
         )

@@ -135,7 +135,7 @@ async def process_mr_with_pipeline_failure_and_retry():
             hotfix_label="hotfix",
             jwt_secret="a" * 64,
             webhook_secret="test-webhook-secret",
-            pipeline_retry_count=2,  # Allow retries
+            job_retry_count=2,  # Allow retries
             poll_interval_seconds=0.1,  # Fast polling for tests
             pipeline_timeout_seconds=300,
         )
@@ -275,7 +275,7 @@ async def process_mr_with_pipeline_failure_max_retries():
             hotfix_label="hotfix",
             jwt_secret="a" * 64,
             webhook_secret="test-webhook-secret",
-            pipeline_retry_count=2,  # Allow 2 retries (3 total attempts)
+            job_retry_count=2,  # Allow 2 retries (3 total attempts)
             poll_interval_seconds=0.1,
         )
 
@@ -424,7 +424,7 @@ async def process_mr_with_canceled_pipeline():
             hotfix_label="hotfix",
             jwt_secret="a" * 64,
             webhook_secret="test-webhook-secret",
-            pipeline_retry_count=1,  # Allow 1 retry
+            job_retry_count=1,  # Allow 1 retry
             poll_interval_seconds=0.1,
         )
 
@@ -433,7 +433,7 @@ async def process_mr_with_canceled_pipeline():
         mocked(get_mr_matcher, get_mr_response),
         mocked(rebase_matcher, rebase_response),
         mocked(pipelines_matcher, pipelines_response),
-        mocked(jobs_matcher, jobs_response) as jobs_mock,
+        mocked(jobs_matcher, jobs_response),
         mocked(create_pipeline_matcher, create_pipeline_response),
         mocked(get_notes_matcher, get_notes_response),
         mocked(comment_matcher, comment_response),
@@ -452,21 +452,14 @@ async def process_mr_with_canceled_pipeline():
             result = await processor._process_mr(queue_item)
 
         with then("canceled pipeline is treated like failure"):
-            # Canceled pipelines should trigger retry or fail
-            assert result in (ProcessingResult.PIPELINE_FAILED, ProcessingResult.SUCCESS)
-
-            # Verify canceled jobs were fetched
-            jobs_history = await jobs_mock.fetch_history()
-            assert len(jobs_history) >= 1
+            # Canceled pipelines yield ProcessingResult.PIPELINE_FAILED without job retry
+            assert result == ProcessingResult.PIPELINE_FAILED
 
             # Check final state
             mr_state = await queue.get_mr_state(52)
-            # Canceled pipeline triggers retry which may still be in testing state
-            assert mr_state["status"] in (
-                "failed",
-                "merged",
-                "testing",
-            ), f"MR should be failed, merged, or testing after retry, got {mr_state['status']}"
+            assert mr_state["status"] == "failed", (
+                f"MR should be failed after canceled pipeline, got {mr_state['status']}"
+            )
 
     await db.close()
 

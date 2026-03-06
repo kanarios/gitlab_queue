@@ -163,7 +163,7 @@ class Scenario(vedro.Scenario):
             poll_interval_seconds=0.1,
             rebase_timeout_seconds=60,
             pipeline_timeout_seconds=300,
-            pipeline_retry_count=2,
+            job_retry_count=2,
             stale_mr_warning_hours=24,
             post_rebase_pipeline_wait_seconds=5,
         )

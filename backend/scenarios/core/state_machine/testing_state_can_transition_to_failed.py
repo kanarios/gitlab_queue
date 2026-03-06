@@ -24,7 +24,7 @@ class Scenario(vedro.Scenario):
     async def when_pipeline_failed_is_triggered(self):
         await self.sm.trigger_pipeline_failed(
             failed_jobs=["test", "lint"],
-            retry_count=2,
+            retried_jobs={"test": 1, "lint": 1},
             error_message="Tests failed",
         )
 

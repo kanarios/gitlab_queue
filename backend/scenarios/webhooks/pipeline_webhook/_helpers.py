@@ -21,7 +21,7 @@ def create_mock_settings():
     settings = MagicMock()
     settings.queue_label = Labels.MERGE_QUEUE
     settings.hotfix_label = Labels.HOTFIX
-    settings.pipeline_retry_count = 2
+    settings.job_retry_count = 2
     settings.target_branch = "master"
     return settings
 

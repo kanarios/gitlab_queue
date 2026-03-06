@@ -271,12 +271,7 @@ class MRStateMachine(StateMachine):
         # Remove queue label (MR is merged, label no longer needed)
         await self.notifier.remove_queue_label(self.mr_iid)
 
-        # Capture positions before completion for notification
-        positions_before: dict[int, int] = {}
-        old_total: int = 0
-        if self.position_notifier:
-            positions_before = await self.position_notifier.capture_queue_positions()
-            old_total = await self.queue_manager.get_queue_length()
+        positions_before, old_total = await self._capture_queue_positions_if_enabled()
 
         # Move MR to history table
         pipeline_duration = self._context.get("pipeline_duration_seconds")
@@ -286,13 +281,7 @@ class MRStateMachine(StateMachine):
             pipeline_duration_seconds=pipeline_duration,
         )
 
-        # Notify affected MRs about position changes
-        if self.position_notifier and positions_before:
-            await self.position_notifier.notify_affected_mrs_after_completion(
-                self.mr_iid,
-                positions_before,
-                old_total,
-            )
+        await self._notify_position_changes_if_any(positions_before, old_total)
 
     async def on_enter_failed(self) -> None:
         """Called when MR fails (conflict, pipeline, timeout)."""
@@ -319,7 +308,7 @@ class MRStateMachine(StateMachine):
                 pipeline_id=self._context.get("pipeline_id"),
                 pipeline_url=self._context.get("pipeline_url"),
                 failed_at=datetime.now(UTC),
-                retry_count=self._context.get("retry_count", 0),
+                retried_jobs=self._context.get("retried_jobs", {}),
                 failed_jobs=self._context.get("failed_jobs", []),
             )
         elif failure_reason == "timeout":
@@ -359,12 +348,7 @@ class MRStateMachine(StateMachine):
         # Remove queue label to prevent re-queueing
         await self.notifier.remove_queue_label(self.mr_iid)
 
-        # Capture positions before completion for notification
-        positions_before: dict[int, int] = {}
-        old_total: int = 0
-        if self.position_notifier:
-            positions_before = await self.position_notifier.capture_queue_positions()
-            old_total = await self.queue_manager.get_queue_length()
+        positions_before, old_total = await self._capture_queue_positions_if_enabled()
 
         # Move MR to history table
         # Map internal failure_reason to history status
@@ -384,13 +368,7 @@ class MRStateMachine(StateMachine):
             pipeline_failed_jobs=self._context.get("failed_jobs"),
         )
 
-        # Notify affected MRs about position changes
-        if self.position_notifier and positions_before:
-            await self.position_notifier.notify_affected_mrs_after_completion(
-                self.mr_iid,
-                positions_before,
-                old_total,
-            )
+        await self._notify_position_changes_if_any(positions_before, old_total)
 
     async def on_enter_removed(self) -> None:
         """Called when MR is removed from queue."""
@@ -437,12 +415,7 @@ class MRStateMachine(StateMachine):
         if removal_reason in ("closed", "timeout"):
             await self.notifier.remove_queue_label(self.mr_iid)
 
-        # Capture positions before completion for notification
-        positions_before: dict[int, int] = {}
-        old_total: int = 0
-        if self.position_notifier:
-            positions_before = await self.position_notifier.capture_queue_positions()
-            old_total = await self.queue_manager.get_queue_length()
+        positions_before, old_total = await self._capture_queue_positions_if_enabled()
 
         # Move MR to history table
         history_status = "timeout" if removal_reason == "timeout" else "removed"
@@ -452,7 +425,18 @@ class MRStateMachine(StateMachine):
             failure_reason=f"Removed: {removal_reason}",
         )
 
-        # Notify affected MRs about position changes
+        await self._notify_position_changes_if_any(positions_before, old_total)
+
+    async def _capture_queue_positions_if_enabled(self) -> tuple[dict[int, int], int]:
+        """Capture current queue positions before MR completion for later notification."""
+        if self.position_notifier:
+            positions_before = await self.position_notifier.capture_queue_positions()
+            old_total = await self.queue_manager.get_queue_length()
+            return positions_before, old_total
+        return {}, 0
+
+    async def _notify_position_changes_if_any(self, positions_before: dict[int, int], old_total: int) -> None:
+        """Notify affected MRs about queue position changes after this MR is completed."""
         if self.position_notifier and positions_before:
             await self.position_notifier.notify_affected_mrs_after_completion(
                 self.mr_iid,
@@ -555,25 +539,25 @@ class MRStateMachine(StateMachine):
         self,
         *,
         failed_jobs: list[str],
-        retry_count: int,
+        retried_jobs: dict[str, int],
         error_message: str,
     ) -> None:
-        """Pipeline failed after retries exhausted.
+        """Pipeline failed after job retries exhausted.
 
         Args:
             failed_jobs: List of failed job names.
-            retry_count: Number of retry attempts made.
+            retried_jobs: Per-job retry counts {job_name: count}.
             error_message: Error message for logging.
         """
         log.info(
             "Triggering pipeline_failed",
             mr_iid=self.mr_iid,
             failed_jobs=failed_jobs,
-            retry_count=retry_count,
+            retried_jobs=retried_jobs,
         )
         self._context["failure_reason"] = "pipeline_failed"
         self._context["failed_jobs"] = failed_jobs
-        self._context["retry_count"] = retry_count
+        self._context["retried_jobs"] = retried_jobs
         self._context["error_message"] = error_message
         await self.pipeline_failed()
 
@@ -635,61 +619,33 @@ class MRStateMachine(StateMachine):
     # Special Notification Methods (no state change)
     # =========================================================================
 
-    async def notify_pipeline_retry(
+    async def notify_job_retry(
         self,
         *,
-        old_pipeline_id: int,
-        old_pipeline_url: str,
-        new_pipeline_id: int,
-        new_pipeline_url: str,
-        retry_count: int,
+        pipeline_id: int,
+        pipeline_url: str | None,
+        retried_jobs: list[str],
+        retried_counts: dict[str, int],
         max_retries: int,
-        failed_jobs: list[str],
-        expected_sha: str | None = None,
     ) -> None:
-        """Notify about pipeline retry (stays in testing state).
+        """Notify about job-level retry (pipeline stays running, no state change).
 
         Args:
-            old_pipeline_id: ID of the failed pipeline.
-            old_pipeline_url: URL to the failed pipeline.
-            new_pipeline_id: ID of the new retry pipeline.
-            new_pipeline_url: URL to the new pipeline.
-            retry_count: Current retry attempt number.
+            pipeline_id: ID of the pipeline containing retried jobs.
+            pipeline_url: URL to the pipeline page.
+            retried_jobs: List of job names being retried.
+            retried_counts: Per-job retry counts {job_name: count}.
             max_retries: Maximum retry attempts configured.
-            failed_jobs: List of jobs that failed.
-            expected_sha: SHA that the new pipeline should be for (race condition prevention).
         """
-        log.info(
-            "Notifying pipeline retry",
-            mr_iid=self.mr_iid,
-            retry_count=retry_count,
-            max_retries=max_retries,
-            expected_sha=expected_sha[:8] if expected_sha else None,
-        )
-
-        # Update context for future reference
-        self._context["pipeline_id"] = new_pipeline_id
-        self._context["pipeline_url"] = new_pipeline_url
-        self._context["expected_sha"] = expected_sha
-
-        await self.queue_manager.update_mr_state(
-            self.mr_iid,
-            "testing",
-            pipeline_id=new_pipeline_id,
-            pipeline_status="running",
-            retry_count=retry_count,
-            expected_sha=expected_sha,
-        )
+        log.info("Job retry initiated", mr_iid=self.mr_iid, retried_jobs=retried_jobs)
         await self.notifier.notify(
             self.mr_iid,
-            "pipeline_retry",
-            retry_count=retry_count,
+            "job_retry",
+            pipeline_id=pipeline_id,
+            pipeline_url=pipeline_url,
+            retried_jobs=retried_jobs,
+            retried_counts=retried_counts,
             max_retries=max_retries,
-            old_pipeline_id=old_pipeline_id,
-            old_pipeline_url=old_pipeline_url,
-            pipeline_id=new_pipeline_id,
-            pipeline_url=new_pipeline_url,
-            failed_jobs=failed_jobs,
         )
 
     async def notify_position_changed(self, *, old_position: int) -> None:

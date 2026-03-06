@@ -21,7 +21,7 @@ class Scenario(vedro.Scenario):
 
     def given_handler_and_failed_event(self):
         self.settings = create_mock_settings()
-        self.settings.pipeline_retry_count = 2
+        self.settings.job_retry_count = 2
 
         self.gitlab_client, self.transport = create_gitlab_client_with_transport()
 

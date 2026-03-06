@@ -49,7 +49,7 @@ class Scenario(vedro.Scenario):
         """
         Calls the processor's _check_pipeline_termination_conditions with the prepared context, state machine, timeout, and start_time, and stores the resulting ProcessingResult on self.result.
         """
-        self.result = await self.processor._check_pipeline_termination_conditions(
+        self.result = await self.processor._pipeline_handler.check_pipeline_termination_conditions(
             ctx=self.ctx,
             sm=self.mock_sm,
             timeout=self.timeout,

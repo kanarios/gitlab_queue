@@ -55,12 +55,12 @@ class Scenario(vedro.Scenario):
 
     async def when_check_pipeline_termination_conditions_is_called(self):
         with patch.object(
-            self.processor,
+            self.processor._pipeline_handler,
             "_verify_mr_in_queue",
             new_callable=AsyncMock,
             return_value=False,
         ):
-            self.result = await self.processor._check_pipeline_termination_conditions(
+            self.result = await self.processor._pipeline_handler.check_pipeline_termination_conditions(
                 ctx=self.ctx,
                 sm=self.mock_sm,
                 timeout=self.timeout,

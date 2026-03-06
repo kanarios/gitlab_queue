@@ -249,7 +249,8 @@ def dump_queue_item(item: QueueItem) -> dict[str, Any]:
         "started_at": item.started_at.isoformat() if item.started_at else None,
         "pipeline_id": item.pipeline_id,
         "pipeline_status": item.pipeline_status,
-        "retry_count": item.retry_count,
+        "retry_count": item.get_max_job_retry_count(),
+        "retried_jobs": item.retried_jobs,
         "last_error": item.last_error,
     }
 
@@ -293,6 +294,7 @@ def load_queue_item(data: dict[str, Any]) -> QueueItem:
         pipeline_id=data.get("pipeline_id"),
         pipeline_status=data.get("pipeline_status"),
         retry_count=data.get("retry_count", 0),
+        retried_jobs=data.get("retried_jobs", {}),
         last_error=data.get("last_error"),
     )
 

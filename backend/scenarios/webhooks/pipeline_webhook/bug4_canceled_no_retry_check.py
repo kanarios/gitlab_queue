@@ -23,7 +23,7 @@ class Scenario(vedro.Scenario):
 
     def given_handler_with_retries_available(self):
         self.settings = create_mock_settings()
-        self.settings.pipeline_retry_count = 3
+        self.settings.job_retry_count = 3
         self.gitlab_client, self.transport = create_gitlab_client_with_transport()
         self.queue_manager = create_mock_queue_manager()
 
