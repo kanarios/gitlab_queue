@@ -25,6 +25,7 @@ async def flaky_pipeline_retry_succeeds_in_flow():
 
     with given("processor with a failed pipeline and retries available"):
         processor = create_mock_processor(poll_fn=instant_poll)
+        # (rebase_in_progress, has_conflicts)
         processor.gitlab_client.rebase_status = (False, False)
 
         sm = create_mock_state_machine()

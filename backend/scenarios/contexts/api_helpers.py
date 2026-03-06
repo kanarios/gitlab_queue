@@ -391,9 +391,14 @@ def created_webhook_state(
     Returns:
         WebhookAppState: Configured app state with all dependencies.
     """
+    if settings is None:
+        settings = create_mock_settings()
+    if database is None:
+        database = created_mock_database(connected=db_healthy)
+
     state = WebhookAppState(
-        settings=settings or create_mock_settings(),
-        database=database or created_mock_database(connected=db_healthy),
+        settings=settings,
+        database=database,
         gitlab_client=created_mock_gitlab_client(circuit_state=gitlab_circuit_state),
         queue_manager=created_mock_queue_manager(),
         notifier=created_mock_notifier(),
