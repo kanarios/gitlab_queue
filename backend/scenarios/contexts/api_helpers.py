@@ -460,18 +460,7 @@ async def created_test_app_with_db() -> AsyncIterator[tuple[FastAPI, WebhookAppS
         Tuple of (FastAPI app, WebhookAppState, Database).
     """
     async with initialized_test_database() as db:
-        settings = create_mock_settings()
-        state = WebhookAppState(
-            settings=settings,
-            database=db,
-            gitlab_client=created_mock_gitlab_client(),
-            queue_manager=created_mock_queue_manager(),
-            notifier=created_mock_notifier(),
-            position_notifier=None,
-            retry_manager=created_mock_retry_manager(),
-            health=created_mock_health(),
-            websocket_manager=WebSocketManager(),
-        )
+        state = created_webhook_state(database=db)
         app = create_webhook_app(state)
         yield app, state, db
 
