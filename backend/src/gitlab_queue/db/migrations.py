@@ -69,9 +69,7 @@ async def get_current_revision(database_url: str) -> str | None:
     try:
         async with engine.connect() as conn:
             # Check if alembic_version table exists
-            has_table = await conn.run_sync(
-                lambda sync_conn: inspect(sync_conn).has_table("alembic_version")
-            )
+            has_table = await conn.run_sync(lambda sync_conn: inspect(sync_conn).has_table("alembic_version"))
             if not has_table:
                 return None
 
@@ -142,14 +140,10 @@ async def _stamp_legacy_database_if_needed(database_url: str) -> bool:
     try:
         async with engine.connect() as conn:
             # Check if merge_requests table exists (i.e. DB was created by ensure_schema)
-            has_merge_requests = await conn.run_sync(
-                lambda sync_conn: inspect(sync_conn).has_table("merge_requests")
-            )
+            has_merge_requests = await conn.run_sync(lambda sync_conn: inspect(sync_conn).has_table("merge_requests"))
 
             # Check if alembic_version table exists
-            has_alembic_version = await conn.run_sync(
-                lambda sync_conn: inspect(sync_conn).has_table("alembic_version")
-            )
+            has_alembic_version = await conn.run_sync(lambda sync_conn: inspect(sync_conn).has_table("alembic_version"))
     finally:
         await engine.dispose()
 
