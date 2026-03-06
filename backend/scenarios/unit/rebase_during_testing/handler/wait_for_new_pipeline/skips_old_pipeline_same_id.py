@@ -1,13 +1,13 @@
 """Test _wait_for_new_pipeline skips pipeline with same ID as before rebase."""
 
 import asyncio
-from unittest.mock import AsyncMock
 
 import vedro
 
+from scenarios.fakes import create_pipeline
+
 from ..._helpers import (
     MockMergeRequest,
-    MockPipeline,
     create_handler,
     create_mock_gitlab_client,
 )
@@ -26,19 +26,19 @@ class Scenario(vedro.Scenario):
         mr = MockMergeRequest(sha=self.new_sha, rebase_in_progress=False)
 
         # First call returns old pipeline (same ID), second returns new
-        old_pipeline = MockPipeline(
+        old_pipeline = create_pipeline(
             id=self.old_pipeline_id,
             sha=self.new_sha,
             status="canceled",
         )
-        new_pipeline = MockPipeline(
+        new_pipeline = create_pipeline(
             id=self.new_pipeline_id,
             sha=self.new_sha,
             status="running",
         )
 
         self.client = create_mock_gitlab_client(mr=mr)
-        self.client.get_latest_mr_pipeline = AsyncMock(side_effect=[old_pipeline, new_pipeline])
+        self.client.latest_pipeline_sequence = [old_pipeline, new_pipeline]
 
         self.handler = create_handler(gitlab_client=self.client)
         self.handler.set_shutdown_event(asyncio.Event())
@@ -55,4 +55,4 @@ class Scenario(vedro.Scenario):
         assert self.result.id == self.new_pipeline_id
 
     def then_pipeline_was_fetched_twice(self):
-        assert self.client.get_latest_mr_pipeline.call_count == 2
+        assert len(self.client.get_latest_pipeline_calls) == 2

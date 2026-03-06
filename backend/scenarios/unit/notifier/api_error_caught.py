@@ -8,10 +8,10 @@ Covers notifier.py lines 355, 425:
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
-
 import vedro
 from vedro import catched
+
+from scenarios.fakes import FakeGitLabClient
 
 from ._helpers import create_test_notifier
 
@@ -21,7 +21,7 @@ class Scenario(vedro.Scenario):
 
     def given_notifier_with_mock_client(self):
         """
-        Create a test notifier configured with a default mock GitLab client.
+        Create a test notifier configured with a default FakeGitLabClient.
 
         Sets self.notifier to the notifier instance returned by create_test_notifier(), ready for use by subsequent test steps.
         """
@@ -56,23 +56,16 @@ class Scenario2(vedro.Scenario):
 
     def given_notifier_with_mock_client(self):
         """
-        Prepare a test notifier with a mocked GitLab client whose add_or_update_pinned_comment returns a note with id 42.
+        Prepare a test notifier with a FakeGitLabClient.
 
-        Sets self.gitlab_client to an AsyncMock configured so add_or_update_pinned_comment returns a MagicMock note (id=42) and assigns self.notifier via create_test_notifier using that client.
+        Sets self.gitlab_client to a FakeGitLabClient and assigns self.notifier via create_test_notifier using that client.
         """
-        self.gitlab_client = AsyncMock()
-        note = MagicMock()
-        note.id = 42
-        self.gitlab_client.add_or_update_pinned_comment = AsyncMock(
-            return_value=note,
-        )
+        self.gitlab_client = FakeGitLabClient()
         self.notifier = create_test_notifier(gitlab_client=self.gitlab_client)
 
     async def when_notify_is_called_with_valid_status(self):
         """
         Invoke notifier.notify with a valid "removed_closed" status and record its return value on self.result.
-
-        Calls notify(mr_iid=10, status="removed_closed", removed_at="2025-01-15 10:00 UTC") and stores the returned note object in self.result for later assertions.
         """
         self.result = await self.notifier.notify(
             mr_iid=10,
@@ -82,18 +75,15 @@ class Scenario2(vedro.Scenario):
 
     def then_note_is_returned(self):
         """
-        Assert that the notifier returned a note with id 42.
-
-        Raises:
-            AssertionError: If the returned object's `id` is not 42.
+        Assert that the notifier returned a note with id 1 (default from FakeGitLabClient).
         """
-        assert self.result.id == 42
+        assert self.result.id == 1
 
     def and_gitlab_client_was_called(self):
-        self.gitlab_client.add_or_update_pinned_comment.assert_awaited_once()
-        call_args = self.gitlab_client.add_or_update_pinned_comment.call_args
-        assert call_args[0][0] == 10  # mr_iid
-        assert "Removed from queue" in call_args[0][1]
+        assert len(self.gitlab_client.add_comment_calls) == 1
+        mr_iid, body = self.gitlab_client.add_comment_calls[0]
+        assert mr_iid == 10
+        assert "Removed from queue" in body
 
 
 class Scenario3(vedro.Scenario):
@@ -101,24 +91,16 @@ class Scenario3(vedro.Scenario):
 
     def given_notifier_whose_client_raises(self):
         """
-        Prepare self.notifier with a mock GitLab client that raises an exception when removing MR labels.
-
-        Configures an AsyncMock gitlab_client where calling remove_mr_label raises Exception("GitLab API 500") and add_or_update_pinned_comment returns a note object with id == 1. The created notifier is assigned to self.notifier.
+        Prepare self.notifier with a FakeGitLabClient that raises an exception when removing MR labels.
         """
-        gitlab_client = AsyncMock()
-        gitlab_client.remove_mr_label = AsyncMock(
-            side_effect=Exception("GitLab API 500"),
+        gitlab_client = FakeGitLabClient(
+            remove_label_error=Exception("GitLab API 500"),
         )
-        note = MagicMock()
-        note.id = 1
-        gitlab_client.add_or_update_pinned_comment = AsyncMock(return_value=note)
         self.notifier = create_test_notifier(gitlab_client=gitlab_client)
 
     async def when_remove_queue_label_is_called(self):
         """
         Invoke the notifier's remove_queue_label for MR IID 42 and record whether it raised an exception.
-
-        Sets self.raised to `True` if an exception was raised during the call, `False` otherwise.
         """
         self.raised = False
         try:
@@ -129,8 +111,6 @@ class Scenario3(vedro.Scenario):
     def then_no_exception_is_propagated(self):
         """
         Asserts that no exception was propagated during the preceding operation.
-
-        Fails the test if an exception bubbled up (i.e., if self.raised is True).
         """
         assert self.raised is False
 
@@ -139,8 +119,9 @@ class Scenario4(vedro.Scenario):
     subject = "build_pipeline_url constructs correct URL"
 
     def given_notifier_with_gitlab_url(self):
-        gitlab_client = MagicMock()
-        gitlab_client.get_project_web_url = AsyncMock(return_value="https://gitlab.example.com/group/project")
+        gitlab_client = FakeGitLabClient(
+            project_web_url="https://gitlab.example.com/group/project",
+        )
         self.notifier = create_test_notifier(gitlab_client=gitlab_client)
 
     async def when_build_pipeline_url_is_called(self):

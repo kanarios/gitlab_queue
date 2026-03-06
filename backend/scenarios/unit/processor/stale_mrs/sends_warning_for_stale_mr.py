@@ -7,13 +7,12 @@ and the warning flag should be marked.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
-
 import vedro
+
+from scenarios.fakes import FakeStateMachine, FakeStateMachineFactory
 
 from .._helpers import (
     create_mock_processor,
-    create_mock_state_machine,
     create_test_queue_item,
 )
 
@@ -22,38 +21,18 @@ class Scenario(vedro.Scenario):
     subject = "check stale mrs sends warning for unwarned stale MR"
 
     def given_processor_with_stale_unwarned_mr(self):
-        """
-        Prepare a mock processor containing a stale merge request that has not been warned.
-
-        Configures:
-        - self.processor: a mock processor.
-        - self.stale_item: a test queue item for MR IID 42 in state "queued" with stale_warning_sent set to False.
-        - self.processor.queue_manager.get_stale_mrs to return a list containing self.stale_item.
-        - self.mock_sm: a mock state machine.
-        """
-        self.processor = create_mock_processor()
+        self.fake_sm = FakeStateMachine()
+        self.sm_factory = FakeStateMachineFactory(state_machine=self.fake_sm)
+        self.processor = create_mock_processor(state_machine_factory=self.sm_factory)
 
         self.stale_item = create_test_queue_item(mr_iid=42, state="queued", stale_warning_sent=False)
-        self.processor.queue_manager.get_stale_mrs.return_value = [
-            self.stale_item,
-        ]
-
-        self.mock_sm = create_mock_state_machine()
+        self.processor.queue_manager.add_item(self.stale_item)
 
     async def when_check_stale_mrs_is_called(self):
-        with patch(
-            "gitlab_queue.core.processor.create_state_machine_for_mr",
-            new_callable=AsyncMock,
-            return_value=self.mock_sm,
-        ):
-            await self.processor._check_stale_mrs()
+        await self.processor._check_stale_mrs()
 
     def then_stale_warning_is_sent(self):
-        self.mock_sm.notify_stale_warning.assert_awaited_once_with(
-            warning_hours=24,
-        )
+        assert self.fake_sm.stale_warning_calls == [{"warning_hours": 24}]
 
     def and_warning_flag_is_marked(self):
-        self.processor.queue_manager.mark_stale_warning_sent.assert_awaited_once_with(
-            42,
-        )
+        assert 42 in self.processor.queue_manager.stale_warning_calls

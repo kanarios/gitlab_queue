@@ -6,13 +6,11 @@ return (None, new_sha) to avoid acting on a stale pipeline.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
 import vedro
 
+from scenarios.fakes import create_mr, create_pipeline
+
 from .._helpers import (
-    create_mock_mr,
-    create_mock_pipeline,
     create_mock_processor,
     create_mock_settings,
 )
@@ -28,18 +26,16 @@ class Scenario(vedro.Scenario):
         new_sha = "new_sha_after_rebase"
 
         # During polling: rebase_in_progress=True → always CONTINUE
-        polling_mr = create_mock_mr(iid=42, sha=new_sha)
-        polling_mr.rebase_in_progress = True
+        polling_mr = create_mr(iid=42, sha=new_sha, rebase_in_progress=True)
 
         # After timeout: get_mr returns the new SHA
-        post_timeout_mr = create_mock_mr(iid=42, sha=new_sha)
-        post_timeout_mr.rebase_in_progress = False
+        post_timeout_mr = create_mr(iid=42, sha=new_sha, rebase_in_progress=False)
 
-        self.processor.gitlab_client.get_mr = AsyncMock(side_effect=[polling_mr, post_timeout_mr])
+        self.processor.gitlab_client.mr_response_sequence = [polling_mr, post_timeout_mr]
 
         # After timeout: pipeline has WRONG sha (stale pipeline)
-        stale_pipeline = create_mock_pipeline(pipeline_id=100, sha="some_other_sha", status="running")
-        self.processor.gitlab_client.get_latest_mr_pipeline.return_value = stale_pipeline
+        stale_pipeline = create_pipeline(id=100, sha="some_other_sha", status="running")
+        self.processor.gitlab_client.latest_pipeline_response = stale_pipeline
 
         self.old_sha = old_sha
         self.expected_new_sha = new_sha

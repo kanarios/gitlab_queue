@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from datetime import UTC, datetime, timedelta
 
 import vedro
 from scenarios.contexts.api_helpers import (
@@ -24,18 +24,32 @@ class Scenario(vedro.Scenario):
         self.token = created_test_jwt(self.state.settings)
         self.headers = {"Authorization": f"Bearer {self.token}"}
 
-        self.active_items = [
+        now = datetime.now(UTC)
+        self.state.queue_manager.add_item(
             create_test_queue_item(
                 mr_iid=100,
                 title="First MR",
                 state=QueueState.REBASING,
                 is_hotfix=True,
-            ),
-            create_test_queue_item(mr_iid=101, title="Second MR", state=QueueState.QUEUED),
-            create_test_queue_item(mr_iid=102, title="Third MR", state=QueueState.QUEUED),
-        ]
-
-        self.state.queue_manager.get_active_queue = AsyncMock(return_value=self.active_items)
+                queued_at=now - timedelta(minutes=30),
+            )
+        )
+        self.state.queue_manager.add_item(
+            create_test_queue_item(
+                mr_iid=101,
+                title="Second MR",
+                state=QueueState.QUEUED,
+                queued_at=now - timedelta(minutes=20),
+            )
+        )
+        self.state.queue_manager.add_item(
+            create_test_queue_item(
+                mr_iid=102,
+                title="Third MR",
+                state=QueueState.QUEUED,
+                queued_at=now - timedelta(minutes=10),
+            )
+        )
 
     def when_active_queue_is_requested(self):
         self.response = self.client.get("/api/queue/active", headers=self.headers)

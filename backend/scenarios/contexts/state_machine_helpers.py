@@ -7,39 +7,32 @@ MRStateMachine transitions and callbacks.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from typing import Any
 
 from gitlab_queue.core.state_machine import MRStateMachine
 from gitlab_queue.models.queue_item import QueueItem
+from scenarios.fakes import FakeNotifier, FakeQueueManager
 from scenarios.library import QueueState
 
 
-def create_mock_notifier() -> MagicMock:
+def create_mock_notifier() -> FakeNotifier:
     """Create a mock MRNotifier for testing.
 
     Returns:
-        MagicMock: Mock notifier with async notify method.
+        FakeNotifier: Fake notifier with call recording.
     """
-    notifier = MagicMock()
-    notifier.notify = AsyncMock()
-    notifier.remove_queue_label = AsyncMock()
-    notifier.build_pipeline_url = AsyncMock(return_value="https://gitlab.com/pipeline/123")
-    return notifier
+    return FakeNotifier(pipeline_url_template="https://gitlab.com/pipeline/{pipeline_id}")
 
 
-def create_mock_queue_manager() -> MagicMock:
+def create_mock_queue_manager() -> FakeQueueManager:
     """Create a mock QueueManager for testing.
 
     Returns:
-        MagicMock: Mock queue manager with standard async methods.
+        FakeQueueManager: Fake queue manager with a pre-added QueueItem.
     """
-    qm = MagicMock()
-    qm.get_queue_position = AsyncMock(return_value=1)
-    qm.get_queue_length = AsyncMock(return_value=5)
-    qm.update_mr_state = AsyncMock(return_value=True)
-    qm.complete_mr = AsyncMock()
-    qm.get_queue_item = AsyncMock(
-        return_value=QueueItem(
+    qm = FakeQueueManager()
+    qm.add_item(
+        QueueItem(
             mr_iid=123,
             title="Test MR",
             author_name="Test",
@@ -53,8 +46,8 @@ def create_mock_queue_manager() -> MagicMock:
 
 
 async def create_state_machine(
-    notifier: MagicMock,
-    queue_manager: MagicMock,
+    notifier: Any,
+    queue_manager: Any,
     mr_iid: int = 123,
     *,
     start_value: str | None = None,
@@ -64,8 +57,8 @@ async def create_state_machine(
     """Create and activate a state machine for testing.
 
     Args:
-        notifier: Mock notifier instance.
-        queue_manager: Mock queue manager instance.
+        notifier: Notifier instance.
+        queue_manager: Queue manager instance.
         mr_iid: MR internal ID.
         start_value: Initial state (defaults to 'queued').
         target_branch: Target branch name.

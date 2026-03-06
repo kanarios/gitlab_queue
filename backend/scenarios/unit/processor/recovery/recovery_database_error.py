@@ -22,7 +22,7 @@ class Scenario(vedro.Scenario):
         Sets self.processor to a mock processor and configures its queue_manager.get_active_queue to raise Exception("DB error") when invoked.
         """
         self.processor = create_mock_processor()
-        self.processor.queue_manager.get_active_queue.side_effect = Exception("DB error")
+        self.processor.queue_manager.get_active_queue_error = Exception("DB error")
 
     async def when_recover_interrupted_state_is_called(self):
         self.raised = None

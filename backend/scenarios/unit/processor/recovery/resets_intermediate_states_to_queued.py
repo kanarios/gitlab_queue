@@ -31,12 +31,10 @@ class Scenario(vedro.Scenario):
         self.processor = create_mock_processor()
 
         self.queue_item = create_test_queue_item(mr_iid=42, state="testing")
-        self.processor.queue_manager.get_active_queue.return_value = [
-            self.queue_item,
-        ]
+        self.processor.queue_manager.add_item(self.queue_item)
 
         self.mock_mr = create_mock_mr(iid=42, state="opened", labels=["merge_queue"])
-        self.processor.gitlab_client.get_mr.return_value = self.mock_mr
+        self.processor.gitlab_client.mr_responses[42] = self.mock_mr
 
     async def when_recover_interrupted_state_is_called(self):
         """
@@ -47,4 +45,7 @@ class Scenario(vedro.Scenario):
         await self.processor._recover_interrupted_state()
 
     def then_mr_state_is_reset_to_queued(self):
-        self.processor.queue_manager.update_mr_state.assert_awaited_once_with(42, "queued")
+        assert len(self.processor.queue_manager.update_state_calls) == 1
+        call = self.processor.queue_manager.update_state_calls[0]
+        assert call["mr_iid"] == 42
+        assert call["state"] == "queued"

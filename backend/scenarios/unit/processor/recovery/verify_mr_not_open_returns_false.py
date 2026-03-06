@@ -27,7 +27,7 @@ class Scenario(vedro.Scenario):
         self.processor = create_mock_processor()
 
         self.mock_mr = create_mock_mr(iid=42, state="closed", labels=["merge_queue"])
-        self.processor.gitlab_client.get_mr.return_value = self.mock_mr
+        self.processor.gitlab_client.mr_responses[42] = self.mock_mr
 
     async def when_verify_mr_in_queue_is_called(self):
         """

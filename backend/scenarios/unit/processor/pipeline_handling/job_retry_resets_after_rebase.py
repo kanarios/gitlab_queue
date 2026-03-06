@@ -7,10 +7,10 @@ retried_jobs should be reset to {} in _wait_for_pipeline loop.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import vedro
 
+import gitlab_queue.core.pipeline_handler as _ph_mod
 from gitlab_queue.core.rebase_during_testing import RebaseDuringTestingContext
 from gitlab_queue.core.types import RebaseCheckOutcome
 
@@ -32,34 +32,49 @@ class Scenario(vedro.Scenario):
 
         # Queue item has prior retried_jobs
         queue_item = create_test_queue_item(mr_iid=42, state="testing", retried_jobs={"flaky": 1})
-        self.processor.queue_manager.get_queue_item = AsyncMock(return_value=queue_item)
+        self.processor.queue_manager.add_item(queue_item)
 
         # Pipeline succeeds after the rebase (so we need 2 iterations)
-        # First iteration: running pipeline -> rebase happens -> reset
-        # Second iteration: success
         running_pipeline = create_mock_pipeline(pipeline_id=100, sha="abc123", status="running")
         success_pipeline = create_mock_pipeline(pipeline_id=101, sha="def456", status="success")
 
-        self.processor.gitlab_client.get_latest_mr_pipeline = AsyncMock(
-            side_effect=[running_pipeline, success_pipeline]
-        )
-        self.processor.gitlab_client.get_mr = AsyncMock(
-            return_value=MagicMock(state="opened", labels=["merge_queue"], sha="abc123")
-        )
+        self.processor.gitlab_client.latest_pipeline_sequence = [running_pipeline, success_pipeline]
 
         new_rebase_ctx = RebaseDuringTestingContext(max_attempts=3, rebase_count=1, current_pipeline_id=101)
-
-        # First rebase check returns reset signal
-        # Second rebase check returns no-op
-        handler = self.processor._pipeline_handler
-        handler.should_skip_stale_pipeline = AsyncMock(return_value=False)
-        handler.check_pipeline_termination_conditions = AsyncMock(return_value=None)
-        handler._interruptible_sleep = AsyncMock(return_value=True)
 
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
 
         self.captured_retried_jobs: list[dict] = []
+
+        # First rebase check returns reset signal, second returns no-op
+        self.rebase_side_effects = iter(
+            [
+                RebaseCheckOutcome(
+                    context=new_rebase_ctx, result=None, last_check=datetime.now(UTC), should_reset=True
+                ),
+                RebaseCheckOutcome(
+                    context=new_rebase_ctx, result=None, last_check=datetime.now(UTC), should_reset=False
+                ),
+            ]
+        )
+
+    async def when_wait_for_pipeline_is_called(self):
+        handler = self.processor._pipeline_handler
+
+        async def fake_termination(*args, **kwargs):
+            return None
+
+        async def fake_skip(*args, **kwargs):
+            return False
+
+        async def fake_sleep(seconds):
+            return True
+
+        handler.check_pipeline_termination_conditions = fake_termination
+        handler.should_skip_stale_pipeline = fake_skip
+        handler._interruptible_sleep = fake_sleep
+
         original_handle = handler.handle_pipeline_status
 
         async def capture_retried_jobs(ctx, sm, pipeline, retried_jobs):
@@ -68,18 +83,15 @@ class Scenario(vedro.Scenario):
 
         handler.handle_pipeline_status = capture_retried_jobs
 
-        self.rebase_side_effects = [
-            RebaseCheckOutcome(context=new_rebase_ctx, result=None, last_check=datetime.now(UTC), should_reset=True),
-            RebaseCheckOutcome(context=new_rebase_ctx, result=None, last_check=datetime.now(UTC), should_reset=False),
-        ]
+        async def fake_rebase(*args, **kwargs):
+            return next(self.rebase_side_effects)
 
-    async def when_wait_for_pipeline_is_called(self):
-        with patch(
-            "gitlab_queue.core.pipeline_handler.maybe_rebase_during_testing",
-            new_callable=AsyncMock,
-            side_effect=self.rebase_side_effects,
-        ):
+        original = _ph_mod.maybe_rebase_during_testing
+        _ph_mod.maybe_rebase_during_testing = fake_rebase
+        try:
             self.result = await self.processor._wait_for_pipeline(self.ctx)
+        finally:
+            _ph_mod.maybe_rebase_during_testing = original
 
     def then_retried_jobs_was_reset_after_rebase(self):
         # After rebase, retried_jobs should be empty
@@ -89,9 +101,10 @@ class Scenario(vedro.Scenario):
 
     def and_retried_jobs_persisted_to_db(self):
         # Verify that after rebase reset, {} was persisted to DB
-        update_calls = self.processor.queue_manager.update_mr_state.await_args_list
         retried_jobs_values = [
-            call.kwargs.get("retried_jobs") for call in update_calls if "retried_jobs" in (call.kwargs or {})
+            call.get("retried_jobs")
+            for call in self.processor.queue_manager.update_state_calls
+            if "retried_jobs" in call
         ]
         assert {} in retried_jobs_values, (
             f"Expected update_mr_state called with retried_jobs={{}} after rebase, but got: {retried_jobs_values}"

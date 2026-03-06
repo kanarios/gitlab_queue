@@ -19,8 +19,7 @@ class Scenario(vedro.Scenario):
     def given_processor_with_no_queue_item(self):
         self.processor = create_mock_processor()
 
-        # Queue item is not found
-        self.processor.queue_manager.get_queue_item.return_value = None
+        # Queue item is not found (empty queue — get_queue_item returns None)
 
         self.pipeline = create_mock_pipeline(pipeline_id=100, sha="abc123", status="running")
 

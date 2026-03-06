@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
-
 import vedro
 from scenarios.contexts.api_helpers import (
     created_test_app,
@@ -12,6 +10,8 @@ from scenarios.contexts.api_helpers import (
 from scenarios.library import QueueState
 from scenarios.schemas.status_code import OkStatusSchema
 from starlette.testclient import TestClient
+
+from gitlab_queue.models.queue_item import DashboardStats
 
 
 class Scenario(vedro.Scenario):
@@ -23,13 +23,13 @@ class Scenario(vedro.Scenario):
         self.token = created_test_jwt(self.state.settings)
         self.headers = {"Authorization": f"Bearer {self.token}"}
 
-        self.current_stats = {
+        self.state.queue_manager.queue_stats = {
             QueueState.QUEUED: 3,
             QueueState.REBASING: 1,
             QueueState.TESTING: 2,
             QueueState.MERGING: 0,
         }
-        self.dashboard_stats = MagicMock(
+        self.state.queue_manager.dashboard_stats = DashboardStats(
             total_in_queue=6,
             stats_window_days=7,
             merged_count=45,
@@ -38,9 +38,6 @@ class Scenario(vedro.Scenario):
             avg_wait_seconds=180,
             avg_processing_seconds=420,
         )
-
-        self.state.queue_manager.get_queue_stats = AsyncMock(return_value=self.current_stats)
-        self.state.queue_manager.get_dashboard_stats = AsyncMock(return_value=self.dashboard_stats)
 
     def when_queue_stats_are_requested(self):
         self.response = self.client.get("/api/queue/stats", headers=self.headers)

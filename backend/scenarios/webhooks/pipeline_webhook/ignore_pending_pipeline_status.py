@@ -33,7 +33,7 @@ class Scenario(vedro.Scenario):
 
     def then_queue_item_should_not_be_checked(self):
         # pending status is not in handled statuses
-        self.queue_manager.get_queue_item.assert_not_awaited()
+        assert self.queue_manager.get_queue_item_calls == []
 
     async def cleanup(self):
         await self.gitlab_client.close()

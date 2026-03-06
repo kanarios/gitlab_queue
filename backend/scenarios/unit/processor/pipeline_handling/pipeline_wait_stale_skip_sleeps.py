@@ -6,10 +6,10 @@ Lines 824-825: when _should_skip_stale_pipeline returns True, sleep and continue
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
 
 import vedro
 
+import gitlab_queue.core.pipeline_handler as _ph_mod
 from gitlab_queue.core.processor import ProcessingResult
 from gitlab_queue.core.types import RebaseCheckOutcome
 
@@ -30,20 +30,24 @@ class Scenario(vedro.Scenario):
         self.processor = create_mock_processor(settings=create_mock_settings(pipeline_poll_interval_seconds=0.001))
 
         self.pipeline = create_mock_pipeline(pipeline_id=99, sha="old_sha", status="running")
-        self.processor.gitlab_client.get_latest_mr_pipeline.return_value = self.pipeline
+        self.processor.gitlab_client.latest_pipeline_response = self.pipeline
 
         queue_item = create_test_queue_item(mr_iid=42, state="testing")
-        self.processor.queue_manager.get_queue_item.return_value = queue_item
+        self.processor.queue_manager.add_item(queue_item)
 
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
 
         self.skip_call_count = 0
         self.termination_call_count = 0
+        self.sleep_call_count = 0
 
-        no_result_rebase = RebaseCheckOutcome(
+        self.no_result_rebase = RebaseCheckOutcome(
             context=None, result=None, last_check=datetime.now(UTC), should_reset=False
         )
+
+    async def when_wait_for_pipeline_is_called(self):
+        handler = self.processor._pipeline_handler
 
         async def termination_side_effect(_ctx, _sm, _timeout, _start):
             self.termination_call_count += 1
@@ -55,39 +59,23 @@ class Scenario(vedro.Scenario):
             self.skip_call_count += 1
             return True  # Always stale
 
-        self.mock_sleep = AsyncMock(return_value=True)
+        async def fake_sleep(seconds):
+            self.sleep_call_count += 1
+            return True
 
-        self.termination_side_effect = termination_side_effect
-        self.skip_side_effect = skip_side_effect
-        self.no_result_rebase = no_result_rebase
+        handler.check_pipeline_termination_conditions = termination_side_effect
+        handler.should_skip_stale_pipeline = skip_side_effect
+        handler._interruptible_sleep = fake_sleep
 
-    async def when_wait_for_pipeline_is_called(self):
-        handler = self.processor._pipeline_handler
-        with (
-            patch.object(
-                handler,
-                "check_pipeline_termination_conditions",
-                new_callable=AsyncMock,
-                side_effect=self.termination_side_effect,
-            ),
-            patch(
-                "gitlab_queue.core.pipeline_handler.maybe_rebase_during_testing",
-                new_callable=AsyncMock,
-                return_value=self.no_result_rebase,
-            ),
-            patch.object(
-                handler,
-                "should_skip_stale_pipeline",
-                new_callable=AsyncMock,
-                side_effect=self.skip_side_effect,
-            ),
-            patch.object(
-                handler,
-                "_interruptible_sleep",
-                self.mock_sleep,
-            ),
-        ):
+        async def fake_rebase(*args, **kwargs):
+            return self.no_result_rebase
+
+        original = _ph_mod.maybe_rebase_during_testing
+        _ph_mod.maybe_rebase_during_testing = fake_rebase
+        try:
             self.result = await self.processor._wait_for_pipeline(self.ctx)
+        finally:
+            _ph_mod.maybe_rebase_during_testing = original
 
     def then_result_is_removed(self):
         assert self.result == ProcessingResult.REMOVED
@@ -96,4 +84,4 @@ class Scenario(vedro.Scenario):
         assert self.skip_call_count >= 1
 
     def and_sleep_was_called_for_stale_skip(self):
-        self.mock_sleep.assert_called()
+        assert self.sleep_call_count >= 1

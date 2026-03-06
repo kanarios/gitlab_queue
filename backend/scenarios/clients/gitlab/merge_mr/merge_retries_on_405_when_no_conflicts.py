@@ -1,45 +1,53 @@
 """Test merge_mr retries on HTTP 405 when has_conflicts=False, then succeeds."""
 
-from unittest.mock import AsyncMock, patch
-
 import vedro
 
-from gitlab_queue.clients.gitlab import GitLabAPIError, GitLabClient
+from scenarios.transports import GitLabMockTransport
 
-from ._helpers import _mr_to_dict, create_gitlab_client_for_test, create_mr
+from ._helpers import (
+    create_merge_mr_client,
+    mr_get_path,
+    mr_get_response,
+    mr_merge_error_response,
+    mr_merge_path,
+    mr_merge_response,
+)
 
 
 class Scenario(vedro.Scenario):
     subject = "merge_mr retries on HTTP 405 when has_conflicts=False, then succeeds"
 
     def given_mr_ready_but_api_returns_405_initially(self):
-        self.mr = create_mr(merge_status="can_be_merged", has_conflicts=False)
         self.iid = 42
-        self.api_error = GitLabAPIError("Method Not Allowed", status_code=405)
+        self.transport = GitLabMockTransport()
+        self.transport.register_sequence(
+            "GET",
+            mr_get_path(self.iid),
+            [
+                mr_get_response(self.iid, merge_status="can_be_merged", has_conflicts=False),
+                mr_get_response(self.iid, merge_status="can_be_merged", has_conflicts=False),
+            ],
+        )
+        self.transport.register_sequence(
+            "PUT",
+            mr_merge_path(self.iid),
+            [
+                mr_merge_error_response(status=405, message="Method Not Allowed"),
+                mr_merge_response(self.iid, state="merged"),
+            ],
+        )
+        self.client = create_merge_mr_client(self.transport)
 
     async def when_merge_mr_is_called(self):
-        with (
-            patch.object(GitLabClient, "get_mr", new_callable=AsyncMock) as mock_get_mr,
-            patch.object(GitLabClient, "put", new_callable=AsyncMock) as mock_put,
-            patch("gitlab_queue.clients.gitlab.asyncio.sleep", new_callable=AsyncMock),
-        ):
-            mock_get_mr.return_value = self.mr
-            # First put() raises 405, second succeeds
-            mock_put.side_effect = [
-                self.api_error,
-                _mr_to_dict("merged"),
-            ]
-
-            client = create_gitlab_client_for_test()
-            self.result = await client.merge_mr(self.iid)
-            self.mock_get_mr = mock_get_mr
-            self.mock_put = mock_put
+        self.result = await self.client.merge_mr(self.iid)
 
     def then_mr_is_merged(self):
         assert self.result.state == "merged"
 
     def and_get_mr_called_twice(self):
-        assert self.mock_get_mr.call_count == 2
+        get_requests = [r for r in self.transport.history if r.method == "GET"]
+        assert len(get_requests) == 2
 
     def and_put_called_twice(self):
-        assert self.mock_put.call_count == 2
+        put_requests = [r for r in self.transport.history if r.method == "PUT"]
+        assert len(put_requests) == 2

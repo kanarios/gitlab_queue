@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import vedro
 
+from scenarios.fakes import create_mr, create_pipeline
+
 from .._helpers import (
-    create_mock_mr,
-    create_mock_pipeline,
     create_mock_processor,
     create_mock_settings,
 )
@@ -26,13 +26,11 @@ class Scenario(vedro.Scenario):
         self.new_sha = "new_sha_after_rebase"
 
         # MR: rebase complete, SHA changed to new_sha
-        mock_mr = create_mock_mr(iid=42, sha=self.new_sha)
-        mock_mr.rebase_in_progress = False
-        self.processor.gitlab_client.get_mr.return_value = mock_mr
+        self.processor.gitlab_client.mr_responses[42] = create_mr(iid=42, sha=self.new_sha, rebase_in_progress=False)
 
         # Pipeline: has new SHA, status "running" (NOT in TERMINAL_PIPELINE_STATUSES)
-        self.pipeline = create_mock_pipeline(pipeline_id=200, sha=self.new_sha, status="running")
-        self.processor.gitlab_client.get_latest_mr_pipeline.return_value = self.pipeline
+        self.pipeline = create_pipeline(id=200, sha=self.new_sha, status="running")
+        self.processor.gitlab_client.latest_pipeline_response = self.pipeline
 
     async def when_wait_for_post_rebase_pipeline_is_called(self):
         self.returned_pipeline, self.returned_sha = await self.processor._rebase_handler.wait_for_post_rebase_pipeline(

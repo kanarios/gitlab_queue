@@ -6,11 +6,24 @@ catch it and log warning without propagating.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from dataclasses import dataclass, field
+from typing import Any
 
 import vedro
 
 from .._helpers import create_mock_processor
+
+
+@dataclass
+class FailingWebSocketManager:
+    """WebSocket manager that raises on broadcast_queue_updated."""
+
+    broadcast_attempted: bool = False
+    broadcast_calls: list[dict[str, Any]] = field(default_factory=list)
+
+    async def broadcast_queue_updated(self, queue: list[dict[str, Any]], stats: dict[str, Any]) -> None:
+        self.broadcast_attempted = True
+        raise Exception("WebSocket connection lost")
 
 
 class Scenario(vedro.Scenario):
@@ -19,13 +32,8 @@ class Scenario(vedro.Scenario):
     def given_processor_with_websocket_manager_that_raises(self):
         self.processor = create_mock_processor()
 
-        # Queue manager returns items for broadcast
-        self.processor.queue_manager.get_active_queue = AsyncMock(return_value=[])
-        self.processor.queue_manager.get_queue_stats = AsyncMock(return_value={"total": 0})
-
         # WebSocket manager whose broadcast raises an exception
-        self.websocket_manager = MagicMock()
-        self.websocket_manager.broadcast_queue_updated = AsyncMock(side_effect=Exception("WebSocket connection lost"))
+        self.websocket_manager = FailingWebSocketManager()
         self.processor.set_websocket_manager(self.websocket_manager)
 
     async def when_broadcast_queue_update_is_called(self):
@@ -40,4 +48,4 @@ class Scenario(vedro.Scenario):
         assert self.exception is None
 
     def and_broadcast_was_attempted(self):
-        self.websocket_manager.broadcast_queue_updated.assert_awaited_once()
+        assert self.websocket_manager.broadcast_attempted is True

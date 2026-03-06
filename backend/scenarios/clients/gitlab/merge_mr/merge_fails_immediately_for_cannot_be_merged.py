@@ -1,35 +1,34 @@
 """Test merge_mr fails immediately when merge_status is 'cannot_be_merged'."""
 
-from unittest.mock import AsyncMock, patch
-
 import vedro
 from vedro import catched
 
-from gitlab_queue.clients.gitlab import GitLabClient, GitLabConflictError
+from gitlab_queue.clients.gitlab import GitLabConflictError
+from scenarios.transports import GitLabMockTransport
 
-from ._helpers import create_gitlab_client_for_test, create_mr
+from ._helpers import (
+    create_merge_mr_client,
+    mr_get_path,
+    mr_get_response,
+)
 
 
 class Scenario(vedro.Scenario):
     subject = "merge_mr fails immediately when merge_status is 'cannot_be_merged'"
 
     def given_mr_cannot_be_merged(self):
-        self.mr = create_mr(merge_status="cannot_be_merged", has_conflicts=True)
         self.iid = 42
+        self.transport = GitLabMockTransport()
+        self.transport.register_sequence(
+            "GET",
+            mr_get_path(self.iid),
+            [mr_get_response(self.iid, merge_status="cannot_be_merged", has_conflicts=True)],
+        )
+        self.client = create_merge_mr_client(self.transport)
 
     async def when_merge_mr_is_called(self):
-        with (
-            patch.object(GitLabClient, "get_mr", new_callable=AsyncMock) as mock_get_mr,
-            patch.object(GitLabClient, "put", new_callable=AsyncMock) as mock_put,
-        ):
-            mock_get_mr.return_value = self.mr
-
-            client = create_gitlab_client_for_test()
-            with catched(GitLabConflictError) as self.exception:
-                await client.merge_mr(self.iid)
-
-            self.mock_get_mr = mock_get_mr
-            self.mock_put = mock_put
+        with catched(GitLabConflictError) as self.exception:
+            await self.client.merge_mr(self.iid)
 
     def then_conflict_error_is_raised(self):
         assert self.exception.type is GitLabConflictError
@@ -38,18 +37,9 @@ class Scenario(vedro.Scenario):
         assert "cannot_be_merged" in str(self.exception.value)
 
     def and_get_mr_called_once(self):
-        """
-        Assert that GitLabClient.get_mr was called exactly once.
+        get_requests = [r for r in self.transport.history if r.method == "GET"]
+        assert len(get_requests) == 1
 
-        Raises:
-            AssertionError: If `self.mock_get_mr.call_count` is not 1.
-        """
-        assert self.mock_get_mr.call_count == 1
-
-    def and_put_never_awaited(self):
-        """
-        Asserts that the mocked GitLabClient.put coroutine was never awaited during the scenario.
-
-        This verifies that no asynchronous PUT operation was executed after attempting to merge the merge request.
-        """
-        self.mock_put.assert_not_awaited()
+    def and_put_never_called(self):
+        put_requests = [r for r in self.transport.history if r.method == "PUT"]
+        assert len(put_requests) == 0

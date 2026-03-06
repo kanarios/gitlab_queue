@@ -26,10 +26,10 @@ class Scenario(vedro.Scenario):
         await self.sm.trigger_merge_failed(error_message="Merge rejected")
 
     def then_history_status_should_be_merge_failed(self):
-        self.queue_manager.complete_mr.assert_awaited()
-        kwargs = self.queue_manager.complete_mr.call_args.kwargs
-        assert kwargs["status"] == "merge_failed", f"Expected history status 'merge_failed', got '{kwargs['status']}'"
+        assert len(self.queue_manager.complete_calls) >= 1
+        call = self.queue_manager.complete_calls[-1]
+        assert call["status"] == "merge_failed", f"Expected history status 'merge_failed', got '{call['status']}'"
 
     def and_history_status_should_not_be_timeout(self):
-        kwargs = self.queue_manager.complete_mr.call_args.kwargs
-        assert kwargs["status"] != "timeout", "merge_failed should not record timeout in history"
+        call = self.queue_manager.complete_calls[-1]
+        assert call["status"] != "timeout", "merge_failed should not record timeout in history"

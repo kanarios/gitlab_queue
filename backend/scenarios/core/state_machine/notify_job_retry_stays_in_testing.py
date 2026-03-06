@@ -35,7 +35,7 @@ class Scenario(vedro.Scenario):
         assert self.sm.current_state.id == "testing"
 
     def and_notifier_should_be_called_with_job_retry_template(self):
-        self.notifier.notify.assert_awaited()
-        call_args = self.notifier.notify.call_args
-        assert call_args[0][0] == 123  # mr_iid
-        assert call_args[0][1] == "job_retry"  # template
+        assert len(self.notifier.notify_calls) == 1
+        call = self.notifier.notify_calls[0]
+        assert call["mr_iid"] == 123
+        assert call["status"] == "job_retry"

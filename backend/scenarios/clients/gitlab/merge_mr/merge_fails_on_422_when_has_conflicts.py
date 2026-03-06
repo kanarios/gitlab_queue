@@ -1,37 +1,42 @@
 """Test merge_mr fails immediately on HTTP 422 when has_conflicts=True."""
 
-from unittest.mock import AsyncMock, patch
-
 import vedro
 from vedro import catched
 
-from gitlab_queue.clients.gitlab import GitLabAPIError, GitLabClient
+from gitlab_queue.clients.gitlab import GitLabAPIError
+from scenarios.transports import GitLabMockTransport
 
-from ._helpers import create_gitlab_client_for_test, create_mr
+from ._helpers import (
+    create_merge_mr_client,
+    mr_get_path,
+    mr_get_response,
+    mr_merge_error_response,
+    mr_merge_path,
+)
 
 
 class Scenario(vedro.Scenario):
     subject = "merge_mr fails immediately on HTTP 422 when has_conflicts=True"
 
     def given_mr_with_conflicts_and_api_returns_422(self):
-        self.mr = create_mr(merge_status="can_be_merged", has_conflicts=True)
         self.iid = 42
-        self.api_error = GitLabAPIError("Branch cannot be merged", status_code=422)
+        self.transport = GitLabMockTransport()
+        self.transport.register_sequence(
+            "GET",
+            mr_get_path(self.iid),
+            [mr_get_response(self.iid, merge_status="can_be_merged", has_conflicts=True)],
+        )
+        error_resp = mr_merge_error_response(status=422)
+        self.transport.register_sequence(
+            "PUT",
+            mr_merge_path(self.iid),
+            [error_resp],
+        )
+        self.client = create_merge_mr_client(self.transport)
 
     async def when_merge_mr_is_called(self):
-        with (
-            patch.object(GitLabClient, "get_mr", new_callable=AsyncMock) as mock_get_mr,
-            patch.object(GitLabClient, "put", new_callable=AsyncMock) as mock_put,
-        ):
-            mock_get_mr.return_value = self.mr
-            mock_put.side_effect = self.api_error
-
-            client = create_gitlab_client_for_test()
-            with catched(GitLabAPIError) as self.exception:
-                await client.merge_mr(self.iid)
-
-            self.mock_get_mr = mock_get_mr
-            self.mock_put = mock_put
+        with catched(GitLabAPIError) as self.exception:
+            await self.client.merge_mr(self.iid)
 
     def then_api_error_is_raised(self):
         assert self.exception.type is GitLabAPIError
@@ -40,7 +45,9 @@ class Scenario(vedro.Scenario):
         assert self.exception.value.status_code == 422
 
     def and_get_mr_called_once(self):
-        assert self.mock_get_mr.call_count == 1
+        get_requests = [r for r in self.transport.history if r.method == "GET"]
+        assert len(get_requests) == 1
 
     def and_put_called_once(self):
-        assert self.mock_put.call_count == 1
+        put_requests = [r for r in self.transport.history if r.method == "PUT"]
+        assert len(put_requests) == 1

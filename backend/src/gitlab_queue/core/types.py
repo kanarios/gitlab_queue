@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from datetime import datetime
 
+    from gitlab_queue.core.protocols import StateMachineProtocol
     from gitlab_queue.core.rebase_during_testing import RebaseDuringTestingContext
-    from gitlab_queue.core.state_machine import MRStateMachine
 
 
 class ProcessingResult(Enum):
@@ -45,7 +45,7 @@ class ProcessingContext:
     """Context for current MR processing."""
 
     mr_iid: int
-    state_machine: MRStateMachine
+    state_machine: StateMachineProtocol
     start_time: datetime
     rebase_ctx: RebaseContext = field(default_factory=RebaseContext)
 

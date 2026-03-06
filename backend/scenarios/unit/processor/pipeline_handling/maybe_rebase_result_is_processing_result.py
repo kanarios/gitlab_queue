@@ -7,13 +7,14 @@ Line 948: when _check_and_handle_rebase_during_testing returns a ProcessingResul
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
 
 import vedro
 
+from gitlab_queue.clients.gitlab import GitLabConflictError
 from gitlab_queue.core.processor import ProcessingResult
 from gitlab_queue.core.rebase_coordinator import maybe_rebase_during_testing
 from gitlab_queue.core.rebase_during_testing import RebaseDuringTestingContext
+from scenarios.fakes import FakeRebaseDuringTestingHandler
 
 from .._helpers import (
     create_mock_pipeline,
@@ -44,22 +45,25 @@ class Scenario(vedro.Scenario):
 
         self.last_rebase_check = datetime(2020, 1, 1, tzinfo=UTC)  # Old timestamp → will check
 
+        # Make handler raise GitLabConflictError → check_and_handle returns CONFLICT
+        self.rebase_handler = FakeRebaseDuringTestingHandler(
+            error=GitLabConflictError("Conflict during rebase"),
+            gitlab_client=self.processor.gitlab_client,
+        )
+        self.processor.gitlab_client.mr_conflicts = ["src/file.py"]
+
     async def when_maybe_rebase_during_testing_is_called(self):
         state = create_pipeline_wait_state(
+            rebase_handler=self.rebase_handler,
             rebase_ctx=self.rebase_ctx,
             last_rebase_check=self.last_rebase_check,
         )
-        with patch(
-            "gitlab_queue.core.rebase_coordinator.check_and_handle_rebase_during_testing",
-            new_callable=AsyncMock,
-            return_value=ProcessingResult.CONFLICT,
-        ):
-            self.outcome = await maybe_rebase_during_testing(
-                settings=self.processor.settings,
-                ctx=self.ctx,
-                state=state,
-                pipeline=self.pipeline,
-            )
+        self.outcome = await maybe_rebase_during_testing(
+            settings=self.processor.settings,
+            ctx=self.ctx,
+            state=state,
+            pipeline=self.pipeline,
+        )
 
     def then_outcome_result_is_conflict(self):
         assert self.outcome.result == ProcessingResult.CONFLICT

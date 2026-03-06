@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
-
 import vedro
+from scenarios.fakes import FakeCurrentState, FakeStateMachine, FakeStateMachineFactory
 
 from gitlab_queue.webhooks.handlers import PipelineWebhookHandler
 
@@ -31,31 +30,26 @@ class Scenario(vedro.Scenario):
         # Create queue item with different target_branch
         self.testing_item = create_queue_item_in_state("testing", mr_iid=123)
         self.testing_item.target_branch = "release/1.0"  # per-MR setting
-        self.queue_manager.get_queue_item = AsyncMock(
-            side_effect=[self.testing_item, self.testing_item],
-        )
+        self.queue_manager.get_queue_item_sequence = [self.testing_item, self.testing_item]
+
+        self.fake_sm = FakeStateMachine(current_state=FakeCurrentState(id="testing"))
+        self.sm_factory = FakeStateMachineFactory(state_machine=self.fake_sm)
 
         self.handler = PipelineWebhookHandler(
             settings=self.settings,
             gitlab_client=self.gitlab_client,
             queue_manager=self.queue_manager,
             notifier=create_mock_notifier(),
+            state_machine_factory=self.sm_factory,
         )
         self.event = create_pipeline_event(mr_iid=123, status="success")
 
     async def when_success_event_is_handled(self):
-        with patch(
-            "gitlab_queue.webhooks.handlers.create_state_machine_for_mr",
-            new_callable=AsyncMock,
-        ) as self.mock_create_sm:
-            sm = MagicMock()
-            sm.trigger_pipeline_success = AsyncMock()
-            self.mock_create_sm.return_value = sm
-
-            await self.handler.handle(self.event)
+        await self.handler.handle(self.event)
 
     def then_state_machine_created_with_queue_item_target_branch(self):
-        call_kwargs = self.mock_create_sm.call_args.kwargs
+        assert len(self.sm_factory.calls) == 1
+        call_kwargs = self.sm_factory.calls[0]
         assert call_kwargs["target_branch"] == "release/1.0", (
             f"Expected target_branch='release/1.0', got '{call_kwargs['target_branch']}'"
         )

@@ -7,8 +7,8 @@ and quick rebase for retry scenarios.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 
 from gitlab_queue.clients.gitlab import GitLabConflictError
 from gitlab_queue.core.polling import PollingConfig, PollOutcome, PollStatus, poll_until_done
@@ -17,6 +17,7 @@ from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
     import asyncio
+    from collections.abc import Callable
 
     from gitlab_queue.clients.gitlab import GitLabClient
     from gitlab_queue.config import Settings
@@ -55,6 +56,7 @@ class RebaseHandler:
     notifier: MRNotifier
     settings: Settings
     shutdown_event: asyncio.Event
+    poll_fn: Callable[..., Any] = field(default=poll_until_done)
 
     async def process_rebase(self, ctx: ProcessingContext) -> ProcessingResult:
         """Initiate rebase and wait for completion.
@@ -150,10 +152,11 @@ class RebaseHandler:
             poll_interval_seconds=REBASE_POLL_INTERVAL_SECONDS,
             operation_name="rebase",
         )
-        outcome = await poll_until_done(config, check_rebase, self.shutdown_event)
+        outcome = await self.poll_fn(config, check_rebase, self.shutdown_event)
 
-        if outcome.completed and outcome.result:
-            return outcome.result
+        if outcome.completed and outcome.result is not None:
+            result: ProcessingResult = outcome.result
+            return result
 
         if outcome.shutdown_requested:
             log.info("Shutdown requested during rebase", mr_iid=mr_iid)
@@ -246,7 +249,7 @@ class RebaseHandler:
             poll_interval_seconds=self.settings.pipeline_poll_interval_seconds,
             operation_name="post_rebase_pipeline",
         )
-        outcome: PollOutcome[tuple[Pipeline | None, str]] = await poll_until_done(
+        outcome: PollOutcome[tuple[Pipeline | None, str]] = await self.poll_fn(
             config, check_pipeline, self.shutdown_event
         )
 

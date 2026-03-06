@@ -9,12 +9,11 @@ This scenario tests race conditions:
 from __future__ import annotations
 
 import asyncio
+import re
 
-import jj
-from jj.mock import mocked
 from scenarios.contexts.gitlab_client_factory import created_test_settings
-from scenarios.contexts.jj_gitlab_mock import get_mock_url
 from scenarios.contexts.sqlite_client import initialized_test_database
+from scenarios.transports import GitLabMockTransport
 from sqlalchemy.exc import IntegrityError, NoResultFound
 from vedro import given, scenario, then, when
 
@@ -34,8 +33,8 @@ async def concurrent_webhook_and_polling_no_duplicates():
             queue = QueueManager(db)
             await queue.ensure_schema()
 
-            mock_url = get_mock_url()
-            settings = created_test_settings(mock_url)
+            transport = GitLabMockTransport()
+            settings = created_test_settings()
 
             # MR data for both webhook and polling
             mr_data = {
@@ -70,68 +69,68 @@ async def concurrent_webhook_and_polling_no_duplicates():
                 "labels": [{"title": "merge_queue"}],
             }
 
-            # Mock GitLab API - list MRs returns our MR
-            list_mrs_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests")
-            list_mrs_response = jj.Response(status=200, json=[mr_data])
+            # Register GitLab API responses
+            transport.register_get(
+                "/api/v4/projects/123/merge_requests",
+                json_data=[mr_data],
+            )
 
-            # Mock GET single MR
-            get_mr_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/42")
-            get_mr_response = jj.Response(status=200, json=mr_data)
+            transport.register_get(
+                "/api/v4/projects/123/merge_requests/42",
+                json_data=mr_data,
+            )
 
             # GET notes (for finding existing bot comments)
-            get_notes_matcher = jj.match("GET", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes"))
-            get_notes_response = jj.Response(status=200, json=[])
+            transport.register_get(
+                re.compile(r"/api/v4/projects/123/merge_requests/\d+/notes"),
+                json_data=[],
+            )
 
-            # Comment matcher (optional notifications)
-            comment_matcher = jj.match("POST", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes"))
-            comment_response = jj.Response(status=201, json={"id": 1})
+            # POST notes (for creating new comments)
+            transport.register_post(
+                re.compile(r"/api/v4/projects/123/merge_requests/\d+/notes"),
+                status=201,
+                json_data={"id": 1},
+            )
 
-        async with (
-            mocked(list_mrs_matcher, list_mrs_response),
-            mocked(get_mr_matcher, get_mr_response),
-            mocked(get_notes_matcher, get_notes_response),
-            mocked(comment_matcher, comment_response),
-        ):
-            with when("webhook and polling run concurrently"):
-                gitlab_client = GitLabClient(settings)
-                webhook_handler = WebhookHandler(
-                    queue_manager=queue,
-                    gitlab_client=gitlab_client,
-                    settings=settings,
-                )
-                scheduler = QueueScheduler(
-                    gitlab_client=gitlab_client,
-                    queue_manager=queue,
-                    settings=settings,
-                )
+        with when("webhook and polling run concurrently"):
+            gitlab_client = GitLabClient(settings, transport=transport)
+            webhook_handler = WebhookHandler(
+                queue_manager=queue,
+                gitlab_client=gitlab_client,
+                settings=settings,
+            )
+            scheduler = QueueScheduler(
+                gitlab_client=gitlab_client,
+                queue_manager=queue,
+                settings=settings,
+            )
 
-                # Run both operations concurrently using asyncio.gather
-                results = await asyncio.gather(
-                    webhook_handler.handle_merge_request_event(webhook_payload),
-                    scheduler.sync_queue(),
-                    return_exceptions=True,
-                )
+            # Run both operations concurrently using asyncio.gather
+            results = await asyncio.gather(
+                webhook_handler.handle_merge_request_event(webhook_payload),
+                scheduler.sync_queue(),
+                return_exceptions=True,
+            )
 
-                # Note: One operation may fail with IntegrityError/NoResultFound
-                # when both try to add the same MR simultaneously.
-                # This is expected behavior - the important thing is that
-                # at least one succeeds and no duplicates are created.
-                # Only IntegrityError/NoResultFound are acceptable - other exceptions are bugs.
-                expected_race_errors = (IntegrityError, NoResultFound)
-                unexpected = [
-                    r for r in results if isinstance(r, Exception) and not isinstance(r, expected_race_errors)
-                ]
-                if unexpected:
-                    raise unexpected[0]
-                successes = [r for r in results if not isinstance(r, Exception)]
-                assert len(successes) >= 1, "At least one operation should succeed"
+            # Note: One operation may fail with IntegrityError/NoResultFound
+            # when both try to add the same MR simultaneously.
+            # This is expected behavior - the important thing is that
+            # at least one succeeds and no duplicates are created.
+            # Only IntegrityError/NoResultFound are acceptable - other exceptions are bugs.
+            expected_race_errors = (IntegrityError, NoResultFound)
+            unexpected = [r for r in results if isinstance(r, Exception) and not isinstance(r, expected_race_errors)]
+            if unexpected:
+                raise unexpected[0]
+            successes = [r for r in results if not isinstance(r, Exception)]
+            assert len(successes) >= 1, "At least one operation should succeed"
 
-                # Get final queue state
-                queue_items = await queue.get_active_queue()
+            # Get final queue state
+            queue_items = await queue.get_active_queue()
 
-            with then("exactly one MR in queue (no duplicates)"):
-                assert len(queue_items) == 1, f"Expected 1 MR, got {len(queue_items)}"
-                assert queue_items[0].mr_iid == 42, "MR 42 should be in queue"
+        with then("exactly one MR in queue (no duplicates)"):
+            assert len(queue_items) == 1, f"Expected 1 MR, got {len(queue_items)}"
+            assert queue_items[0].mr_iid == 42, "MR 42 should be in queue"
 
 
 @scenario()
@@ -143,8 +142,8 @@ async def concurrent_multiple_webhooks_same_mr():
             queue = QueueManager(db)
             await queue.ensure_schema()
 
-            mock_url = get_mock_url()
-            settings = created_test_settings(mock_url)
+            transport = GitLabMockTransport()
+            settings = created_test_settings()
 
             mr_data = {
                 "iid": 50,
@@ -195,57 +194,58 @@ async def concurrent_multiple_webhooks_same_mr():
                 "labels": [{"title": "merge_queue"}],
             }
 
-            get_mr_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/50")
-            get_mr_response = jj.Response(status=200, json=mr_data)
+            transport.register_get(
+                "/api/v4/projects/123/merge_requests/50",
+                json_data=mr_data,
+            )
 
             # GET notes (for finding existing bot comments)
-            get_notes_matcher = jj.match("GET", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes"))
-            get_notes_response = jj.Response(status=200, json=[])
+            transport.register_get(
+                re.compile(r"/api/v4/projects/123/merge_requests/\d+/notes"),
+                json_data=[],
+            )
 
-            comment_matcher = jj.match("POST", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes"))
-            comment_response = jj.Response(status=201, json={"id": 1})
+            # POST notes (for creating new comments)
+            transport.register_post(
+                re.compile(r"/api/v4/projects/123/merge_requests/\d+/notes"),
+                status=201,
+                json_data={"id": 1},
+            )
 
-        async with (
-            mocked(get_mr_matcher, get_mr_response),
-            mocked(get_notes_matcher, get_notes_response),
-            mocked(comment_matcher, comment_response),
-        ):
-            with when("multiple webhooks fire concurrently"):
-                gitlab_client = GitLabClient(settings)
-                webhook_handler = WebhookHandler(
-                    queue_manager=queue,
-                    gitlab_client=gitlab_client,
-                    settings=settings,
-                )
+        with when("multiple webhooks fire concurrently"):
+            gitlab_client = GitLabClient(settings, transport=transport)
+            webhook_handler = WebhookHandler(
+                queue_manager=queue,
+                gitlab_client=gitlab_client,
+                settings=settings,
+            )
 
-                # Fire 5 webhook events concurrently
-                results = await asyncio.gather(
-                    webhook_handler.handle_merge_request_event(webhook_labeled),
-                    webhook_handler.handle_merge_request_event(webhook_updated),
-                    webhook_handler.handle_merge_request_event(webhook_labeled),
-                    webhook_handler.handle_merge_request_event(webhook_updated),
-                    webhook_handler.handle_merge_request_event(webhook_labeled),
-                    return_exceptions=True,
-                )
+            # Fire 5 webhook events concurrently
+            results = await asyncio.gather(
+                webhook_handler.handle_merge_request_event(webhook_labeled),
+                webhook_handler.handle_merge_request_event(webhook_updated),
+                webhook_handler.handle_merge_request_event(webhook_labeled),
+                webhook_handler.handle_merge_request_event(webhook_updated),
+                webhook_handler.handle_merge_request_event(webhook_labeled),
+                return_exceptions=True,
+            )
 
-                # Note: Some operations may fail with IntegrityError/race conditions
-                # when multiple webhooks process the same MR simultaneously.
-                # This is expected - the key assertion is: no duplicates created.
-                # Only IntegrityError/NoResultFound are acceptable - other exceptions are bugs.
-                expected_race_errors = (IntegrityError, NoResultFound)
-                unexpected = [
-                    r for r in results if isinstance(r, Exception) and not isinstance(r, expected_race_errors)
-                ]
-                if unexpected:
-                    raise unexpected[0]
-                successes = [r for r in results if not isinstance(r, Exception)]
-                assert len(successes) >= 1, "At least one webhook should succeed"
+            # Note: Some operations may fail with IntegrityError/race conditions
+            # when multiple webhooks process the same MR simultaneously.
+            # This is expected - the key assertion is: no duplicates created.
+            # Only IntegrityError/NoResultFound are acceptable - other exceptions are bugs.
+            expected_race_errors = (IntegrityError, NoResultFound)
+            unexpected = [r for r in results if isinstance(r, Exception) and not isinstance(r, expected_race_errors)]
+            if unexpected:
+                raise unexpected[0]
+            successes = [r for r in results if not isinstance(r, Exception)]
+            assert len(successes) >= 1, "At least one webhook should succeed"
 
-                queue_items = await queue.get_active_queue()
+            queue_items = await queue.get_active_queue()
 
-            with then("exactly one MR in queue"):
-                assert len(queue_items) == 1, f"Expected 1 MR, got {len(queue_items)}"
-                assert queue_items[0].mr_iid == 50
+        with then("exactly one MR in queue"):
+            assert len(queue_items) == 1, f"Expected 1 MR, got {len(queue_items)}"
+            assert queue_items[0].mr_iid == 50
 
 
 @scenario()
@@ -257,8 +257,8 @@ async def concurrent_add_and_remove():
             queue = QueueManager(db)
             await queue.ensure_schema()
 
-            mock_url = get_mock_url()
-            settings = created_test_settings(mock_url)
+            transport = GitLabMockTransport()
+            settings = created_test_settings()
 
             mr_data = {
                 "iid": 60,
@@ -316,49 +316,52 @@ async def concurrent_add_and_remove():
                 },
             }
 
-            get_mr_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/60")
-            get_mr_response = jj.Response(status=200, json=mr_data)
+            transport.register_get(
+                "/api/v4/projects/123/merge_requests/60",
+                json_data=mr_data,
+            )
 
             # GET notes (for finding existing bot comments)
-            get_notes_matcher = jj.match("GET", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes"))
-            get_notes_response = jj.Response(status=200, json=[])
+            transport.register_get(
+                re.compile(r"/api/v4/projects/123/merge_requests/\d+/notes"),
+                json_data=[],
+            )
 
-            comment_matcher = jj.match("POST", jj.matchers.regex(r"/api/v4/projects/123/merge_requests/\d+/notes"))
-            comment_response = jj.Response(status=201, json={"id": 1})
+            # POST notes (for creating new comments)
+            transport.register_post(
+                re.compile(r"/api/v4/projects/123/merge_requests/\d+/notes"),
+                status=201,
+                json_data={"id": 1},
+            )
 
-        async with (
-            mocked(get_mr_matcher, get_mr_response),
-            mocked(get_notes_matcher, get_notes_response),
-            mocked(comment_matcher, comment_response),
-        ):
-            with when("add and remove webhooks fire concurrently"):
-                gitlab_client = GitLabClient(settings)
-                webhook_handler = WebhookHandler(
-                    queue_manager=queue,
-                    gitlab_client=gitlab_client,
-                    settings=settings,
-                )
+        with when("add and remove webhooks fire concurrently"):
+            gitlab_client = GitLabClient(settings, transport=transport)
+            webhook_handler = WebhookHandler(
+                queue_manager=queue,
+                gitlab_client=gitlab_client,
+                settings=settings,
+            )
 
-                # Run add then remove concurrently (multiple times)
-                await asyncio.gather(
-                    webhook_handler.handle_merge_request_event(webhook_labeled),
-                    webhook_handler.handle_merge_request_event(webhook_unlabeled),
-                    webhook_handler.handle_merge_request_event(webhook_labeled),
-                    webhook_handler.handle_merge_request_event(webhook_unlabeled),
-                    return_exceptions=True,
-                )
+            # Run add then remove concurrently (multiple times)
+            await asyncio.gather(
+                webhook_handler.handle_merge_request_event(webhook_labeled),
+                webhook_handler.handle_merge_request_event(webhook_unlabeled),
+                webhook_handler.handle_merge_request_event(webhook_labeled),
+                webhook_handler.handle_merge_request_event(webhook_unlabeled),
+                return_exceptions=True,
+            )
 
-                queue_items = await queue.get_active_queue()
+            queue_items = await queue.get_active_queue()
 
-            with then("queue state is consistent (MR removed or never added)"):
-                # Final state should be consistent - either removed or not in active queue
-                # The exact state depends on ordering, but should never have duplicates
-                assert len(queue_items) <= 1, f"Should have at most 1 MR, got {len(queue_items)}"
+        with then("queue state is consistent (MR removed or never added)"):
+            # Final state should be consistent - either removed or not in active queue
+            # The exact state depends on ordering, but should never have duplicates
+            assert len(queue_items) <= 1, f"Should have at most 1 MR, got {len(queue_items)}"
 
-                # If MR is in queue, it should not be in 'removed' state
-                for item in queue_items:
-                    item_state = await queue.get_mr_state(item.mr_iid)
-                    assert item_state != "removed", "Active queue item should not be 'removed'"
+            # If MR is in queue, it should not be in 'removed' state
+            for item in queue_items:
+                item_state = await queue.get_mr_state(item.mr_iid)
+                assert item_state != "removed", "Active queue item should not be 'removed'"
 
 
 @scenario()

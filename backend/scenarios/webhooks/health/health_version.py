@@ -9,8 +9,6 @@ Covers health.py lines 76, 128, 167:
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import vedro
 
 from gitlab_queue.health import (
@@ -19,6 +17,7 @@ from gitlab_queue.health import (
     ComponentStatus,
     GitLabHealth,
 )
+from gitlab_queue.utils.circuit_breaker import CircuitBreaker, CircuitState
 
 
 class Scenario(vedro.Scenario):
@@ -120,12 +119,9 @@ class Scenario6(vedro.Scenario):
     subject = "GitLabHealth.from_circuit_breaker maps HALF_OPEN to DEGRADED"
 
     def given_half_open_circuit_breaker(self):
-        from gitlab_queue.utils.circuit_breaker import CircuitState
-
-        self.cb = MagicMock()
-        self.cb.state = CircuitState.HALF_OPEN
-        self.cb.failure_count = 3
-        self.cb._time_until_half_open = MagicMock(return_value=None)
+        self.cb = CircuitBreaker(failure_threshold=5, half_open_timeout=30.0)
+        self.cb._state = CircuitState.HALF_OPEN
+        self.cb._failure_count = 3
 
     def when_from_circuit_breaker_is_called(self):
         self.gitlab_health = GitLabHealth.from_circuit_breaker(self.cb)

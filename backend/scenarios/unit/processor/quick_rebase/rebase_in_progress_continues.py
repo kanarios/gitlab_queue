@@ -23,12 +23,21 @@ class Scenario(vedro.Scenario):
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
 
-        # First call: rebase_in_progress=True → CONTINUE (line 1148)
-        # Second call: rebase_in_progress=False → DONE, True (success)
-        self.processor.gitlab_client.check_rebase_status.side_effect = [
+        # Override check_rebase_status to return sequential values
+        self.rebase_status_sequence = [
             (True, False),  # In progress → CONTINUE
             (False, False),  # Done, no conflicts → success
         ]
+        self.check_rebase_call_count = 0
+
+        original_client = self.processor.gitlab_client
+
+        async def sequential_check_rebase_status(iid):
+            idx = min(self.check_rebase_call_count, len(self.rebase_status_sequence) - 1)
+            self.check_rebase_call_count += 1
+            return self.rebase_status_sequence[idx]
+
+        original_client.check_rebase_status = sequential_check_rebase_status
 
     async def when_wait_for_rebase_quick_is_called(self):
         # Should complete successfully without raising
@@ -42,4 +51,4 @@ class Scenario(vedro.Scenario):
         assert self.exception is None
 
     def and_check_rebase_status_was_called_twice(self):
-        assert self.processor.gitlab_client.check_rebase_status.call_count == 2
+        assert self.check_rebase_call_count == 2

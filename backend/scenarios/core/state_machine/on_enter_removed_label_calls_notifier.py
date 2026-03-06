@@ -27,16 +27,11 @@ class Scenario(vedro.Scenario):
         await self.sm.trigger_mark_removed(reason="label_removed")
 
     def then_notifier_should_be_called_with_removed_label_template(self):
-        """
-        Assert that the notifier was awaited with mr_iid 123 and the "removed_label" template.
-
-        Verifies that notifier.notify was awaited and that the first positional argument (mr_iid) is 123 and the second positional argument (template) is "removed_label".
-        """
-        self.notifier.notify.assert_awaited_once()
-        call_args = self.notifier.notify.call_args
-        assert call_args[0][0] == 123  # mr_iid
-        assert call_args[0][1] == "removed_label"  # template
+        assert len(self.notifier.notify_calls) == 1
+        call_args = self.notifier.notify_calls[0]
+        assert call_args["mr_iid"] == 123
+        assert call_args["status"] == "removed_label"
 
     def and_notify_should_include_position(self):
-        call_kwargs = self.notifier.notify.call_args[1]
-        assert "position" in call_kwargs
+        call_args = self.notifier.notify_calls[0]
+        assert "position" in call_args

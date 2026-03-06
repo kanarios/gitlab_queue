@@ -19,7 +19,7 @@ class Scenario(vedro.Scenario):
     def given_processor_with_gitlab_api_error(self):
         self.processor = create_mock_processor()
 
-        self.processor.gitlab_client.list_mrs_with_label.side_effect = GitLabAPIError("Internal server error")
+        self.processor.gitlab_client.list_mrs_error = GitLabAPIError("Internal server error")
 
     async def when_fetch_mrs_by_label_is_called(self):
         self.result = await self.processor._fetch_mrs_by_label("merge_queue")

@@ -34,19 +34,11 @@ class Scenario(vedro.Scenario):
         )
 
     def then_notifier_should_be_called_with_conflict_template(self):
-        """
-        Assert that the notifier was invoked with the conflict template for MR 123.
-
-        Performs the following checks:
-        - `notify` was awaited on the notifier mock.
-        - The first positional argument (`mr_iid`) equals `123`.
-        - The second positional argument (`template`) equals `"conflict"`.
-        """
-        self.notifier.notify.assert_awaited()
-        call_args = self.notifier.notify.call_args
-        assert call_args[0][0] == 123  # mr_iid
-        assert call_args[0][1] == "conflict"  # template
+        assert len(self.notifier.notify_calls) == 1
+        call_args = self.notifier.notify_calls[-1]
+        assert call_args["mr_iid"] == 123
+        assert call_args["status"] == "conflict"
 
     def and_notify_should_include_conflicted_files(self):
-        call_kwargs = self.notifier.notify.call_args[1]
-        assert call_kwargs.get("conflicted_files") == ["src/main.py", "tests/test_main.py"]
+        call_args = self.notifier.notify_calls[-1]
+        assert call_args.get("conflicted_files") == ["src/main.py", "tests/test_main.py"]

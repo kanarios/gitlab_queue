@@ -24,7 +24,7 @@ class Scenario(vedro.Scenario):
         Sets self.processor to a mock created by create_mock_processor() and configures its gitlab_client.get_mr to raise GitLabNotFoundError("MR not found") when called.
         """
         self.processor = create_mock_processor()
-        self.processor.gitlab_client.get_mr.side_effect = GitLabNotFoundError("MR not found")
+        self.processor.gitlab_client.get_mr_error = GitLabNotFoundError("MR not found")
 
     async def when_verify_mr_in_queue_is_called(self):
         """

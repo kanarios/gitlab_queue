@@ -7,19 +7,26 @@ and the overall system behavior.
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import Mock
+from dataclasses import dataclass
 
 import vedro
+from scenarios.fakes import FakeGitLabClient, FakeSettings
 from vedro import scenario
 
+from gitlab_queue.clients.gitlab import GitLabServerError
+from gitlab_queue.core.scheduler import create_scheduler
+from gitlab_queue.models.mr import Author, MergeRequest
 
-def create_mock_rate_limit_state(is_critical: bool = False) -> Mock:
-    """Create a properly configured mock for rate_limit_state."""
-    state = Mock()
-    state.is_critical = Mock(return_value=is_critical)
-    state.seconds_until_reset = 0.0
-    state.usage_ratio = 0.1
-    return state
+
+@dataclass
+class NonCriticalRateLimitState:
+    """Rate limit state that is never critical."""
+
+    seconds_until_reset: float = 0.0
+    usage_ratio: float = 0.1
+
+    def is_critical(self, _threshold: float) -> bool:
+        return False
 
 
 @scenario()
@@ -37,14 +44,6 @@ async def scheduler_integrates_with_real_queue_manager():
 
         queue_manager = QueueManager(db=database)
         await queue_manager.ensure_schema()
-
-        # Mock GitLab client
-        from unittest.mock import AsyncMock
-
-        gitlab_client = AsyncMock()
-
-        # Create mock MRs from GitLab
-        from gitlab_queue.models.mr import Author, MergeRequest
 
         mr1 = MergeRequest(
             iid=1,
@@ -86,17 +85,9 @@ async def scheduler_integrates_with_real_queue_manager():
             web_url="https://gitlab.com/project/-/merge_requests/2",
         )
 
-        gitlab_client.list_mrs_with_label = AsyncMock(return_value=[mr1, mr2])
+        gitlab_client = FakeGitLabClient(listed_mrs=[mr1, mr2])
 
-        # Mock settings
-        settings = Mock(
-            queue_label="merge_queue",
-            hotfix_label="hotfix",
-            poll_interval_seconds=30,
-        )
-
-        # Create scheduler
-        from gitlab_queue.core.scheduler import create_scheduler
+        settings = FakeSettings()
 
         scheduler = create_scheduler(
             gitlab_client=gitlab_client,
@@ -152,14 +143,6 @@ async def scheduler_handles_concurrent_webhook_and_polling():
         queue_manager = QueueManager(db=database)
         await queue_manager.ensure_schema()
 
-        # Mock GitLab client
-        from unittest.mock import AsyncMock
-
-        gitlab_client = AsyncMock()
-
-        # Create mock MR
-        from gitlab_queue.models.mr import Author, MergeRequest
-
         mr1 = MergeRequest(
             iid=1,
             title="Feature A",
@@ -180,28 +163,20 @@ async def scheduler_handles_concurrent_webhook_and_polling():
             web_url="https://gitlab.com/project/-/merge_requests/1",
         )
 
-        # Initially empty, then returns MR
-        # Note: sync_queue calls list_mrs_with_label twice per sync (queue + hotfix labels)
+        # Track calls to simulate dynamic responses
         call_count = 0
 
-        async def dynamic_list_mrs(*_args: object, **_kwargs: object) -> list[MergeRequest]:
-            nonlocal call_count
-            call_count += 1
-            if call_count <= 2:  # First sync (2 calls: queue + hotfix)
-                return []
-            return [mr1]  # Subsequent calls: MR present
+        class DynamicGitLabClient(FakeGitLabClient):
+            async def list_mrs_with_label(self, label: str, *, state: str = "opened") -> list[MergeRequest]:
+                nonlocal call_count
+                self.list_mrs_calls.append(label)
+                call_count += 1
+                if call_count <= 2:  # First sync (2 calls: queue + hotfix)
+                    return []
+                return [mr1]  # Subsequent calls: MR present
 
-        gitlab_client.list_mrs_with_label = AsyncMock(side_effect=dynamic_list_mrs)
-
-        # Mock settings
-        settings = Mock(
-            queue_label="merge_queue",
-            hotfix_label="hotfix",
-            poll_interval_seconds=30,
-        )
-
-        # Create scheduler
-        from gitlab_queue.core.scheduler import create_scheduler
+        gitlab_client = DynamicGitLabClient()
+        settings = FakeSettings()
 
         scheduler = create_scheduler(
             gitlab_client=gitlab_client,
@@ -256,14 +231,6 @@ async def scheduler_recovers_from_gitlab_outage():
         queue_manager = QueueManager(db=database)
         await queue_manager.ensure_schema()
 
-        # Mock GitLab client
-        from unittest.mock import AsyncMock
-
-        gitlab_client = AsyncMock()
-
-        # Create mock MR
-        from gitlab_queue.models.mr import Author, MergeRequest
-
         mr1 = MergeRequest(
             iid=1,
             title="Feature A",
@@ -284,31 +251,23 @@ async def scheduler_recovers_from_gitlab_outage():
             web_url="https://gitlab.com/project/-/merge_requests/1",
         )
 
-        # Simulate outage then recovery
+        # Simulate outage then recovery via call tracking
         call_count = 0
 
-        async def outage_then_recovery(*_args: object, **_kwargs: object) -> list[MergeRequest]:
-            nonlocal call_count
-            call_count += 1
-            if call_count <= 2:
-                from gitlab_queue.clients.gitlab import GitLabServerError
+        class OutageGitLabClient(FakeGitLabClient):
+            async def list_mrs_with_label(self, label: str, *, state: str = "opened") -> list[MergeRequest]:
+                nonlocal call_count
+                self.list_mrs_calls.append(label)
+                call_count += 1
+                if call_count <= 2:
+                    raise GitLabServerError("Service unavailable", status_code=503)
+                return [mr1]  # Service recovered
 
-                raise GitLabServerError("Service unavailable", status_code=503)
-            return [mr1]  # Service recovered
-
-        gitlab_client.list_mrs_with_label = AsyncMock(side_effect=outage_then_recovery)
-        gitlab_client.rate_limit_state = create_mock_rate_limit_state()
-
-        # Mock settings with short poll interval
-        settings = Mock(
-            queue_label="merge_queue",
-            hotfix_label="hotfix",
-            poll_interval_seconds=0.1,  # Quick polling for test
-            rate_limit_critical_threshold=0.95,
+        gitlab_client = OutageGitLabClient(
+            rate_limit_state=NonCriticalRateLimitState(),
         )
 
-        # Create scheduler
-        from gitlab_queue.core.scheduler import create_scheduler
+        settings = FakeSettings(poll_interval_seconds=0.1)
 
         scheduler = create_scheduler(
             gitlab_client=gitlab_client,
@@ -356,9 +315,6 @@ async def scheduler_removes_orphaned_entries_after_mr_closed():
         queue_manager = QueueManager(db=database)
         await queue_manager.ensure_schema()
 
-        # Add MRs to queue initially
-        from gitlab_queue.models.mr import Author, MergeRequest
-
         mr1 = MergeRequest(
             iid=1,
             title="Feature A",
@@ -403,19 +359,11 @@ async def scheduler_removes_orphaned_entries_after_mr_closed():
         await queue_manager.add_to_queue(mr1, is_hotfix=False)
         await queue_manager.add_to_queue(mr2, is_hotfix=False)
 
-        # Mock GitLab client - MR2 was closed
-        from unittest.mock import AsyncMock
-
-        gitlab_client = AsyncMock()
-
-        # Only MR1 remains with label
-        gitlab_client.list_mrs_with_label = AsyncMock(return_value=[mr1])
-
         # MR2 is now closed
         mr2_closed = MergeRequest(
             iid=2,
             title="Feature B",
-            state="closed",  # Now closed
+            state="closed",
             labels=["merge_queue"],
             sha="def456",
             source_branch="feature-b",
@@ -431,17 +379,13 @@ async def scheduler_removes_orphaned_entries_after_mr_closed():
             ),
             web_url="https://gitlab.com/project/-/merge_requests/2",
         )
-        gitlab_client.get_mr = AsyncMock(return_value=mr2_closed)
 
-        # Mock settings
-        settings = Mock(
-            queue_label="merge_queue",
-            hotfix_label="hotfix",
-            poll_interval_seconds=30,
+        gitlab_client = FakeGitLabClient(
+            listed_mrs=[mr1],
+            mr_responses={2: mr2_closed},
         )
 
-        # Create scheduler
-        from gitlab_queue.core.scheduler import create_scheduler
+        settings = FakeSettings()
 
         scheduler = create_scheduler(
             gitlab_client=gitlab_client,

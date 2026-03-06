@@ -26,11 +26,11 @@ class Scenario(vedro.Scenario):
         await self.sm.trigger_timeout(max_wait_hours=4)
 
     def then_complete_mr_failure_reason_should_not_be_none(self):
-        self.queue_manager.complete_mr.assert_awaited()
-        kwargs = self.queue_manager.complete_mr.call_args.kwargs
-        assert kwargs.get("failure_reason") is not None, "Expected failure_reason to be set, got None"
+        assert len(self.queue_manager.complete_calls) >= 1
+        call = self.queue_manager.complete_calls[-1]
+        assert call.get("failure_reason") is not None, "Expected failure_reason to be set, got None"
 
     def and_failure_reason_should_contain_timeout_info(self):
-        kwargs = self.queue_manager.complete_mr.call_args.kwargs
-        reason = kwargs["failure_reason"]
+        call = self.queue_manager.complete_calls[-1]
+        reason = call["failure_reason"]
         assert "4" in reason, f"Expected hours in failure_reason, got '{reason}'"

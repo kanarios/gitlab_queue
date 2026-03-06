@@ -6,12 +6,10 @@ returns completed=True but result is falsy (e.g. None).
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
-
 import vedro
 
 from gitlab_queue.core.polling import PollOutcome
-from gitlab_queue.core.processor import ProcessingResult
+from gitlab_queue.core.types import ProcessingResult
 
 from .._helpers import (
     create_mock_processor,
@@ -25,10 +23,6 @@ class Scenario(vedro.Scenario):
     subject = "wait_for_rebase returns ERROR when poll completes with falsy result"
 
     def given_processor_where_poll_returns_completed_false_result(self):
-        self.processor = create_mock_processor(settings=create_mock_settings(rebase_timeout_seconds=60))
-        self.mock_sm = create_mock_state_machine()
-        self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
-
         # Simulate poll_until_done completing with result=None (falsy)
         # This hits the defensive fallback at line 474
         self.fake_outcome = PollOutcome(
@@ -38,13 +32,18 @@ class Scenario(vedro.Scenario):
             result=None,
         )
 
+        async def fake_poll_fn(config, fn, shutdown_event, **kwargs):
+            return self.fake_outcome
+
+        self.processor = create_mock_processor(
+            settings=create_mock_settings(rebase_timeout_seconds=60),
+            poll_fn=fake_poll_fn,
+        )
+        self.mock_sm = create_mock_state_machine()
+        self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
+
     async def when_wait_for_rebase_is_called(self):
-        with patch(
-            "gitlab_queue.core.rebase_handler.poll_until_done",
-            new_callable=AsyncMock,
-            return_value=self.fake_outcome,
-        ):
-            self.result = await self.processor._wait_for_rebase(self.ctx)
+        self.result = await self.processor._wait_for_rebase(self.ctx)
 
     def then_result_is_error(self):
         assert self.result == ProcessingResult.ERROR

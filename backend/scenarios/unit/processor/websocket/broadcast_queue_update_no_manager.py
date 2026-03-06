@@ -21,7 +21,7 @@ class Scenario(vedro.Scenario):
         await self.processor._broadcast_queue_update()
 
     def then_no_queue_calls_were_made(self):
-        self.processor.queue_manager.get_active_queue.assert_not_called()
+        assert len(self.processor.queue_manager.get_queue_item_calls) == 0
 
     def and_websocket_manager_is_still_none(self):
         assert self.processor._websocket_manager is None

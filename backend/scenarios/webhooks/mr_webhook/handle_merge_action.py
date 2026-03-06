@@ -1,10 +1,11 @@
 """Test: handle merge action cleans up queue."""
 
-from unittest.mock import AsyncMock, MagicMock
+from datetime import UTC, datetime
 
 import vedro
 from scenarios.library import Labels
 
+from gitlab_queue.models.queue_item import QueueItem
 from gitlab_queue.webhooks.handlers import MRWebhookHandler
 
 from ._helpers import (
@@ -26,8 +27,18 @@ class Scenario(vedro.Scenario):
             labels=[Labels.MERGE_QUEUE],
         )
         self.queue_manager = create_mock_queue_manager()
-        # MR is in queue (get_queue_item returns non-None)
-        self.queue_manager.get_queue_item = AsyncMock(return_value=MagicMock())
+        # MR is in queue
+        self.queue_manager.add_item(
+            QueueItem(
+                mr_iid=123,
+                title="Test",
+                author_name="A",
+                author_username="a",
+                target_branch="master",
+                state="queued",
+                queued_at=datetime.now(UTC),
+            )
+        )
         self.handler = MRWebhookHandler(
             settings=self.settings,
             gitlab_client=self.gitlab_client,
@@ -39,7 +50,7 @@ class Scenario(vedro.Scenario):
         await self.handler.handle(self.event)
 
     def then_mr_should_be_removed_from_queue(self):
-        self.queue_manager.remove_from_queue.assert_awaited_once_with(123)
+        assert self.queue_manager.remove_calls == [123]
 
     async def cleanup(self):
         await self.gitlab_client.close()

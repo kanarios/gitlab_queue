@@ -36,9 +36,9 @@ class Scenario(vedro.Scenario):
         self.processor = create_mock_processor()
 
         self.queue_item = create_test_queue_item(mr_iid=42, state="merging", expected_sha="abc123")
-        self.processor.queue_manager.get_queue_item.return_value = self.queue_item
+        self.processor.queue_manager.add_item(self.queue_item)
 
-        self.processor.gitlab_client.merge_mr.side_effect = GitLabAPIError("Internal server error", status_code=500)
+        self.processor.gitlab_client.merge_result = GitLabAPIError("Internal server error", status_code=500)
 
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
@@ -66,6 +66,5 @@ class Scenario(vedro.Scenario):
 
         This assertion ensures the state machine's trigger_merge_failed coroutine was awaited once and that the awaited call supplied an 'error_message' keyword argument.
         """
-        self.mock_sm.trigger_merge_failed.assert_awaited_once()
-        call_kwargs = self.mock_sm.trigger_merge_failed.call_args.kwargs
-        assert "error_message" in call_kwargs
+        assert len(self.mock_sm.merge_failed_calls) == 1
+        assert "error_message" in self.mock_sm.merge_failed_calls[0]

@@ -8,12 +8,12 @@ should_reset=False, and an updated last_check.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
 
 import vedro
 
 from gitlab_queue.core.rebase_coordinator import maybe_rebase_during_testing
 from gitlab_queue.core.rebase_during_testing import RebaseDuringTestingContext
+from scenarios.fakes import FakeRebaseDuringTestingHandler
 
 from .._helpers import (
     create_mock_pipeline,
@@ -44,23 +44,26 @@ class Scenario(vedro.Scenario):
 
         self.last_rebase_check = datetime(2020, 1, 1, tzinfo=UTC)  # Old timestamp → will check
 
+        # FakeRebaseDuringTestingHandler returns (same_ctx, None) → no rebase occurred
+        # Since rebase_count stays the same, check_and_handle returns None
+        same_ctx = RebaseDuringTestingContext(rebase_count=0, max_attempts=3, current_pipeline_id=100)
+        self.rebase_handler = FakeRebaseDuringTestingHandler(
+            result=(same_ctx, None),
+            gitlab_client=self.processor.gitlab_client,
+        )
+
     async def when_maybe_rebase_during_testing_is_called(self):
-        # check_and_handle_rebase_during_testing returns None → no rebase needed
         state = create_pipeline_wait_state(
+            rebase_handler=self.rebase_handler,
             rebase_ctx=self.rebase_ctx,
             last_rebase_check=self.last_rebase_check,
         )
-        with patch(
-            "gitlab_queue.core.rebase_coordinator.check_and_handle_rebase_during_testing",
-            new_callable=AsyncMock,
-            return_value=None,
-        ):
-            self.outcome = await maybe_rebase_during_testing(
-                settings=self.processor.settings,
-                ctx=self.ctx,
-                state=state,
-                pipeline=self.pipeline,
-            )
+        self.outcome = await maybe_rebase_during_testing(
+            settings=self.processor.settings,
+            ctx=self.ctx,
+            state=state,
+            pipeline=self.pipeline,
+        )
 
     def then_outcome_result_is_none(self):
         assert self.outcome.result is None

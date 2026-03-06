@@ -8,8 +8,6 @@ Covers router.py parse error handling path (ValueError/KeyError catch block).
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
 import vedro
 from scenarios.contexts.api_helpers import created_test_app
 from scenarios.schemas.status_code import OkStatusSchema
@@ -22,7 +20,6 @@ class Scenario(vedro.Scenario):
     def given_app_with_valid_token(self):
         self.app, self.state = created_test_app()
         self.webhook_secret = self.state.settings.webhook_secret.get_secret_value()
-        self.state.retry_manager.add_to_retry_queue = AsyncMock(return_value=7)
         self.client = TestClient(self.app, raise_server_exceptions=False)
         # Pipeline event with missing required fields to trigger parse error
         self.payload = {
@@ -50,6 +47,6 @@ class Scenario(vedro.Scenario):
         assert "retry_id" in data
 
     def and_retry_manager_should_be_called(self):
-        self.state.retry_manager.add_to_retry_queue.assert_awaited_once()
-        call_kwargs = self.state.retry_manager.add_to_retry_queue.call_args.kwargs
-        assert call_kwargs["event_type"] == "pipeline"
+        assert len(self.state.retry_manager.add_to_retry_queue_calls) == 1
+        call = self.state.retry_manager.add_to_retry_queue_calls[0]
+        assert call["event_type"] == "pipeline"

@@ -4,14 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
 
 from gitlab_queue.core.queue_position_notifier import QueuePositionNotifier
+from scenarios.fakes import CallRecorder
+from scenarios.fakes.models import create_note
 
 
 @dataclass
 class MockQueueItem:
-    """Mock QueueItem for tests."""
+    """Typed QueueItem stub for tests."""
 
     mr_iid: int
     state: str = "queued"
@@ -23,27 +24,50 @@ class MockQueueItem:
     is_hotfix: bool = False
 
 
-def create_mock_notifier() -> MagicMock:
-    """Create mock MRNotifier."""
-    notifier = MagicMock()
-    notifier.notify = AsyncMock()
-    return notifier
+class _NotifyRecorder(CallRecorder):
+    """CallRecorder that returns a Note on every call."""
+
+    def _return_value(self, *args, **kwargs):
+        return create_note()
+
+
+@dataclass
+class FakeRecordingNotifier:
+    """Fake MRNotifier that records ``notify`` calls via CallRecorder.
+
+    Consumer tests can use .notify.call_args / .notify.call_count etc.
+    """
+
+    notify: _NotifyRecorder = field(default_factory=_NotifyRecorder)
+
+
+@dataclass
+class FakeRecordingQueueManager:
+    """Fake QueueManager that returns a pre-configured active queue."""
+
+    _queue_items: list[MockQueueItem] = field(default_factory=list)
+
+    async def get_active_queue(self) -> list[MockQueueItem]:
+        return self._queue_items
+
+
+def create_mock_notifier() -> FakeRecordingNotifier:
+    """Create a FakeRecordingNotifier for testing."""
+    return FakeRecordingNotifier()
 
 
 def create_mock_queue_manager(
     queue_items: list[MockQueueItem] | None = None,
-) -> MagicMock:
-    """Create mock QueueManager."""
-    manager = MagicMock()
-    manager.get_active_queue = AsyncMock(return_value=queue_items or [])
-    return manager
+) -> FakeRecordingQueueManager:
+    """Create a FakeRecordingQueueManager."""
+    return FakeRecordingQueueManager(_queue_items=queue_items or [])
 
 
 def create_position_notifier(
-    notifier: MagicMock | None = None,
-    queue_manager: MagicMock | None = None,
+    notifier: FakeRecordingNotifier | None = None,
+    queue_manager: FakeRecordingQueueManager | None = None,
 ) -> QueuePositionNotifier:
-    """Create QueuePositionNotifier with mocks."""
+    """Create QueuePositionNotifier with typed fakes."""
     return QueuePositionNotifier(
         notifier=notifier or create_mock_notifier(),
         queue_manager=queue_manager or create_mock_queue_manager(),

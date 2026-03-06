@@ -33,16 +33,11 @@ class Scenario(vedro.Scenario):
         assert self.sm.current_state.id == "queued"
 
     def and_notifier_should_be_called_with_stale_warning_template(self):
-        """
-        Verify the notifier was awaited and called with mr_iid 123 and the "stale_warning" template.
-
-        Checks that notifier.notify was awaited, that the first positional argument equals 123 (mr_iid), and that the second positional argument equals "stale_warning" (template).
-        """
-        self.notifier.notify.assert_awaited()
-        call_args = self.notifier.notify.call_args
-        assert call_args[0][0] == 123  # mr_iid
-        assert call_args[0][1] == "stale_warning"  # template
+        assert len(self.notifier.notify_calls) == 1
+        call_args = self.notifier.notify_calls[-1]
+        assert call_args["mr_iid"] == 123
+        assert call_args["status"] == "stale_warning"
 
     def and_notify_should_include_warning_hours(self):
-        call_kwargs = self.notifier.notify.call_args[1]
-        assert call_kwargs.get("warning_hours") == 12
+        call_args = self.notifier.notify_calls[-1]
+        assert call_args.get("warning_hours") == 12

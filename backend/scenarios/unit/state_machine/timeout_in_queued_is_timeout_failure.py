@@ -19,7 +19,7 @@ class Scenario(vedro.Scenario):
         self.notifier = create_mock_notifier()
         self.queue_manager = create_mock_queue_manager()
 
-        self.queue_manager.get_queue_item.return_value = QueueItem(
+        queue_item = QueueItem(
             mr_iid=42,
             title="Test MR",
             author_name="Test",
@@ -28,6 +28,7 @@ class Scenario(vedro.Scenario):
             state="queued",
             queued_at=datetime.now(UTC),
         )
+        self.queue_manager.add_item(queue_item)
 
         self.sm = MRStateMachine(
             notifier=self.notifier,
@@ -42,12 +43,10 @@ class Scenario(vedro.Scenario):
         await self.sm.trigger_timeout(max_wait_hours=2)
 
     def then_timeout_notification_is_sent(self):
-        self.notifier.notify.assert_awaited_once()
-        call_args = self.notifier.notify.call_args
-        assert call_args[0][0] == 42
-        assert call_args[0][1] == "timeout"
+        assert len(self.notifier.notify_calls) == 1
+        assert self.notifier.notify_calls[0]["mr_iid"] == 42
+        assert self.notifier.notify_calls[0]["status"] == "timeout"
 
     def and_history_status_is_timeout(self):
-        self.queue_manager.complete_mr.assert_awaited()
-        kwargs = self.queue_manager.complete_mr.call_args.kwargs
-        assert kwargs["status"] == "timeout"
+        assert len(self.queue_manager.complete_calls) >= 1
+        assert self.queue_manager.complete_calls[-1]["status"] == "timeout"

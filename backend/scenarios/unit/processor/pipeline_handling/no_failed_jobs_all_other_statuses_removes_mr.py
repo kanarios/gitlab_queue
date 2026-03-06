@@ -6,9 +6,9 @@ trigger_pipeline_failed and return (False, None, retried_jobs).
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
-
 import vedro
+
+from scenarios.fakes import create_job
 
 from .._helpers import (
     create_mock_pipeline,
@@ -28,13 +28,8 @@ class Scenario(vedro.Scenario):
 
         # Jobs exist but none are 'failed', 'running', 'pending', 'created', or 'canceled'
         # (e.g., all 'success' — unexpected but possible race condition)
-        succeeded_job = MagicMock()
-        succeeded_job.id = 10
-        succeeded_job.name = "unit_tests"
-        succeeded_job.status = "success"
-
-        self.processor.gitlab_client.get_pipeline_jobs = AsyncMock(return_value=[succeeded_job])
-        self.processor.queue_manager.get_queue_item.return_value = None
+        succeeded_job = create_job(id=10, name="unit_tests", status="success")
+        self.processor.gitlab_client.pipeline_jobs_response = [succeeded_job]
 
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
@@ -54,7 +49,7 @@ class Scenario(vedro.Scenario):
         assert self.should_continue is False
 
     def and_trigger_pipeline_failed_was_called(self):
-        self.mock_sm.trigger_pipeline_failed.assert_awaited_once()
+        assert len(self.mock_sm.pipeline_failed_calls) == 1
 
     def and_new_start_is_none(self):
         assert self.new_start is None

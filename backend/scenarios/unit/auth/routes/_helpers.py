@@ -2,79 +2,62 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from typing import Any
+
+import httpx
 
 
-def create_mock_token_response(
-    access_token: str = "test-access-token",
-) -> MagicMock:
+def create_oauth_transport(
+    *,
+    token_response_json: dict[str, Any] | None = None,
+    token_status: int = 200,
+    userinfo_response_json: dict[str, Any] | None = None,
+    userinfo_status: int = 200,
+    project_access_status: int = 200,
+    userinfo_error: Exception | None = None,
+) -> httpx.MockTransport:
+    """Create httpx.MockTransport that routes OAuth requests.
+
+    Routes by request path:
+    - POST */oauth/token -> token response
+    - GET /api/v4/user -> userinfo response
+    - GET /api/v4/projects/* -> project access response
     """
-    Create a mock HTTP response that simulates a successful OAuth token exchange.
+    if token_response_json is None:
+        token_response_json = {"access_token": "test-access-token"}
 
-    Parameters:
-        access_token (str): Access token value to include in the response JSON.
+    if userinfo_response_json is None:
+        userinfo_response_json = {
+            "id": 1,
+            "username": "testuser",
+            "name": "Test User",
+            "email": "test@example.com",
+            "avatar_url": "https://gitlab.example.com/avatar.png",
+        }
 
-    Returns:
-        MagicMock: A mock response with status_code 200 and json() returning {"access_token": access_token}.
-    """
-    response = MagicMock()
-    response.status_code = 200
-    response.json.return_value = {"access_token": access_token}
-    return response
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
 
+        if request.method == "POST" and path == "/oauth/token":
+            return httpx.Response(
+                status_code=token_status,
+                json=token_response_json,
+            )
 
-def create_mock_userinfo_response(
-    user_id: int = 1,
-    username: str = "testuser",
-    name: str = "Test User",
-    email: str = "test@example.com",
-    avatar_url: str = "https://gitlab.example.com/avatar.png",
-) -> MagicMock:
-    """Create a mock httpx response for GitLab user info.
+        if request.method == "GET" and path == "/api/v4/user":
+            if userinfo_error is not None:
+                raise userinfo_error
+            return httpx.Response(
+                status_code=userinfo_status,
+                json=userinfo_response_json if userinfo_status == 200 else {"error": "server_error"},
+            )
 
-    Args:
-        user_id: GitLab user ID.
-        username: GitLab username.
-        name: User display name.
-        email: User email.
-        avatar_url: URL to user avatar.
+        if request.method == "GET" and "/api/v4/projects/" in path:
+            return httpx.Response(
+                status_code=project_access_status,
+                json={"id": 1} if project_access_status == 200 else {"message": "404 Not Found"},
+            )
 
-    Returns:
-        MagicMock simulating a successful user info response.
-    """
-    response = MagicMock()
-    response.status_code = 200
-    response.json.return_value = {
-        "id": user_id,
-        "username": username,
-        "name": name,
-        "email": email,
-        "avatar_url": avatar_url,
-    }
-    return response
+        return httpx.Response(status_code=404, json={"error": "not_found"})
 
-
-def create_mock_httpx_client(
-    token_response: MagicMock | None = None,
-    userinfo_response: MagicMock | None = None,
-) -> AsyncMock:
-    """
-    Create a configured AsyncMock that simulates an httpx.AsyncClient for OAuth token exchange and user info retrieval.
-
-    Parameters:
-        token_response (MagicMock | None): Mock response returned by client.post(); if None a default token response is created.
-        userinfo_response (MagicMock | None): Mock response returned by client.get(); if None a default userinfo response is created.
-
-    Returns:
-        AsyncMock: An AsyncMock that mimics an httpx.AsyncClient where .post() returns the token response, .get() returns the userinfo response, and asynchronous context manager methods (__aenter__, __aexit__) are configured.
-    """
-    client = AsyncMock()
-    client.post = AsyncMock(
-        return_value=token_response or create_mock_token_response(),
-    )
-    client.get = AsyncMock(
-        return_value=userinfo_response or create_mock_userinfo_response(),
-    )
-    client.__aenter__ = AsyncMock(return_value=client)
-    client.__aexit__ = AsyncMock(return_value=None)
-    return client
+    return httpx.MockTransport(handler)

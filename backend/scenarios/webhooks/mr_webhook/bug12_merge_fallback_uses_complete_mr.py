@@ -2,16 +2,31 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import UTC, datetime
 
 import vedro
+from scenarios.fakes import (
+    FakeCurrentState,
+    FakeGitLabClient,
+    FakeNotifier,
+    FakeQueueManager,
+    FakeStateMachine,
+    FakeStateMachineFactory,
+    FakeWebSocketManager,
+)
 from statemachine.exceptions import TransitionNotAllowed
 
+from gitlab_queue.models.queue_item import QueueItem
 from gitlab_queue.webhooks.handlers import MRWebhookHandler
 
 from ._helpers import create_mock_settings, create_mr_event
 
 MR_IID = 456
+
+_TRANSITION_ERROR = TransitionNotAllowed(
+    type("FakeEvent", (), {"id": "merge_success", "name": "merge_success"})(),
+    type("FakeState", (), {"id": "merging", "name": "merging"})(),
+)
 
 
 class Scenario(vedro.Scenario):
@@ -20,21 +35,28 @@ class Scenario(vedro.Scenario):
     def given_handler_where_merge_transition_fails(self):
         self.settings = create_mock_settings()
 
-        self.queue_manager = MagicMock()
-        self.queue_manager.get_queue_item = AsyncMock(return_value=MagicMock())
-        self.queue_manager.remove_from_queue = AsyncMock(return_value=True)
-        self.queue_manager.complete_mr = AsyncMock(return_value=True)
-        self.queue_manager.get_active_queue = AsyncMock(return_value=[])
-        self.queue_manager.get_queue_stats = AsyncMock(return_value={})
+        self.queue_manager = FakeQueueManager()
+        self.queue_manager.add_item(
+            QueueItem(
+                mr_iid=MR_IID,
+                title="Test",
+                author_name="A",
+                author_username="a",
+                target_branch="main",
+                state="merging",
+                queued_at=datetime.now(UTC),
+            )
+        )
 
-        self.gitlab_client = MagicMock()
-        self.gitlab_client.remove_mr_label = AsyncMock()
+        self.gitlab_client = FakeGitLabClient()
+        self.notifier = FakeNotifier()
+        self.websocket_manager = FakeWebSocketManager()
 
-        self.notifier = MagicMock()
-        self.notifier.notify = AsyncMock()
-
-        self.websocket_manager = MagicMock()
-        self.websocket_manager.broadcast_queue_updated = AsyncMock()
+        self.fake_sm = FakeStateMachine(
+            current_state=FakeCurrentState(id="merging"),
+            trigger_errors={"merge_success": _TRANSITION_ERROR},
+        )
+        self.sm_factory = FakeStateMachineFactory(state_machine=self.fake_sm)
 
         self.handler = MRWebhookHandler(
             settings=self.settings,
@@ -42,26 +64,22 @@ class Scenario(vedro.Scenario):
             queue_manager=self.queue_manager,
             notifier=self.notifier,
             websocket_manager=self.websocket_manager,
+            state_machine_factory=self.sm_factory,
         )
         self.event = create_mr_event(iid=MR_IID, action="merge", state="merged")
 
     async def when_merge_event_triggers_transition_not_allowed(self):
-        with patch(
-            "gitlab_queue.webhooks.handlers.create_state_machine_for_mr",
-            new_callable=AsyncMock,
-        ) as mock_sm:
-            sm = MagicMock()
-            sm.current_state.id = "merging"
-            sm.trigger_merge_success = AsyncMock(side_effect=TransitionNotAllowed(MagicMock(), MagicMock()))
-            mock_sm.return_value = sm
-
-            await self.handler.handle(self.event)
+        await self.handler.handle(self.event)
 
     def then_complete_mr_should_be_called(self):
-        self.queue_manager.complete_mr.assert_awaited_once_with(
-            MR_IID,
-            status="merged",
+        merged_calls = [
+            c for c in self.queue_manager.complete_calls if c["mr_iid"] == MR_IID and c["status"] == "merged"
+        ]
+        assert len(merged_calls) == 1, (
+            f"Expected complete_mr(MR_IID, status='merged'), got: {self.queue_manager.complete_calls}"
         )
 
     def and_remove_from_queue_should_not_be_called(self):
-        self.queue_manager.remove_from_queue.assert_not_awaited()
+        assert self.queue_manager.remove_calls == [], (
+            f"Expected no remove_from_queue calls, got: {self.queue_manager.remove_calls}"
+        )

@@ -130,6 +130,8 @@ async def validate_project_access(
     gitlab_url: str,
     access_token: str,
     project_id: int,
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
 ) -> bool:
     """Check if user has access to the GitLab project.
 
@@ -155,7 +157,7 @@ async def validate_project_access(
     """
     url = f"{gitlab_url.rstrip('/')}/api/v4/projects/{project_id}"
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(transport=transport) as client:
         try:
             response = await client.get(
                 url,

@@ -6,14 +6,13 @@ the processor should trigger conflict_during_testing and return CONFLICT result.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
 import vedro
 
 from gitlab_queue.clients.gitlab import GitLabConflictError
 from gitlab_queue.core.processor import ProcessingResult
 from gitlab_queue.core.rebase_coordinator import check_and_handle_rebase_during_testing
-from gitlab_queue.core.rebase_during_testing import RebaseDuringTestingContext, RebaseDuringTestingHandler
+from gitlab_queue.core.rebase_during_testing import RebaseDuringTestingContext
+from scenarios.fakes import FakeRebaseDuringTestingHandler
 
 from .._helpers import (
     create_mock_pipeline,
@@ -32,12 +31,9 @@ class Scenario(vedro.Scenario):
 
         self.pipeline = create_mock_pipeline(pipeline_id=100, sha="abc123", status="running")
 
-        self.rebase_handler = AsyncMock(spec=RebaseDuringTestingHandler)
-        self.rebase_handler.handle_rebase_if_needed = AsyncMock(
-            side_effect=GitLabConflictError("Conflict during rebase")
-        )
+        self.rebase_handler = FakeRebaseDuringTestingHandler(error=GitLabConflictError("Conflict during rebase"))
 
-        self.processor.gitlab_client.get_mr_conflicts = AsyncMock(return_value=["src/file.py"])
+        self.processor.gitlab_client.mr_conflicts = ["src/file.py"]
 
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
@@ -60,7 +56,7 @@ class Scenario(vedro.Scenario):
         assert self.result == ProcessingResult.CONFLICT
 
     def and_conflict_during_testing_was_triggered(self):
-        self.mock_sm.trigger_conflict_during_testing.assert_awaited_once()
+        assert len(self.mock_sm.conflict_during_testing_calls) == 1
 
     def and_trigger_pipeline_failed_was_not_called(self):
-        self.mock_sm.trigger_pipeline_failed.assert_not_awaited()
+        assert len(self.mock_sm.pipeline_failed_calls) == 0

@@ -34,17 +34,12 @@ class Scenario(vedro.Scenario):
         )
 
     def then_notifier_should_be_called_with_testing_template(self):
-        """
-        Assert that the notifier coroutine was awaited and invoked with the expected merge request IID and the "testing" template.
-
-        Checks that notify() was awaited, then verifies the first positional argument equals 123 (mr_iid) and the second positional argument equals "testing" (template).
-        """
-        self.notifier.notify.assert_awaited()
-        call_args = self.notifier.notify.call_args
-        assert call_args[0][0] == 123  # mr_iid
-        assert call_args[0][1] == "testing"  # template
+        assert len(self.notifier.notify_calls) == 1
+        call_args = self.notifier.notify_calls[-1]
+        assert call_args["mr_iid"] == 123
+        assert call_args["status"] == "testing"
 
     def and_notify_should_include_pipeline_info(self):
-        call_kwargs = self.notifier.notify.call_args[1]
-        assert call_kwargs.get("pipeline_id") == 456
-        assert call_kwargs.get("pipeline_url") == "https://gitlab.com/pipeline/456"
+        call_args = self.notifier.notify_calls[-1]
+        assert call_args["pipeline_id"] == 456
+        assert call_args["pipeline_url"] == "https://gitlab.com/pipeline/456"

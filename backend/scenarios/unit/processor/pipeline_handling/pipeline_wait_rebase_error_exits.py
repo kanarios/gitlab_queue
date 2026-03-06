@@ -6,10 +6,10 @@ Line 809: when outcome.result is not None, return from the loop immediately.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
 
 import vedro
 
+import gitlab_queue.core.pipeline_handler as _ph_mod
 from gitlab_queue.core.processor import ProcessingResult
 from gitlab_queue.core.types import RebaseCheckOutcome
 
@@ -30,10 +30,10 @@ class Scenario(vedro.Scenario):
 
         # Pipeline exists
         self.pipeline = create_mock_pipeline(pipeline_id=100, sha="abc123", status="running")
-        self.processor.gitlab_client.get_latest_mr_pipeline.return_value = self.pipeline
+        self.processor.gitlab_client.latest_pipeline_response = self.pipeline
 
-        self.queue_item = create_test_queue_item(mr_iid=42, state="testing")
-        self.processor.queue_manager.get_queue_item.return_value = self.queue_item
+        queue_item = create_test_queue_item(mr_iid=42, state="testing")
+        self.processor.queue_manager.add_item(queue_item)
 
         # _maybe_rebase_during_testing returns a conflict result
         self.conflict_outcome = RebaseCheckOutcome(
@@ -44,27 +44,25 @@ class Scenario(vedro.Scenario):
         )
 
         self.mock_sm = create_mock_state_machine()
-        # verify_mr returns True so termination conditions don't trigger
-        self.processor.gitlab_client.get_mr.return_value = None
-
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
 
     async def when_wait_for_pipeline_is_called(self):
         handler = self.processor._pipeline_handler
-        with (
-            patch.object(
-                handler,
-                "check_pipeline_termination_conditions",
-                new_callable=AsyncMock,
-                return_value=None,
-            ),
-            patch(
-                "gitlab_queue.core.pipeline_handler.maybe_rebase_during_testing",
-                new_callable=AsyncMock,
-                return_value=self.conflict_outcome,
-            ),
-        ):
+
+        async def fake_termination(*args, **kwargs):
+            return None
+
+        handler.check_pipeline_termination_conditions = fake_termination
+
+        async def fake_rebase(*args, **kwargs):
+            return self.conflict_outcome
+
+        self._original_rebase = _ph_mod.maybe_rebase_during_testing
+        _ph_mod.maybe_rebase_during_testing = fake_rebase
+        try:
             self.result = await self.processor._wait_for_pipeline(self.ctx)
+        finally:
+            _ph_mod.maybe_rebase_during_testing = self._original_rebase
 
     def then_result_is_conflict(self):
         assert self.result == ProcessingResult.CONFLICT

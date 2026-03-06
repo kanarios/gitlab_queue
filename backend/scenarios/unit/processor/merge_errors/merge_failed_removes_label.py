@@ -38,11 +38,9 @@ class Scenario(vedro.Scenario):
         self.processor = create_mock_processor()
 
         self.queue_item = create_test_queue_item(mr_iid=42, state="merging", expected_sha="abc123")
-        self.processor.queue_manager.get_queue_item.return_value = self.queue_item
+        self.processor.queue_manager.add_item(self.queue_item)
 
-        self.processor.gitlab_client.merge_mr.side_effect = GitLabConflictError(
-            "Merge conflict detected", status_code=409
-        )
+        self.processor.gitlab_client.merge_result = GitLabConflictError("Merge conflict detected", status_code=409)
 
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
@@ -64,15 +62,13 @@ class Scenario(vedro.Scenario):
 
         Verifies that the processor notified the state machine of a merge failure.
         """
-        self.mock_sm.trigger_merge_failed.assert_awaited_once()
+        assert len(self.mock_sm.merge_failed_calls) == 1
 
     def and_error_message_is_passed_to_state_machine(self):
         """
         Asserts that the state machine was passed an `error_message` containing the merge conflict text.
-
-        Checks that the mocked state's `trigger_merge_failed` call included an `error_message` keyword argument and that the message contains the substring "Merge conflict".
         """
-        call_kwargs = self.mock_sm.trigger_merge_failed.await_args.kwargs
+        call_kwargs = self.mock_sm.merge_failed_calls[0]
         assert "error_message" in call_kwargs
         assert "Merge conflict" in call_kwargs["error_message"]
 
@@ -80,4 +76,4 @@ class Scenario(vedro.Scenario):
         """
         Asserts that the state machine's merge-success transition was not triggered during the test.
         """
-        self.mock_sm.trigger_merge_success.assert_not_awaited()
+        assert self.mock_sm.merge_success_calls == []

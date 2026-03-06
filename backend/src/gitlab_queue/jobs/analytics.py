@@ -21,7 +21,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from datetime import date, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -31,6 +31,8 @@ from gitlab_queue.db import Database, UnitOfWork
 from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from gitlab_queue.config import Settings
 
 log = get_logger(__name__)
@@ -56,6 +58,8 @@ class AnalyticsJobProcessor:
 
     database: Database
     settings: Settings
+    uow_factory: Callable[..., UnitOfWork] | None = None
+    vacuum_fn: Callable[[], Any] | None = None
 
     # Internal state
     _shutdown_event: asyncio.Event = field(default_factory=asyncio.Event, init=False)
@@ -129,6 +133,11 @@ class AnalyticsJobProcessor:
             jobs=[job.id for job in self._scheduler.get_jobs()],
         )
 
+    def _create_uow(self) -> UnitOfWork:
+        """Create a UnitOfWork instance using the factory or default."""
+        factory = self.uow_factory or UnitOfWork
+        return factory(self.database, auto_commit=True)
+
     async def _save_hourly_snapshot(self) -> None:
         """Save hourly queue snapshot.
 
@@ -141,7 +150,7 @@ class AnalyticsJobProcessor:
         log.debug("Running hourly snapshot job")
 
         try:
-            async with UnitOfWork(self.database, auto_commit=True) as uow:
+            async with self._create_uow() as uow:
                 # Get current queue depth
                 queue_depth = await uow.merge_requests.count_active()
 
@@ -173,7 +182,7 @@ class AnalyticsJobProcessor:
         log.debug("Running daily aggregation job", target_date=yesterday.isoformat())
 
         try:
-            async with UnitOfWork(self.database, auto_commit=True) as uow:
+            async with self._create_uow() as uow:
                 result = await uow.analytics.aggregate_daily(yesterday)
 
                 if result:
@@ -201,7 +210,7 @@ class AnalyticsJobProcessor:
         log.debug("Running hourly analytics cleanup", retention_days=retention_days)
 
         try:
-            async with UnitOfWork(self.database, auto_commit=True) as uow:
+            async with self._create_uow() as uow:
                 deleted_count = await uow.analytics.cleanup_hourly(retention_days)
 
             if deleted_count > 0:
@@ -225,7 +234,7 @@ class AnalyticsJobProcessor:
         log.debug("Running history cleanup", retention_days=retention_days)
 
         try:
-            async with UnitOfWork(self.database, auto_commit=True) as uow:
+            async with self._create_uow() as uow:
                 deleted_count = await uow.history.cleanup_old_records(retention_days)
 
             if deleted_count > 0:
@@ -248,6 +257,10 @@ class AnalyticsJobProcessor:
         Note: SQLite VACUUM requires exclusive access and cannot run
         inside a transaction. We use a raw connection for this.
         """
+        if self.vacuum_fn is not None:
+            await self.vacuum_fn()
+            return
+
         log.debug("Running database VACUUM")
 
         try:

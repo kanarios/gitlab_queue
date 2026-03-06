@@ -10,11 +10,10 @@ asyncio.wait_for completes, calling trigger_merge_success.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
-
 import vedro
 
 from gitlab_queue.core.processor import ProcessingResult
+from scenarios.fakes import create_mr
 
 from .._helpers import (
     create_mock_processor,
@@ -37,12 +36,11 @@ class Scenario(vedro.Scenario):
 
         # Queue item with an expected SHA to test the race-condition guard
         self.queue_item = create_test_queue_item(mr_iid=42, state="merging", expected_sha="sha_merge_ok")
-        self.processor.queue_manager.get_queue_item.return_value = self.queue_item
+        self.processor.queue_manager.add_item(self.queue_item)
 
         # Simulate a merged MR returned by merge_mr
-        self.merged_mr = MagicMock()
-        self.merged_mr.state = "merged"
-        self.processor.gitlab_client.merge_mr = AsyncMock(return_value=self.merged_mr)
+        self.merged_mr = create_mr(iid=42, state="merged")
+        self.processor.gitlab_client.merge_result = self.merged_mr
 
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
@@ -69,21 +67,18 @@ class Scenario(vedro.Scenario):
 
         Verifies the processor triggered the merge success transition on the mocked state machine.
         """
-        self.mock_sm.trigger_merge_success.assert_awaited_once()
+        assert len(self.mock_sm.merge_success_calls) == 1
 
     def and_merge_mr_is_called_with_correct_sha(self):
         """
-        Asserts the GitLab client's merge_mr was awaited exactly once with the expected MR IID and expected SHA.
-
-        Checks that merge_mr was called with MR IID 42 and keyword argument expected_sha set to "sha_merge_ok".
+        Asserts the GitLab client's merge_mr was called once with the expected MR IID and expected SHA.
         """
-        self.processor.gitlab_client.merge_mr.assert_awaited_once_with(42, expected_sha="sha_merge_ok")
+        assert len(self.processor.gitlab_client.merge_calls) == 1
+        assert self.processor.gitlab_client.merge_calls[0] == (42, "sha_merge_ok")
 
     def and_no_failure_transitions_are_triggered(self):
         """
         Asserts that no failure or timeout transitions were triggered on the mock state machine.
-
-        Verifies that neither `trigger_merge_failed` nor `trigger_timeout` was awaited.
         """
-        self.mock_sm.trigger_merge_failed.assert_not_awaited()
-        self.mock_sm.trigger_timeout.assert_not_awaited()
+        assert self.mock_sm.merge_failed_calls == []
+        assert self.mock_sm.timeout_calls == []

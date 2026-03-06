@@ -26,8 +26,8 @@ if TYPE_CHECKING:
     from gitlab_queue.clients.gitlab import GitLabClient
     from gitlab_queue.config import Settings
     from gitlab_queue.core.notifier import MRNotifier
+    from gitlab_queue.core.protocols import StateMachineProtocol
     from gitlab_queue.core.queue import QueueManager
-    from gitlab_queue.core.state_machine import MRStateMachine
     from gitlab_queue.models.pipeline import Job, Pipeline
 
 log = get_logger(__name__)
@@ -144,7 +144,7 @@ class PipelineHandler:
     async def _fetch_pipeline_jobs(
         self,
         mr_iid: int,
-        sm: MRStateMachine,
+        sm: StateMachineProtocol,
         pipeline: Pipeline,
         retried_jobs: dict[str, int],
     ) -> list[Job] | None:
@@ -190,7 +190,7 @@ class PipelineHandler:
     async def _handle_no_failed_jobs(
         self,
         mr_iid: int,
-        sm: MRStateMachine,
+        sm: StateMachineProtocol,
         pipeline: Pipeline,
         all_jobs: list[Job],
         retried_jobs: dict[str, int],
@@ -365,7 +365,7 @@ class PipelineHandler:
     async def check_pipeline_termination_conditions(
         self,
         ctx: ProcessingContext,
-        sm: MRStateMachine,
+        sm: StateMachineProtocol,
         timeout: timedelta,
         start_time: datetime,
     ) -> ProcessingResult | None:
@@ -434,7 +434,7 @@ class PipelineHandler:
     async def handle_pipeline_status(
         self,
         ctx: ProcessingContext,
-        sm: MRStateMachine,
+        sm: StateMachineProtocol,
         pipeline: Pipeline,
         retried_jobs: dict[str, int],
     ) -> ProcessingResult | RetrySignal | None:

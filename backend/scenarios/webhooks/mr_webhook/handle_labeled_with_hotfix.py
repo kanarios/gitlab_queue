@@ -40,8 +40,8 @@ class Scenario(vedro.Scenario):
         await self.handler.handle(self.event)
 
     def then_mr_should_be_added_as_hotfix(self):
-        call_args = self.queue_manager.add_to_queue.call_args
-        assert call_args[1]["is_hotfix"] is True
+        assert len(self.queue_manager.add_to_queue_calls) == 1
+        assert self.queue_manager.add_to_queue_calls[0]["is_hotfix"] is True
 
     async def cleanup(self):
         await self.gitlab_client.close()

@@ -6,9 +6,9 @@ on the _websocket_manager attribute.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import vedro
+
+from scenarios.fakes import FakeWebSocketManager
 
 from .._helpers import create_mock_processor
 
@@ -18,7 +18,7 @@ class Scenario(vedro.Scenario):
 
     def given_processor_and_manager(self):
         self.processor = create_mock_processor()
-        self.manager = MagicMock()
+        self.manager = FakeWebSocketManager()
 
     def when_set_websocket_manager_is_called(self):
         self.processor.set_websocket_manager(self.manager)

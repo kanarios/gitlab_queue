@@ -5,16 +5,15 @@ the handler does not call position_notifier to update affected MRs' positions.
 """
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
 
 import vedro
+from scenarios.fakes import FakeNotifier, FakePositionNotifier, FakeQueueManager
 
 from gitlab_queue.models.queue_item import QueueItem
 from gitlab_queue.webhooks.handlers import MRWebhookHandler
 
 from ._helpers import (
     create_gitlab_client_with_transport,
-    create_mock_queue_manager,
     create_mock_settings,
     create_mr_event,
 )
@@ -36,21 +35,17 @@ class Scenario(vedro.Scenario):
             queued_at=datetime.now(UTC),
         )
 
-    def given_mock_queue_manager(self):
-        self.queue_manager = create_mock_queue_manager()
-        self.queue_manager.get_queue_item = AsyncMock(return_value=self.queue_item)
-        self.queue_manager.get_queue_position = AsyncMock(return_value=1)
-        self.queue_manager.get_queue_length = AsyncMock(return_value=2)
-        self.queue_manager.complete_mr = AsyncMock()
+    def given_queue_manager(self):
+        self.queue_manager = FakeQueueManager()
+        self.queue_manager.add_item(self.queue_item)
 
-    def given_mock_notifier(self):
-        self.notifier = MagicMock()
-        self.notifier.notify = AsyncMock()
+    def given_notifier(self):
+        self.notifier = FakeNotifier()
 
-    def given_mock_position_notifier(self):
-        self.position_notifier = MagicMock()
-        self.position_notifier.capture_queue_positions = AsyncMock(return_value={MR_IID: 1, 456: 2})
-        self.position_notifier.notify_affected_mrs_after_completion = AsyncMock()
+    def given_position_notifier(self):
+        self.position_notifier = FakePositionNotifier(
+            captured_positions={MR_IID: 1, 456: 2},
+        )
 
     def given_handler(self):
         self.settings = create_mock_settings()
@@ -77,10 +72,10 @@ class Scenario(vedro.Scenario):
         await self.handler.handle(self.event)
 
     def then_position_notifier_should_capture_positions(self):
-        self.position_notifier.capture_queue_positions.assert_awaited()
+        assert len(self.position_notifier.capture_calls) > 0
 
     def and_position_notifier_should_notify_affected_mrs(self):
-        self.position_notifier.notify_affected_mrs_after_completion.assert_awaited()
+        assert len(self.position_notifier.notify_after_completion_calls) > 0
 
     async def cleanup(self):
         await self.gitlab_client.close()

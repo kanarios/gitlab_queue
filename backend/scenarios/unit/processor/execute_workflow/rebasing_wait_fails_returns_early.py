@@ -5,17 +5,33 @@ Line 340: return result when _wait_for_rebase returns non-SUCCESS in the rebasin
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from dataclasses import dataclass, field
+from typing import Any
 
 import vedro
 
-from gitlab_queue.core.processor import ProcessingResult
+from gitlab_queue.core.types import ProcessingContext, ProcessingResult
 
 from .._helpers import (
     create_mock_processor,
     create_mock_state_machine,
     create_processing_context,
 )
+
+
+@dataclass
+class FakeRebaseHandler:
+    wait_for_rebase_result: ProcessingResult = ProcessingResult.SUCCESS
+    capture_pre_rebase_sha_calls: list[Any] = field(default_factory=list)
+    wait_for_rebase_calls: list[Any] = field(default_factory=list)
+
+    async def capture_pre_rebase_sha(self, ctx: ProcessingContext) -> str:
+        self.capture_pre_rebase_sha_calls.append(ctx)
+        return "sha"
+
+    async def wait_for_rebase(self, ctx: ProcessingContext) -> ProcessingResult:
+        self.wait_for_rebase_calls.append(ctx)
+        return self.wait_for_rebase_result
 
 
 class Scenario(vedro.Scenario):
@@ -27,21 +43,11 @@ class Scenario(vedro.Scenario):
         self.mock_sm.current_state.id = "rebasing"
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
 
+        # Inject fake rebase handler that returns TIMEOUT
+        self.processor._rh = FakeRebaseHandler(wait_for_rebase_result=ProcessingResult.TIMEOUT)
+
     async def when_execute_workflow_is_called(self):
-        with (
-            patch.object(
-                self.processor,
-                "_capture_pre_rebase_sha",
-                new_callable=AsyncMock,
-            ),
-            patch.object(
-                self.processor,
-                "_wait_for_rebase",
-                new_callable=AsyncMock,
-                return_value=ProcessingResult.TIMEOUT,
-            ),
-        ):
-            self.result = await self.processor._execute_workflow(self.ctx)
+        self.result = await self.processor._execute_workflow(self.ctx)
 
     def then_result_is_timeout(self):
         assert self.result == ProcessingResult.TIMEOUT

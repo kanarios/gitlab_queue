@@ -8,13 +8,15 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from gitlab_queue.models.events import MergeRequestEvent, PipelineEvent
 from gitlab_queue.models.retorts import parse_webhook_event
 from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from gitlab_queue.api.websocket import WebSocketManager
     from gitlab_queue.clients.gitlab import GitLabClient
     from gitlab_queue.config import Settings
@@ -22,6 +24,7 @@ if TYPE_CHECKING:
     from gitlab_queue.core.queue import QueueManager
     from gitlab_queue.core.queue_position_notifier import QueuePositionNotifier
     from gitlab_queue.models.retry import RetryQueueItem
+    from gitlab_queue.webhooks.handlers import MRWebhookHandler, PipelineWebhookHandler
     from gitlab_queue.webhooks.retry_manager import WebhookRetryManager
 
 log = get_logger(__name__)
@@ -56,6 +59,9 @@ class WebhookRetryProcessor:
     notifier: MRNotifier
     position_notifier: QueuePositionNotifier | None = None
     websocket_manager: WebSocketManager | None = None
+    mr_handler_factory: Callable[..., MRWebhookHandler] | None = None
+    pipeline_handler_factory: Callable[..., PipelineWebhookHandler] | None = None
+    event_parser: Callable[[dict[str, Any]], MergeRequestEvent | PipelineEvent | None] | None = None
 
     # Internal state
     _shutdown_event: asyncio.Event = field(default_factory=asyncio.Event, init=False)
@@ -129,7 +135,8 @@ class WebhookRetryProcessor:
 
         try:
             # Parse the webhook event from stored payload
-            event = parse_webhook_event(item.payload)
+            parser = self.event_parser or parse_webhook_event
+            event = parser(item.payload)
 
             if event is None:
                 # Unknown event type - should not happen, move to DLQ
@@ -189,17 +196,27 @@ class WebhookRetryProcessor:
         Args:
             event: The merge request event to process.
         """
-        # Import here to avoid circular imports
-        from gitlab_queue.webhooks.handlers import MRWebhookHandler
+        if self.mr_handler_factory is not None:
+            handler = self.mr_handler_factory(
+                settings=self.settings,
+                gitlab_client=self.gitlab_client,
+                queue_manager=self.queue_manager,
+                notifier=self.notifier,
+                position_notifier=self.position_notifier,
+                websocket_manager=self.websocket_manager,
+            )
+        else:
+            # Import here to avoid circular imports
+            from gitlab_queue.webhooks.handlers import MRWebhookHandler
 
-        handler = MRWebhookHandler(
-            settings=self.settings,
-            gitlab_client=self.gitlab_client,
-            queue_manager=self.queue_manager,
-            notifier=self.notifier,
-            position_notifier=self.position_notifier,
-            websocket_manager=self.websocket_manager,
-        )
+            handler = MRWebhookHandler(
+                settings=self.settings,
+                gitlab_client=self.gitlab_client,
+                queue_manager=self.queue_manager,
+                notifier=self.notifier,
+                position_notifier=self.position_notifier,
+                websocket_manager=self.websocket_manager,
+            )
 
         await handler.handle(event)
 
@@ -209,17 +226,27 @@ class WebhookRetryProcessor:
         Args:
             event: The pipeline event to process.
         """
-        # Import here to avoid circular imports
-        from gitlab_queue.webhooks.handlers import PipelineWebhookHandler
+        if self.pipeline_handler_factory is not None:
+            handler = self.pipeline_handler_factory(
+                settings=self.settings,
+                gitlab_client=self.gitlab_client,
+                queue_manager=self.queue_manager,
+                notifier=self.notifier,
+                position_notifier=self.position_notifier,
+                websocket_manager=self.websocket_manager,
+            )
+        else:
+            # Import here to avoid circular imports
+            from gitlab_queue.webhooks.handlers import PipelineWebhookHandler
 
-        handler = PipelineWebhookHandler(
-            settings=self.settings,
-            gitlab_client=self.gitlab_client,
-            queue_manager=self.queue_manager,
-            notifier=self.notifier,
-            position_notifier=self.position_notifier,
-            websocket_manager=self.websocket_manager,
-        )
+            handler = PipelineWebhookHandler(
+                settings=self.settings,
+                gitlab_client=self.gitlab_client,
+                queue_manager=self.queue_manager,
+                notifier=self.notifier,
+                position_notifier=self.position_notifier,
+                websocket_manager=self.websocket_manager,
+            )
 
         await handler.handle(event)
 

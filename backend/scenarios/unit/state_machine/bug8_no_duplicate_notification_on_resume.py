@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
 
 import vedro
 
 from gitlab_queue.core.state_machine import create_state_machine_for_mr
 from gitlab_queue.models.queue_item import QueueItem
+from scenarios.fakes import FakeNotifier, FakeQueueManager
 
 
 class Scenario(vedro.Scenario):
@@ -23,14 +23,10 @@ class Scenario(vedro.Scenario):
             queued_at=datetime.now(UTC),
         )
 
-        self.notifier = MagicMock()
-        self.notifier.notify = AsyncMock()
-        self.notifier.remove_queue_label = AsyncMock()
+        self.notifier = FakeNotifier()
 
-        self.queue_manager = MagicMock()
-        self.queue_manager.get_queue_item = AsyncMock(return_value=self.queue_item)
-        self.queue_manager.update_mr_state = AsyncMock(return_value=True)
-        self.queue_manager.complete_mr = AsyncMock(return_value=True)
+        self.queue_manager = FakeQueueManager()
+        self.queue_manager.add_item(self.queue_item)
 
     async def when_state_machine_is_created_for_existing_item(self):
         await create_state_machine_for_mr(
@@ -41,4 +37,4 @@ class Scenario(vedro.Scenario):
         )
 
     def then_notifier_is_not_called(self):
-        self.notifier.notify.assert_not_awaited()
+        assert len(self.notifier.notify_calls) == 0

@@ -25,11 +25,13 @@ class Scenario(vedro.Scenario):
         assert self.sm.current_state.id == "rebasing"
 
     def and_queue_manager_should_update_state(self):
-        self.queue_manager.update_mr_state.assert_awaited_once_with(42, "rebasing")
+        assert len(self.queue_manager.update_state_calls) == 1
+        call = self.queue_manager.update_state_calls[0]
+        assert call["mr_iid"] == 42
+        assert call["state"] == "rebasing"
 
     def and_notifier_should_be_called_with_rebasing(self):
-        calls = self.notifier.notify.call_args_list
-        assert len(calls) >= 1
+        assert len(self.notifier.notify_calls) >= 1
         # The most recent call should be for 'rebasing'
-        last_call = calls[-1]
-        assert last_call.args[1] == "rebasing"
+        last_call = self.notifier.notify_calls[-1]
+        assert last_call["status"] == "rebasing"

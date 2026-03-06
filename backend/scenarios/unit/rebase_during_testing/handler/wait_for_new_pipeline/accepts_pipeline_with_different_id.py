@@ -47,4 +47,4 @@ class Scenario(vedro.Scenario):
         assert self.result.id == self.new_pipeline_id
 
     def then_pipeline_was_fetched_once(self):
-        self.client.get_latest_mr_pipeline.assert_awaited_once()
+        assert len(self.client.get_latest_pipeline_calls) == 1

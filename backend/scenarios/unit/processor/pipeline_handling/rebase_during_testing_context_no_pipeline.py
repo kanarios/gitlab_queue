@@ -6,12 +6,11 @@ but no new pipeline, return the updated context to preserve state tracking.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
-
 import vedro
 
 from gitlab_queue.core.rebase_coordinator import check_and_handle_rebase_during_testing
 from gitlab_queue.core.rebase_during_testing import RebaseDuringTestingContext
+from scenarios.fakes import FakeRebaseDuringTestingHandler
 
 from .._helpers import (
     create_mock_pipeline,
@@ -38,9 +37,7 @@ class Scenario(vedro.Scenario):
         # Updated context: rebase happened (count went up) but no new pipeline
         self.new_ctx = RebaseDuringTestingContext(rebase_count=1, max_attempts=3, current_pipeline_id=100)
 
-        self.rebase_handler = MagicMock()
-        # Returns (new_ctx, None) — rebase happened but no pipeline found yet
-        self.rebase_handler.handle_rebase_if_needed = AsyncMock(return_value=(self.new_ctx, None))
+        self.rebase_handler = FakeRebaseDuringTestingHandler(result=(self.new_ctx, None))
 
     async def when_check_and_handle_rebase_during_testing_is_called(self):
         state = create_pipeline_wait_state(
@@ -61,4 +58,4 @@ class Scenario(vedro.Scenario):
         assert self.result.rebase_count == 1
 
     def and_notify_rebase_during_testing_was_not_called(self):
-        self.mock_sm.notify_rebase_during_testing.assert_not_awaited()
+        assert len(self.mock_sm.rebase_during_testing_calls) == 0

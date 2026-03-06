@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
 import vedro
 from scenarios.contexts.api_helpers import created_test_app, created_test_jwt
 from scenarios.schemas.status_code import OkStatusSchema
@@ -17,10 +15,8 @@ class Scenario(vedro.Scenario):
 
     def given_app_with_empty_dlq(self):
         self.app, self.state = created_test_app()
-        self.state.retry_manager.get_dlq_entries = AsyncMock(return_value=[])
-        self.state.retry_manager.get_dlq_stats = AsyncMock(
-            return_value=create_test_dlq_stats(total=0),
-        )
+        self.state.retry_manager.dlq_entries = []
+        self.state.retry_manager.dlq_stats = create_test_dlq_stats(total=0)
         self.client = TestClient(self.app, raise_server_exceptions=False)
         self.token = created_test_jwt(self.state.settings)
         self.headers = {"Authorization": f"Bearer {self.token}"}

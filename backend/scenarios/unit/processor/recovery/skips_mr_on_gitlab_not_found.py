@@ -6,8 +6,6 @@ the MR should be marked as 'removed' in the queue.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
 import vedro
 
 from gitlab_queue.clients.gitlab import GitLabNotFoundError
@@ -20,14 +18,11 @@ class Scenario(vedro.Scenario):
 
     def given_processor_with_nonexistent_mr_in_queue(self):
         self.processor = create_mock_processor()
-        self.processor.queue_manager.complete_mr = AsyncMock(return_value=True)
 
         self.queue_item = create_test_queue_item(mr_iid=42, state="queued")
-        self.processor.queue_manager.get_active_queue.return_value = [
-            self.queue_item,
-        ]
+        self.processor.queue_manager.add_item(self.queue_item)
 
-        self.processor.gitlab_client.get_mr.side_effect = GitLabNotFoundError("MR not found", status_code=404)
+        self.processor.gitlab_client.get_mr_error = GitLabNotFoundError("MR not found", status_code=404)
 
     async def when_recover_interrupted_state_is_called(self):
         """
@@ -36,8 +31,8 @@ class Scenario(vedro.Scenario):
         await self.processor._recover_interrupted_state()
 
     def then_mr_is_marked_as_removed(self):
-        self.processor.queue_manager.complete_mr.assert_awaited_once_with(
-            42,
-            status="removed",
-            failure_reason="not_found",
-        )
+        assert len(self.processor.queue_manager.complete_calls) == 1
+        call = self.processor.queue_manager.complete_calls[0]
+        assert call["mr_iid"] == 42
+        assert call["status"] == "removed"
+        assert call["failure_reason"] == "not_found"

@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
 
 from d42 import fake
 from scenarios.contexts.gitlab_client_factory import created_test_settings
-from scenarios.library import Labels
+from scenarios.fakes import FakeNotifier, FakeQueueManager
 from scenarios.schemas import PipelineEventSchema, QueueItemSchema
 from scenarios.transports import GitLabMockTransport
 
@@ -17,26 +16,15 @@ from gitlab_queue.models.queue_item import QueueItem
 
 
 def create_mock_settings():
-    """Create mock settings."""
-    settings = MagicMock()
-    settings.queue_label = Labels.MERGE_QUEUE
-    settings.hotfix_label = Labels.HOTFIX
-    settings.job_retry_count = 2
-    settings.target_branch = "master"
-    return settings
+    """Create test settings for pipeline webhook tests."""
+    return created_test_settings(
+        job_retry_count=2,
+        target_branch="master",
+    )
 
 
 # Alias for backward compatibility
 created_mock_settings = create_mock_settings
-
-
-def create_mock_gitlab_client():
-    """Create mock GitLab client using MagicMock (legacy).
-
-    DEPRECATED: Use create_gitlab_client_with_transport() instead.
-    """
-    client = MagicMock()
-    return client
 
 
 def create_gitlab_client_with_transport(
@@ -46,7 +34,7 @@ def create_gitlab_client_with_transport(
     """Create real GitLabClient with MockTransport.
 
     This is the preferred way to create GitLab client for testing.
-    It uses real GitLabClient with injected MockTransport instead of MagicMock.
+    It uses real GitLabClient with injected MockTransport.
 
     Args:
         project_id: GitLab project ID.
@@ -66,19 +54,14 @@ def create_gitlab_client_with_transport(
     return client, transport
 
 
-def create_mock_queue_manager():
-    """Create mock queue manager."""
-    qm = MagicMock()
-    qm.get_queue_item = AsyncMock(return_value=None)
-    qm.update_mr_state = AsyncMock(return_value=True)
-    return qm
+def create_mock_queue_manager() -> FakeQueueManager:
+    """Create FakeQueueManager for pipeline webhook tests."""
+    return FakeQueueManager()
 
 
-def create_mock_notifier():
-    """Create mock notifier."""
-    notifier = MagicMock()
-    notifier.notify = AsyncMock()
-    return notifier
+def create_mock_notifier() -> FakeNotifier:
+    """Create FakeNotifier for pipeline webhook tests."""
+    return FakeNotifier()
 
 
 def create_pipeline_event(

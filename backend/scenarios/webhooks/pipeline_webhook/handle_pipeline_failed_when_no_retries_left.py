@@ -1,7 +1,5 @@
 """Test: handle pipeline failed marks MR as failed (processor handles retries)."""
 
-from unittest.mock import AsyncMock
-
 import vedro
 
 from gitlab_queue.webhooks.handlers import PipelineWebhookHandler
@@ -24,9 +22,7 @@ class Scenario(vedro.Scenario):
         self.settings.job_retry_count = 2
         self.gitlab_client, self.transport = create_gitlab_client_with_transport()
         self.queue_manager = create_mock_queue_manager()
-        self.queue_manager.get_queue_item = AsyncMock(
-            return_value=create_queue_item_in_state("testing", retry_count=3, mr_iid=123)
-        )
+        self.queue_manager.add_item(create_queue_item_in_state("testing", retry_count=3, mr_iid=123))
         self.notifier = create_mock_notifier()
         self.handler = PipelineWebhookHandler(
             settings=self.settings,
@@ -40,11 +36,11 @@ class Scenario(vedro.Scenario):
         await self.handler.handle(self.event)
 
     def then_pipeline_status_should_be_marked_as_failed(self):
-        self.queue_manager.update_mr_state.assert_awaited_once_with(
-            123,
-            "testing",
-            pipeline_status="failed",
-        )
+        assert len(self.queue_manager.update_state_calls) == 1
+        call = self.queue_manager.update_state_calls[0]
+        assert call["mr_iid"] == 123
+        assert call["state"] == "testing"
+        assert call["pipeline_status"] == "failed"
 
     async def cleanup(self):
         await self.gitlab_client.close()

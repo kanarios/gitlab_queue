@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
-
 import vedro
 from scenarios.contexts.api_helpers import (
     created_test_app,
     created_test_jwt,
 )
+from scenarios.fakes import FakeHistoryRepo, FakeUnitOfWork, HistoryStatsResult
 from scenarios.schemas.status_code import OkStatusSchema
 from starlette.testclient import TestClient
 
@@ -22,23 +21,18 @@ class Scenario(vedro.Scenario):
         self.token = created_test_jwt(self.state.settings)
         self.headers = {"Authorization": f"Bearer {self.token}"}
 
-        mock_stats = MagicMock()
-        mock_stats.total_processed = 100
-        mock_stats.success_count = 80
-        mock_stats.failed_count = 10
-        mock_stats.conflict_count = 7
-        mock_stats.timeout_count = 3
+        history_repo = FakeHistoryRepo(
+            stats_for_period_result=HistoryStatsResult(
+                total_processed=100,
+                success_count=80,
+                failed_count=10,
+                conflict_count=7,
+                timeout_count=3,
+            ),
+        )
+        uow = FakeUnitOfWork(history=history_repo)
 
-        mock_uow = AsyncMock()
-        mock_uow.history = AsyncMock()
-        mock_uow.history.get_stats_for_period = AsyncMock(return_value=mock_stats)
-        mock_uow.__aenter__ = AsyncMock(return_value=mock_uow)
-        mock_uow.__aexit__ = AsyncMock(return_value=None)
-
-        import gitlab_queue.api.routes as routes_module
-
-        self._original_uow = routes_module.UnitOfWork
-        routes_module.UnitOfWork = MagicMock(return_value=mock_uow)
+        self.state.uow_factory = lambda db: uow
 
     def when_outcomes_endpoint_is_called(self):
         self.response = self.client.get(
@@ -62,8 +56,3 @@ class Scenario(vedro.Scenario):
             assert "name" in outcome
             assert "count" in outcome
             assert "percentage" in outcome
-
-    def cleanup(self):
-        import gitlab_queue.api.routes as routes_module
-
-        routes_module.UnitOfWork = self._original_uow

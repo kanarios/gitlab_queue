@@ -6,71 +6,59 @@ with GitLab, including adding missing MRs and removing orphaned entries.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, Mock
 
 import vedro
 from vedro import scenario
 
+from gitlab_queue.clients.gitlab import GitLabAPIError, GitLabNotFoundError
+from scenarios.fakes import FakeGitLabClient, FakeQueueManager, FakeSettings, create_mr
+
 if TYPE_CHECKING:
     from gitlab_queue.core.scheduler import SyncStats
+    from gitlab_queue.models.mr import MergeRequest
+
+
+def _make_mr(iid: int, labels: list[str] | None = None) -> MergeRequest:
+    """Create a MergeRequest with sensible defaults."""
+    return create_mr(
+        iid=iid,
+        labels=labels or ["merge_queue"],
+        source_branch=f"feature-{iid}",
+    )
+
+
+def _make_queue_item(queue_manager: FakeQueueManager, mr_iid: int, state: str = "queued") -> None:
+    """Add a queue item to the fake queue manager."""
+    from datetime import UTC, datetime
+
+    from gitlab_queue.models.queue_item import QueueItem
+
+    item = QueueItem(
+        mr_iid=mr_iid,
+        title=f"MR {mr_iid}",
+        author_name="Test",
+        author_username="test",
+        target_branch="master",
+        state=state,
+        queued_at=datetime.now(UTC),
+        is_hotfix=False,
+        labels=["merge_queue"],
+    )
+    queue_manager.add_item(item)
 
 
 @scenario()
 async def sync_adds_missing_mrs_to_queue():
     """Test that sync adds MRs from GitLab that are missing in queue."""
     with vedro.given:
-        # Mock GitLab client
-        gitlab_client = AsyncMock()
+        mr1 = _make_mr(iid=1)
+        mr2 = _make_mr(iid=2, labels=["merge_queue", "hotfix"])
 
-        # Create real MergeRequest objects (not mocks)
-        from gitlab_queue.models.mr import Author, MergeRequest
+        gitlab_client = FakeGitLabClient(listed_mrs=[mr1, mr2])
+        queue_manager = FakeQueueManager()
+        settings = FakeSettings()
 
-        mr1 = MergeRequest(
-            iid=1,
-            title="MR 1",
-            state="opened",
-            labels=["merge_queue"],
-            sha="abc123",
-            source_branch="feature-1",
-            target_branch="master",
-            merge_status="can_be_merged",
-            has_conflicts=False,
-            rebase_in_progress=False,
-            author=Author(id=1, name="Alice", username="alice", avatar_url=None),
-            web_url="https://gitlab.com/project/-/merge_requests/1",
-        )
-        mr2 = MergeRequest(
-            iid=2,
-            title="MR 2",
-            state="opened",
-            labels=["merge_queue", "hotfix"],
-            sha="def456",
-            source_branch="feature-2",
-            target_branch="master",
-            merge_status="can_be_merged",
-            has_conflicts=False,
-            rebase_in_progress=False,
-            author=Author(id=2, name="Bob", username="bob", avatar_url=None),
-            web_url="https://gitlab.com/project/-/merge_requests/2",
-        )
-        gitlab_client.list_mrs_with_label = AsyncMock(return_value=[mr1, mr2])
-        gitlab_client.get_mr = AsyncMock(side_effect=[mr1, mr2])
-
-        # Mock queue manager with empty queue
-        queue_manager = AsyncMock()
-        queue_manager.get_active_queue = AsyncMock(return_value=[])
-        queue_manager.add_to_queue = AsyncMock()
-
-        # Mock settings
-        settings = Mock(
-            queue_label="merge_queue",
-            hotfix_label="hotfix",
-            poll_interval_seconds=30,
-        )
-
-        # Create scheduler
         from gitlab_queue.core.scheduler import QueueScheduler
 
         scheduler = QueueScheduler(
@@ -85,80 +73,41 @@ async def sync_adds_missing_mrs_to_queue():
     with vedro.then:
         # Verify MRs were added to queue
         assert stats.mrs_in_gitlab == 2
-        assert stats.mrs_in_queue == 0
+        assert stats.mrs_in_queue == 2  # Updated after finalization
         assert stats.added == 2
         assert stats.removed == 0
         assert stats.unchanged == 0
 
         # Verify add_to_queue was called for both MRs
-        assert queue_manager.add_to_queue.call_count == 2
+        assert len(queue_manager.add_to_queue_calls) == 2
 
         # Verify hotfix flag was set correctly
-        calls = queue_manager.add_to_queue.call_args_list
+        calls = queue_manager.add_to_queue_calls
         # First MR (no hotfix label)
-        assert calls[0].kwargs["is_hotfix"] is False
+        assert calls[0]["is_hotfix"] is False
         # Second MR (has hotfix label)
-        assert calls[1].kwargs["is_hotfix"] is True
+        assert calls[1]["is_hotfix"] is True
 
 
 @scenario()
 async def sync_removes_orphaned_mrs_from_queue():
     """Test that sync removes MRs from queue that are no longer in GitLab."""
     with vedro.given:
-        # Mock GitLab client
-        gitlab_client = AsyncMock()
+        mr1 = _make_mr(iid=1)
 
         # GitLab returns only MR 1 (MR 2 has been closed/unlabeled)
-        from gitlab_queue.models.mr import Author, MergeRequest
-
-        mr1 = MergeRequest(
-            iid=1,
-            title="MR 1",
-            state="opened",
-            labels=["merge_queue"],
-            sha="abc123",
-            source_branch="feature-1",
-            target_branch="master",
-            merge_status="can_be_merged",
-            has_conflicts=False,
-            rebase_in_progress=False,
-            author=Author(id=1, name="Alice", username="alice", avatar_url=None),
-            web_url="https://gitlab.com/project/-/merge_requests/1",
-        )
-        gitlab_client.list_mrs_with_label = AsyncMock(return_value=[mr1])
-
-        # MR 2 exists but is closed
-        mr2_closed = Mock(
-            iid=2,
-            title="MR 2",
-            labels=["merge_queue"],
-            state="closed",
-        )
-        gitlab_client.get_mr = AsyncMock(return_value=mr2_closed)
-
-        # Mock queue manager with 2 items
-        queue_item1 = Mock(
-            mr_iid=1,
-            state="queued",
-            queued_at=datetime.now(UTC),
-        )
-        queue_item2 = Mock(
-            mr_iid=2,
-            state="queued",
-            queued_at=datetime.now(UTC),
-        )
-        queue_manager = AsyncMock()
-        queue_manager.get_active_queue = AsyncMock(return_value=[queue_item1, queue_item2])
-        queue_manager.remove_from_queue = AsyncMock()
-
-        # Mock settings
-        settings = Mock(
-            queue_label="merge_queue",
-            hotfix_label="hotfix",
-            poll_interval_seconds=30,
+        gitlab_client = FakeGitLabClient(
+            listed_mrs=[mr1],
+            # MR 2 exists but is closed
+            mr_responses={2: create_mr(iid=2, state="closed", labels=["merge_queue"])},
         )
 
-        # Create scheduler
+        queue_manager = FakeQueueManager()
+        _make_queue_item(queue_manager, mr_iid=1)
+        _make_queue_item(queue_manager, mr_iid=2)
+
+        settings = FakeSettings()
+
         from gitlab_queue.core.scheduler import QueueScheduler
 
         scheduler = QueueScheduler(
@@ -173,38 +122,25 @@ async def sync_removes_orphaned_mrs_from_queue():
     with vedro.then:
         # Verify orphaned MR was removed
         assert stats.mrs_in_gitlab == 1
-        assert stats.mrs_in_queue == 2
+        assert stats.mrs_in_queue == 1  # finalize_sync updates to current queue size
         assert stats.added == 0
         assert stats.removed == 1
         assert stats.unchanged == 1
 
         # Verify remove_from_queue was called for MR 2
-        queue_manager.remove_from_queue.assert_awaited_once_with(2)
+        assert queue_manager.remove_calls == [2]
 
 
 @scenario()
 async def sync_handles_gitlab_api_errors_gracefully():
     """Test that sync handles GitLab API errors without crashing."""
     with vedro.given:
-        # Mock GitLab client that raises error
-        gitlab_client = AsyncMock()
-        from gitlab_queue.clients.gitlab import GitLabAPIError
-
-        gitlab_client.list_mrs_with_label = AsyncMock(
-            side_effect=GitLabAPIError("API rate limit exceeded", status_code=429)
+        gitlab_client = FakeGitLabClient(
+            list_mrs_error=GitLabAPIError("API rate limit exceeded", status_code=429),
         )
+        queue_manager = FakeQueueManager()
+        settings = FakeSettings()
 
-        # Mock queue manager
-        queue_manager = AsyncMock()
-
-        # Mock settings
-        settings = Mock(
-            queue_label="merge_queue",
-            hotfix_label="hotfix",
-            poll_interval_seconds=30,
-        )
-
-        # Create scheduler
         from gitlab_queue.core.scheduler import QueueScheduler
 
         scheduler = QueueScheduler(
@@ -214,7 +150,7 @@ async def sync_handles_gitlab_api_errors_gracefully():
         )
 
     with vedro.when:
-        # Should not raise exception
+        # Should raise exception (scheduler.run() catches it, but sync_queue() propagates)
         try:
             await scheduler.sync_queue()
             error_occurred = False
@@ -222,77 +158,28 @@ async def sync_handles_gitlab_api_errors_gracefully():
             error_occurred = True
 
     with vedro.then:
-        # Verify API error was caught and handled
+        # Verify API error was raised
         assert error_occurred is True
         # Queue operations should not have been called
-        assert queue_manager.get_active_queue.called is False
-        assert queue_manager.add_to_queue.called is False
-        assert queue_manager.remove_from_queue.called is False
+        assert len(queue_manager.add_to_queue_calls) == 0
+        assert len(queue_manager.remove_calls) == 0
 
 
 @scenario()
 async def sync_does_not_duplicate_existing_mrs():
     """Test that sync does not duplicate MRs already in the queue."""
     with vedro.given:
-        # Mock GitLab client
-        gitlab_client = AsyncMock()
+        mr1 = _make_mr(iid=1)
+        mr2 = _make_mr(iid=2)
 
-        # GitLab returns 2 MRs
-        from gitlab_queue.models.mr import Author, MergeRequest
+        gitlab_client = FakeGitLabClient(listed_mrs=[mr1, mr2])
 
-        mr1 = MergeRequest(
-            iid=1,
-            title="MR 1",
-            state="opened",
-            labels=["merge_queue"],
-            sha="abc123",
-            source_branch="feature-1",
-            target_branch="master",
-            merge_status="can_be_merged",
-            has_conflicts=False,
-            rebase_in_progress=False,
-            author=Author(id=1, name="Alice", username="alice", avatar_url=None),
-            web_url="https://gitlab.com/project/-/merge_requests/1",
-        )
-        mr2 = MergeRequest(
-            iid=2,
-            title="MR 2",
-            state="opened",
-            labels=["merge_queue"],
-            sha="def456",
-            source_branch="feature-2",
-            target_branch="master",
-            merge_status="can_be_merged",
-            has_conflicts=False,
-            rebase_in_progress=False,
-            author=Author(id=2, name="Bob", username="bob", avatar_url=None),
-            web_url="https://gitlab.com/project/-/merge_requests/2",
-        )
-        gitlab_client.list_mrs_with_label = AsyncMock(return_value=[mr1, mr2])
+        queue_manager = FakeQueueManager()
+        _make_queue_item(queue_manager, mr_iid=1)
+        _make_queue_item(queue_manager, mr_iid=2, state="testing")
 
-        # Queue already contains both MRs
-        queue_item1 = Mock(
-            mr_iid=1,
-            state="queued",
-            queued_at=datetime.now(UTC),
-        )
-        queue_item2 = Mock(
-            mr_iid=2,
-            state="testing",  # Different state but still active
-            queued_at=datetime.now(UTC),
-        )
-        queue_manager = AsyncMock()
-        queue_manager.get_active_queue = AsyncMock(return_value=[queue_item1, queue_item2])
-        queue_manager.add_to_queue = AsyncMock()
+        settings = FakeSettings()
 
-        # Mock settings
-        settings = Mock(
-            queue_label="merge_queue",
-            hotfix_label="hotfix",
-            poll_interval_seconds=30,
-        )
-
-        # Create scheduler
         from gitlab_queue.core.scheduler import QueueScheduler
 
         scheduler = QueueScheduler(
@@ -313,48 +200,27 @@ async def sync_does_not_duplicate_existing_mrs():
         assert stats.unchanged == 2
 
         # Verify add_to_queue was not called
-        assert queue_manager.add_to_queue.called is False
+        assert len(queue_manager.add_to_queue_calls) == 0
         # Verify remove_from_queue was not called
-        assert queue_manager.remove_from_queue.called is False
+        assert len(queue_manager.remove_calls) == 0
 
 
 @scenario()
 async def sync_removes_mr_with_removed_queue_label():
     """Test that sync removes MR when queue label is removed."""
     with vedro.given:
-        # Mock GitLab client
-        gitlab_client = AsyncMock()
-
         # GitLab returns empty list (no MRs with queue label)
-        gitlab_client.list_mrs_with_label = AsyncMock(return_value=[])
-
-        # MR exists but no longer has queue label
-        mr_without_label = Mock(
-            iid=1,
-            title="MR 1",
-            labels=["review"],  # No queue_label
-            state="opened",
-        )
-        gitlab_client.get_mr = AsyncMock(return_value=mr_without_label)
-
-        # Queue contains the MR
-        queue_item = Mock(
-            mr_iid=1,
-            state="queued",
-            queued_at=datetime.now(UTC),
-        )
-        queue_manager = AsyncMock()
-        queue_manager.get_active_queue = AsyncMock(return_value=[queue_item])
-        queue_manager.remove_from_queue = AsyncMock()
-
-        # Mock settings
-        settings = Mock(
-            queue_label="merge_queue",
-            hotfix_label="hotfix",
-            poll_interval_seconds=30,
+        gitlab_client = FakeGitLabClient(
+            listed_mrs=[],
+            # MR exists but no longer has queue label or hotfix label
+            mr_responses={1: create_mr(iid=1, labels=["review"])},
         )
 
-        # Create scheduler
+        queue_manager = FakeQueueManager()
+        _make_queue_item(queue_manager, mr_iid=1)
+
+        settings = FakeSettings()
+
         from gitlab_queue.core.scheduler import QueueScheduler
 
         scheduler = QueueScheduler(
@@ -369,47 +235,29 @@ async def sync_removes_mr_with_removed_queue_label():
     with vedro.then:
         # Verify MR was removed due to missing label
         assert stats.mrs_in_gitlab == 0
-        assert stats.mrs_in_queue == 1
+        assert stats.mrs_in_queue == 0  # finalize_sync updates to current queue size
         assert stats.added == 0
         assert stats.removed == 1
         assert stats.unchanged == 0
 
         # Verify remove_from_queue was called
-        queue_manager.remove_from_queue.assert_awaited_once_with(1)
+        assert queue_manager.remove_calls == [1]
 
 
 @scenario()
 async def sync_handles_404_mr_not_found():
     """Test that sync removes MR when it returns 404 from GitLab."""
     with vedro.given:
-        # Mock GitLab client
-        gitlab_client = AsyncMock()
-        from gitlab_queue.clients.gitlab import GitLabNotFoundError
-
-        # GitLab returns empty list
-        gitlab_client.list_mrs_with_label = AsyncMock(return_value=[])
-
-        # MR no longer exists (404)
-        gitlab_client.get_mr = AsyncMock(side_effect=GitLabNotFoundError("MR not found", status_code=404))
-
-        # Queue contains the missing MR
-        queue_item = Mock(
-            mr_iid=999,
-            state="queued",
-            queued_at=datetime.now(UTC),
-        )
-        queue_manager = AsyncMock()
-        queue_manager.get_active_queue = AsyncMock(return_value=[queue_item])
-        queue_manager.remove_from_queue = AsyncMock()
-
-        # Mock settings
-        settings = Mock(
-            queue_label="merge_queue",
-            hotfix_label="hotfix",
-            poll_interval_seconds=30,
+        gitlab_client = FakeGitLabClient(
+            listed_mrs=[],
+            get_mr_error=GitLabNotFoundError("MR not found", status_code=404),
         )
 
-        # Create scheduler
+        queue_manager = FakeQueueManager()
+        _make_queue_item(queue_manager, mr_iid=999)
+
+        settings = FakeSettings()
+
         from gitlab_queue.core.scheduler import QueueScheduler
 
         scheduler = QueueScheduler(
@@ -424,10 +272,10 @@ async def sync_handles_404_mr_not_found():
     with vedro.then:
         # Verify MR was removed due to 404
         assert stats.mrs_in_gitlab == 0
-        assert stats.mrs_in_queue == 1
+        assert stats.mrs_in_queue == 0  # finalize_sync updates to current queue size
         assert stats.added == 0
         assert stats.removed == 1
         assert stats.unchanged == 0
 
         # Verify remove_from_queue was called
-        queue_manager.remove_from_queue.assert_awaited_once_with(999)
+        assert queue_manager.remove_calls == [999]

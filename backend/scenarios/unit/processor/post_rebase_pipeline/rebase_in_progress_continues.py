@@ -7,8 +7,9 @@ from __future__ import annotations
 
 import vedro
 
+from scenarios.fakes import create_mr
+
 from .._helpers import (
-    create_mock_mr,
     create_mock_processor,
     create_mock_settings,
 )
@@ -21,9 +22,7 @@ class Scenario(vedro.Scenario):
         self.processor = create_mock_processor(settings=create_mock_settings(pipeline_poll_interval_seconds=0.001))
 
         # MR still has rebase_in_progress = True (not done yet)
-        mock_mr = create_mock_mr(iid=42, sha="new_sha")
-        mock_mr.rebase_in_progress = True
-        self.processor.gitlab_client.get_mr.return_value = mock_mr
+        self.processor.gitlab_client.mr_responses[42] = create_mr(iid=42, sha="new_sha", rebase_in_progress=True)
 
     async def when_wait_for_post_rebase_pipeline_is_called_with_short_timeout(self):
         self.pipeline, self.new_sha = await self.processor._rebase_handler.wait_for_post_rebase_pipeline(

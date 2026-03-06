@@ -7,9 +7,9 @@ Expected: continue polling (should_continue=True), NOT remove MR.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
-
 import vedro
+
+from scenarios.fakes import create_job
 
 from .._helpers import (
     create_mock_pipeline,
@@ -28,13 +28,8 @@ class Scenario(vedro.Scenario):
 
         self.pipeline = create_mock_pipeline(pipeline_id=100, sha="abc123", status="failed")
 
-        running_job = MagicMock()
-        running_job.id = 10
-        running_job.name = "unit_tests"
-        running_job.status = "running"  # Job already transitioning after retry
-
-        self.processor.gitlab_client.get_pipeline_jobs = AsyncMock(return_value=[running_job])
-        self.processor.gitlab_client.retry_pipeline_job = AsyncMock()
+        running_job = create_job(id=10, name="unit_tests", status="running")
+        self.processor.gitlab_client.pipeline_jobs_response = [running_job]
 
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
@@ -59,7 +54,7 @@ class Scenario(vedro.Scenario):
         assert self.new_start_time is None
 
     def and_trigger_pipeline_failed_was_not_called(self):
-        self.mock_sm.trigger_pipeline_failed.assert_not_awaited()
+        assert len(self.mock_sm.pipeline_failed_calls) == 0
 
     def and_retry_pipeline_job_was_not_called(self):
-        self.processor.gitlab_client.retry_pipeline_job.assert_not_called()
+        assert len(self.processor.gitlab_client.retry_job_calls) == 0

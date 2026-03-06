@@ -7,12 +7,12 @@ the outcome has should_reset=True.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
 
 import vedro
 
 from gitlab_queue.core.rebase_coordinator import maybe_rebase_during_testing
 from gitlab_queue.core.rebase_during_testing import RebaseDuringTestingContext
+from scenarios.fakes import FakeRebaseDuringTestingHandler, create_pipeline
 
 from .._helpers import (
     create_mock_pipeline,
@@ -45,24 +45,27 @@ class Scenario(vedro.Scenario):
         # New context after rebase: pipeline_id=200 (changed!)
         self.new_rebase_ctx = RebaseDuringTestingContext(rebase_count=1, max_attempts=3, current_pipeline_id=200)
 
+        # Handler returns (new_ctx, new_pipeline) → rebase happened with new pipeline
+        new_pipeline = create_pipeline(id=200, sha="new_sha", status="running")
+        self.rebase_handler = FakeRebaseDuringTestingHandler(
+            result=(self.new_rebase_ctx, new_pipeline),
+            gitlab_client=self.processor.gitlab_client,
+        )
+
         self.last_rebase_check = datetime(2020, 1, 1, tzinfo=UTC)  # Old timestamp → will check
 
     async def when_maybe_rebase_during_testing_is_called(self):
         state = create_pipeline_wait_state(
+            rebase_handler=self.rebase_handler,
             rebase_ctx=self.rebase_ctx,
             last_rebase_check=self.last_rebase_check,
         )
-        with patch(
-            "gitlab_queue.core.rebase_coordinator.check_and_handle_rebase_during_testing",
-            new_callable=AsyncMock,
-            return_value=self.new_rebase_ctx,
-        ):
-            self.outcome = await maybe_rebase_during_testing(
-                settings=self.processor.settings,
-                ctx=self.ctx,
-                state=state,
-                pipeline=self.pipeline,
-            )
+        self.outcome = await maybe_rebase_during_testing(
+            settings=self.processor.settings,
+            ctx=self.ctx,
+            state=state,
+            pipeline=self.pipeline,
+        )
 
     def then_outcome_has_should_reset_true(self):
         assert self.outcome.should_reset is True

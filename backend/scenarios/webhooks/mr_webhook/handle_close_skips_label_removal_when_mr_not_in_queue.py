@@ -1,27 +1,26 @@
 """Scenario: handle close skips label removal when MR was not in queue."""
 
-from unittest.mock import AsyncMock, MagicMock
-
 import vedro
+from scenarios.fakes import FakeGitLabClient, FakeQueueManager
 
 from gitlab_queue.models.events import MergeRequestAttributes, MergeRequestEvent
 from gitlab_queue.webhooks.handlers import MRWebhookHandler
+
+from ._helpers import create_mock_settings
 
 
 class Scenario(vedro.Scenario):
     subject = "handle close skips label removal when MR was not in queue"
 
     def given_settings(self):
-        self.settings = MagicMock()
-        self.settings.queue_label = "merge_queue"
-        self.settings.hotfix_label = "hotfix"
+        self.settings = create_mock_settings()
 
     def given_gitlab_client(self):
-        self.gitlab_client = AsyncMock()
+        self.gitlab_client = FakeGitLabClient()
 
     def given_queue_manager(self):
-        self.queue_manager = AsyncMock()
-        self.queue_manager.get_queue_item.return_value = None  # MR not in queue
+        self.queue_manager = FakeQueueManager()
+        # No items added -> get_queue_item will return None
 
     def given_handler(self):
         self.handler = MRWebhookHandler(
@@ -53,7 +52,7 @@ class Scenario(vedro.Scenario):
         await self.handler._handle_close(self.event)
 
     def then_it_should_not_remove_from_queue(self):
-        self.queue_manager.remove_from_queue.assert_not_awaited()
+        assert self.queue_manager.remove_calls == []
 
     def then_it_should_not_remove_label(self):
-        self.gitlab_client.remove_mr_label.assert_not_awaited()
+        assert self.gitlab_client.remove_label_calls == []

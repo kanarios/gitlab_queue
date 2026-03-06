@@ -1,7 +1,6 @@
 """Test _calculate_duration returns minutes format for durations 60s-3599s."""
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import patch
 
 import vedro
 from vedro import params
@@ -27,9 +26,7 @@ class Scenario(vedro.Scenario):
         )
 
     def when_calculate_duration_is_called(self):
-        with patch("gitlab_queue.core.state_machine.datetime") as mock_datetime:
-            mock_datetime.now.return_value = self.fixed_now
-            self.result = self.sm._calculate_duration(self.queue_item)
+        self.result = self.sm._calculate_duration(self.queue_item, now=self.fixed_now)
 
     def then_result_matches_expected_format(self):
         assert self.result == self.expected

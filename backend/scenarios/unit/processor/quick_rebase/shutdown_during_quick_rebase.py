@@ -23,7 +23,7 @@ class Scenario(vedro.Scenario):
         self.processor = create_mock_processor()
 
         # Rebase still in progress — would keep polling, but shutdown stops it
-        self.processor.gitlab_client.check_rebase_status.return_value = (True, False)
+        self.processor.gitlab_client.rebase_status = (True, False)
 
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)

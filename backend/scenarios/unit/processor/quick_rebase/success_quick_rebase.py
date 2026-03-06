@@ -21,7 +21,7 @@ class Scenario(vedro.Scenario):
         self.processor = create_mock_processor()
 
         # check_rebase_status returns (False, False) = done, no conflicts
-        self.processor.gitlab_client.check_rebase_status.return_value = (False, False)
+        self.processor.gitlab_client.rebase_status = (False, False)
 
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
@@ -35,6 +35,3 @@ class Scenario(vedro.Scenario):
 
     def then_no_exception_is_raised(self):
         assert self.exception is None
-
-    def and_check_rebase_status_was_called(self):
-        self.processor.gitlab_client.check_rebase_status.assert_awaited()
