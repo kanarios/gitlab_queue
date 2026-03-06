@@ -1,7 +1,8 @@
-"""Test _maybe_rebase_during_testing returns outcome with result=None when check returns None.
+"""Test maybe_rebase_during_testing returns outcome with result=None when check returns None.
 
-Line 937: when _check_and_handle_rebase_during_testing returns None (no rebase needed),
-return RebaseCheckOutcome with result=None, should_reset=False, updated last_check.
+When check_and_handle_rebase_during_testing returns None (no rebase needed),
+maybe_rebase_during_testing should return a RebaseCheckOutcome with result=None,
+should_reset=False, and an updated last_check.
 """
 
 from __future__ import annotations

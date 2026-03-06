@@ -1,8 +1,8 @@
-"""Test _handle_pipeline_status triggers pipeline_success on success status.
+"""Test handle_pipeline_status triggers pipeline_success on success status.
 
 When a pipeline has status "success" and the SHA matches the expected SHA
-in the queue item, _handle_pipeline_status should trigger trigger_pipeline_success
-on the state machine and return ProcessingResult.SUCCESS.
+in the queue item, pipeline_handler.handle_pipeline_status should trigger
+trigger_pipeline_success on the state machine and return ProcessingResult.SUCCESS.
 """
 
 from __future__ import annotations

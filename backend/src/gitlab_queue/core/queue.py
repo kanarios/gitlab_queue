@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS merge_requests (
     pipeline_status TEXT,
     expected_sha TEXT,
     retry_count INTEGER DEFAULT 0,
-    retried_jobs TEXT DEFAULT '{}',
+    retried_jobs TEXT NOT NULL DEFAULT '{}',
     last_error TEXT,
     stale_warning_sent INTEGER DEFAULT 0,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP

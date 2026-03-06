@@ -1,6 +1,7 @@
-"""Test _handle_pipeline_status delegates to _handle_pipeline_failure when status is failed.
+"""Test handle_pipeline_status delegates to handle_pipeline_failure when status is failed.
 
-Line 993: when pipeline.status == "failed", call _handle_pipeline_failure and return its result.
+When pipeline.status == "failed", handle_pipeline_status should call
+handle_pipeline_failure and return its result.
 """
 
 from __future__ import annotations

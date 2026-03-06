@@ -54,8 +54,17 @@ class Scenario(vedro.Scenario):
     def then_should_continue_is_false(self):
         assert self.should_continue is False
 
+    def and_new_start_time_is_none(self):
+        assert self.new_start_time is None
+
+    def and_updated_retried_is_empty(self):
+        assert self.updated_retried == {}
+
     def and_trigger_pipeline_failed_was_called(self):
         self.mock_sm.trigger_pipeline_failed.assert_awaited_once()
+        call_kwargs = self.mock_sm.trigger_pipeline_failed.await_args.kwargs
+        assert call_kwargs["failed_jobs"] == ["unit_tests"]
+        assert call_kwargs["retried_jobs"] == {}
 
     def and_retry_pipeline_job_was_not_called(self):
         self.processor.gitlab_client.retry_pipeline_job.assert_not_awaited()

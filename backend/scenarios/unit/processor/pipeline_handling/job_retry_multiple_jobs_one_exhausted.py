@@ -60,6 +60,12 @@ class Scenario(vedro.Scenario):
     def then_should_continue_is_false(self):
         assert self.should_continue is False
 
+    def and_new_start_time_is_none(self):
+        assert self.new_start_time is None
+
+    def and_updated_retried_is_unchanged(self):
+        assert self.updated_retried == self.retried_jobs
+
     def and_trigger_pipeline_failed_was_called(self):
         self.mock_sm.trigger_pipeline_failed.assert_awaited_once_with(
             failed_jobs=["unit_tests"],

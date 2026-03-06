@@ -1,7 +1,6 @@
 """Test _wait_for_post_rebase_pipeline continues when rebase is still in progress.
 
-Line 498: when mr.rebase_in_progress=True, return PollStatus.CONTINUE.
-Test uses short timeout so the loop terminates via timeout.
+When mr.rebase_in_progress is True, polling continues until timeout.
 """
 
 from __future__ import annotations
