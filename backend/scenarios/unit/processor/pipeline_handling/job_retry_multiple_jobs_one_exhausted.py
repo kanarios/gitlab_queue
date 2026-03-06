@@ -6,7 +6,7 @@ removed immediately. retry_pipeline_job should NOT be called for any job.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import ANY, AsyncMock, MagicMock
 
 import vedro
 
@@ -61,7 +61,11 @@ class Scenario(vedro.Scenario):
         assert self.should_continue is False
 
     def and_trigger_pipeline_failed_was_called(self):
-        self.mock_sm.trigger_pipeline_failed.assert_awaited_once()
+        self.mock_sm.trigger_pipeline_failed.assert_awaited_once_with(
+            failed_jobs=["unit_tests"],
+            retried_jobs={"unit_tests": 1},
+            error_message=ANY,
+        )
 
     def and_retry_pipeline_job_was_not_called(self):
         self.processor.gitlab_client.retry_pipeline_job.assert_not_called()

@@ -1,6 +1,7 @@
 """Test set_websocket_manager() assigns the manager to _websocket_manager.
 
-Lines 178-179: set_websocket_manager() stores the WebSocketManager instance.
+set_websocket_manager() stores the given WebSocketManager instance
+on the _websocket_manager attribute.
 """
 
 from __future__ import annotations

@@ -1,6 +1,8 @@
-"""Test _wait_for_post_rebase_pipeline skips terminal pipeline when SHA changed after rebase.
+"""Test _wait_for_post_rebase_pipeline skips terminal pipeline during polling when SHA changed.
 
-Lines 535-544: when SHA changed and pipeline is terminal (canceled/failed/success), skip and CONTINUE.
+When SHA changed and pipeline is terminal (canceled/failed/success), polling skips it
+via CONTINUE. After timeout, the post-timeout path returns the pipeline as-is since
+its SHA matches the current MR SHA.
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ from .._helpers import (
 
 
 class Scenario(vedro.Scenario):
-    subject = "wait_for_post_rebase_pipeline skips all terminal pipelines when SHA changed after rebase"
+    subject = "wait_for_post_rebase_pipeline skips terminal pipeline during polling but returns it on timeout"
 
     def given_processor_with_sha_change_and_stale_success_pipeline(self):
         self.processor = create_mock_processor(settings=create_mock_settings(pipeline_poll_interval_seconds=0.001))
@@ -29,9 +31,9 @@ class Scenario(vedro.Scenario):
         mock_mr.rebase_in_progress = False
         self.processor.gitlab_client.get_mr.return_value = mock_mr
 
-        # Pipeline is "success" but it's for the old code (pre-rebase) → should be skipped
-        stale_pipeline = create_mock_pipeline(pipeline_id=100, sha=new_sha, status="success")
-        self.processor.gitlab_client.get_latest_mr_pipeline.return_value = stale_pipeline
+        # Pipeline is "success" with matching SHA → skipped during polling, returned on timeout
+        self.stale_pipeline = create_mock_pipeline(pipeline_id=100, sha=new_sha, status="success")
+        self.processor.gitlab_client.get_latest_mr_pipeline.return_value = self.stale_pipeline
 
         self.old_sha = old_sha
 
@@ -42,7 +44,13 @@ class Scenario(vedro.Scenario):
             timeout_seconds=0.001,
         )
 
-    def then_stale_terminal_pipeline_is_skipped(self):
-        # The "success" pipeline for the new SHA is skipped as terminal after rebase
-        # Poll continues until timeout
+    def then_terminal_pipeline_was_skipped_during_polling(self):
+        # Polling skipped the terminal pipeline multiple times before timeout
+        assert self.processor.gitlab_client.get_latest_mr_pipeline.call_count > 1
+
+    def and_pipeline_is_returned_on_timeout(self):
+        # After timeout, post-timeout path returns pipeline since SHA matches
+        assert self.pipeline is self.stale_pipeline
+
+    def and_new_sha_is_updated(self):
         assert self.new_sha == "new_sha_after_rebase"

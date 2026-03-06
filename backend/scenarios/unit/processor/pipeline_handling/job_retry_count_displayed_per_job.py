@@ -39,7 +39,7 @@ class Scenario(vedro.Scenario):
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
 
-        # test: 2 retries done (at limit), lint: 1 retry done (also at limit)
+        # test: 2 retries (at job_retry_count limit), lint: 1 retry (below limit)
         self.retried_jobs = {"test": 2, "lint": 1}
 
     async def when_handle_pipeline_failure_retry_is_called(self):

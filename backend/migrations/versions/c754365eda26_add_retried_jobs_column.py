@@ -35,7 +35,7 @@ def upgrade() -> None:
 
     if "retried_jobs" not in columns:
         with op.batch_alter_table("merge_requests", schema=None) as batch_op:
-            batch_op.add_column(sa.Column("retried_jobs", sa.Text(), nullable=True, server_default="{}"))
+            batch_op.add_column(sa.Column("retried_jobs", sa.Text(), nullable=False, server_default="{}"))
 
 
 def downgrade() -> None:

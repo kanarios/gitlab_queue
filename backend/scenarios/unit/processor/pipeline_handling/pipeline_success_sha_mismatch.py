@@ -44,12 +44,7 @@ class Scenario(vedro.Scenario):
 
     async def when_handle_pipeline_status_is_called(self):
         """
-        Invoke the processor's _handle_pipeline_status with the prepared
-        context, mock state machine, and pipeline, and store the handler's
-        return value on self.result.
-
-        The call uses retry_count=0 and max_retries=1 to simulate the initial
-        handling attempt.
+        Invoke _pipeline_handler.handle_pipeline_status with ctx, sm, pipeline, and retried_jobs={}, and store the result on self.result.
         """
         self.result = await self.processor._pipeline_handler.handle_pipeline_status(
             ctx=self.ctx,

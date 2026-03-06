@@ -452,7 +452,7 @@ async def process_mr_with_canceled_pipeline():
             result = await processor._process_mr(queue_item)
 
         with then("canceled pipeline is treated like failure"):
-            # Canceled pipelines are immediately removed without job retry
+            # Canceled pipelines yield ProcessingResult.PIPELINE_FAILED without job retry
             assert result == ProcessingResult.PIPELINE_FAILED
 
             # Check final state

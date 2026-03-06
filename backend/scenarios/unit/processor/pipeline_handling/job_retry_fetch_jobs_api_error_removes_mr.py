@@ -52,3 +52,6 @@ class Scenario(vedro.Scenario):
 
     def and_trigger_pipeline_failed_was_called(self):
         self.mock_sm.trigger_pipeline_failed.assert_awaited_once()
+        call_kwargs = self.mock_sm.trigger_pipeline_failed.await_args.kwargs
+        assert call_kwargs["retried_jobs"] == {}
+        assert call_kwargs["failed_jobs"] == []

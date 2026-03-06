@@ -50,6 +50,8 @@ class Scenario(vedro.Scenario):
         self.mock_sm.trigger_pipeline_failed.assert_awaited_once()
         call_kwargs = self.mock_sm.trigger_pipeline_failed.call_args.kwargs
         assert "canceled" in call_kwargs["error_message"].lower()
+        assert call_kwargs["failed_jobs"] == []
+        assert call_kwargs["retried_jobs"] == {}
 
     def and_retry_pipeline_job_was_not_called(self):
         self.processor.gitlab_client.retry_pipeline_job.assert_not_called()

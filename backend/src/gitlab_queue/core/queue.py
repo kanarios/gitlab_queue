@@ -668,9 +668,9 @@ class QueueManager:
         # Auto-derive retry_count from retried_jobs (single source of truth)
         if "retried_jobs" in extra and "retry_count" not in params:
             rj = extra["retried_jobs"]
-            if isinstance(rj, dict) and rj:
+            if isinstance(rj, dict):
                 set_clauses.append("retry_count = :retry_count")
-                params["retry_count"] = max(rj.values())
+                params["retry_count"] = max(rj.values()) if rj else 0
 
         sql = f"UPDATE merge_requests SET {', '.join(set_clauses)} WHERE iid = :iid"
 

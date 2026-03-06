@@ -60,3 +60,6 @@ class Scenario(vedro.Scenario):
     def and_error_message_mentions_canceled(self):
         call_kwargs = self.mock_sm.trigger_pipeline_failed.call_args.kwargs
         assert "canceled" in call_kwargs["error_message"].lower()
+
+    def and_updated_retried_is_unchanged(self):
+        assert self.updated_retried == self.retried_jobs

@@ -1,6 +1,7 @@
 """Test _check_pipeline_termination_conditions returns ERROR when shutdown is requested.
 
-Lines 853-854: when _shutdown_event is set, return ProcessingResult.ERROR.
+When _shutdown_event is set, check_pipeline_termination_conditions should
+return ProcessingResult.ERROR to stop pipeline polling.
 """
 
 from __future__ import annotations

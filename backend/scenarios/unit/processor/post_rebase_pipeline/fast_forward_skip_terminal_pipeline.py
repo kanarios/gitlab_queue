@@ -1,7 +1,8 @@
-"""Test _wait_for_post_rebase_pipeline skips terminal pipeline in fast-forward case.
+"""Test _wait_for_post_rebase_pipeline skips terminal pipeline during polling in fast-forward case.
 
-Lines 505, 513-520: when SHA is unchanged (fast-forward) and pipeline is terminal (canceled/failed),
-skip it and continue polling.
+When SHA is unchanged (fast-forward) and pipeline is terminal (canceled/failed),
+polling skips it via CONTINUE. After timeout, the post-timeout path returns
+the pipeline since its SHA matches.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from .._helpers import (
 
 
 class Scenario(vedro.Scenario):
-    subject = "wait_for_post_rebase_pipeline skips terminal failed pipeline in fast-forward case"
+    subject = "wait_for_post_rebase_pipeline skips terminal pipeline during polling but returns it on timeout"
 
     def given_processor_fast_forward_with_canceled_pipeline(self):
         self.processor = create_mock_processor(settings=create_mock_settings(pipeline_poll_interval_seconds=0.001))
@@ -29,23 +30,26 @@ class Scenario(vedro.Scenario):
         mock_mr.rebase_in_progress = False
         self.processor.gitlab_client.get_mr.return_value = mock_mr
 
-        # Terminal pipeline (canceled) with same SHA → should be skipped
-        terminal_pipeline = create_mock_pipeline(pipeline_id=100, sha=same_sha, status="canceled")
-        self.processor.gitlab_client.get_latest_mr_pipeline.return_value = terminal_pipeline
+        # Terminal pipeline (canceled) with same SHA → skipped during polling, returned on timeout
+        self.terminal_pipeline = create_mock_pipeline(pipeline_id=100, sha=same_sha, status="canceled")
+        self.processor.gitlab_client.get_latest_mr_pipeline.return_value = self.terminal_pipeline
 
         self.old_sha = same_sha  # Same SHA = fast-forward case
 
     async def when_wait_for_post_rebase_pipeline_is_called(self):
-        # Short timeout — poll will skip terminal pipeline and then time out
         self.pipeline, self.new_sha = await self.processor._rebase_handler.wait_for_post_rebase_pipeline(
             mr_iid=42,
             old_sha=self.old_sha,
             timeout_seconds=0.001,
         )
 
-    def then_terminal_pipeline_is_skipped(self):
-        # The canceled pipeline should be skipped (returned None after timeout)
-        # The post-timeout logic will call get_mr and get_latest_mr_pipeline again
-        # Since both return the same values, pipeline.sha == new_sha but it's canceled
-        # So it won't be skipped in the post-timeout logic (different code path)
-        assert self.new_sha is not None
+    def then_terminal_pipeline_was_skipped_during_polling(self):
+        # Polling skipped the canceled pipeline multiple times before timeout
+        assert self.processor.gitlab_client.get_latest_mr_pipeline.call_count > 1
+
+    def and_pipeline_is_returned_on_timeout(self):
+        # After timeout, post-timeout path returns pipeline since SHA matches
+        assert self.pipeline is self.terminal_pipeline
+
+    def and_new_sha_matches_old_sha(self):
+        assert self.new_sha == self.old_sha

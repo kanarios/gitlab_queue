@@ -16,7 +16,7 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from sqlalchemy import pool, text
+from sqlalchemy import inspect, pool, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from gitlab_queue.utils.logging import get_logger
@@ -69,10 +69,10 @@ async def get_current_revision(database_url: str) -> str | None:
     try:
         async with engine.connect() as conn:
             # Check if alembic_version table exists
-            result = await conn.execute(
-                text("SELECT name FROM sqlite_master WHERE type='table' AND name='alembic_version'")
+            has_table = await conn.run_sync(
+                lambda sync_conn: inspect(sync_conn).has_table("alembic_version")
             )
-            if result.fetchone() is None:
+            if not has_table:
                 return None
 
             # Get current revision
@@ -142,16 +142,14 @@ async def _stamp_legacy_database_if_needed(database_url: str) -> bool:
     try:
         async with engine.connect() as conn:
             # Check if merge_requests table exists (i.e. DB was created by ensure_schema)
-            result = await conn.execute(
-                text("SELECT name FROM sqlite_master WHERE type='table' AND name='merge_requests'")
+            has_merge_requests = await conn.run_sync(
+                lambda sync_conn: inspect(sync_conn).has_table("merge_requests")
             )
-            has_merge_requests = result.fetchone() is not None
 
             # Check if alembic_version table exists
-            result = await conn.execute(
-                text("SELECT name FROM sqlite_master WHERE type='table' AND name='alembic_version'")
+            has_alembic_version = await conn.run_sync(
+                lambda sync_conn: inspect(sync_conn).has_table("alembic_version")
             )
-            has_alembic_version = result.fetchone() is not None
     finally:
         await engine.dispose()
 

@@ -1,7 +1,7 @@
 """Test _process_rebase returns CONFLICT when rebase_mr raises GitLabConflictError.
 
-Lines 382-390: when rebase_mr raises GitLabConflictError on initiation,
-trigger_rebase_failed and return CONFLICT.
+When rebase_mr raises GitLabConflictError on initiation,
+trigger_rebase_failed should be called and CONFLICT returned.
 """
 
 from __future__ import annotations

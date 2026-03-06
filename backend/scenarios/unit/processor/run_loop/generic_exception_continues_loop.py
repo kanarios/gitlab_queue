@@ -1,7 +1,7 @@
 """Test run() logs generic exceptions and continues the loop.
 
-Lines 212-214: generic Exception handler catches errors without stopping the loop.
-Lines 217-218: normal sleep after successful iteration is cancellable.
+When _process_iteration raises a generic Exception, run() should log it
+and continue to the next iteration rather than stopping.
 """
 
 from __future__ import annotations
@@ -28,10 +28,15 @@ class Scenario(vedro.Scenario):
 
         self.process_iteration_side_effect = process_iteration_side_effect
 
+        self.sleep_call_count = 0
+
         async def interruptible_sleep_side_effect(_seconds):
-            # Normal sleep after iteration — shut down
-            self.processor._shutdown_event.set()
-            return False
+            self.sleep_call_count += 1
+            if self.sleep_call_count >= 2:
+                # Shut down after second iteration completes
+                self.processor._shutdown_event.set()
+                return False
+            return True
 
         self.interruptible_sleep_side_effect = interruptible_sleep_side_effect
 
@@ -54,10 +59,9 @@ class Scenario(vedro.Scenario):
         ):
             await self.processor.run()
 
-    def then_process_iteration_was_called_once(self):
-        # Exception occurs → sleep is called → returns False → break
-        # So _process_iteration is only called once
-        assert self.call_count == 1
+    def then_process_iteration_was_called_twice(self):
+        # First iteration raises exception, loop continues, second iteration succeeds
+        assert self.call_count == 2
 
-    def and_interruptible_sleep_was_called_after_exception(self):
-        self.mock_sleep.assert_called_once()
+    def and_interruptible_sleep_was_called_twice(self):
+        assert self.mock_sleep.call_count == 2

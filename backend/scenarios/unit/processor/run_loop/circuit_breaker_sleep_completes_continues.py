@@ -1,7 +1,7 @@
 """Test run() continues loop when circuit breaker sleep completes without interrupt.
 
-Line 211: continue statement is executed when _interruptible_sleep returns True
-after a GitLabCircuitOpenError — processor does NOT sleep again and goes to next iteration.
+When _interruptible_sleep returns True after a GitLabCircuitOpenError,
+run() skips the regular sleep and proceeds to the next iteration.
 """
 
 from __future__ import annotations

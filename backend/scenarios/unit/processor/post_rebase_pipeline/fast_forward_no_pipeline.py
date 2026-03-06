@@ -42,3 +42,6 @@ class Scenario(vedro.Scenario):
     def then_result_is_no_pipeline_due_to_timeout(self):
         # No pipeline found, poll continues until timeout, then returns (None, sha)
         assert self.pipeline is None
+
+    def and_new_sha_matches_old_sha(self):
+        assert self.new_sha == self.old_sha

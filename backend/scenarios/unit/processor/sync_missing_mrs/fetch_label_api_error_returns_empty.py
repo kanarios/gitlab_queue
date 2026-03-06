@@ -1,6 +1,7 @@
 """Test _fetch_mrs_by_label returns empty list when GitLabAPIError is raised.
 
-Lines 1424-1425: when list_mrs_with_label raises GitLabAPIError, log warning and return [].
+When list_mrs_with_label raises GitLabAPIError, _fetch_mrs_by_label
+should log a warning and return an empty list.
 """
 
 from __future__ import annotations

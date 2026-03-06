@@ -46,9 +46,7 @@ class Scenario(vedro.Scenario):
 
     async def when_handle_pipeline_status_is_called(self):
         """
-        Invoke the processor's _handle_pipeline_status with the prepared context, state machine, and pipeline, and store the returned processing result on self.result.
-
-        This awaits the asynchronous call using retry_count=0 and max_retries=1 and assigns its result to the instance attribute `self.result` for later assertions.
+        Invoke the pipeline handler's handle_pipeline_status with the prepared context, state machine, pipeline, and retried_jobs={}, and store the returned processing result on self.result.
         """
         self.result = await self.processor._pipeline_handler.handle_pipeline_status(
             ctx=self.ctx,

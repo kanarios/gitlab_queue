@@ -1,6 +1,7 @@
 """Test is_shutdown_requested property returns True after request_shutdown().
 
-Line 1565: is_shutdown_requested returns _shutdown_event.is_set().
+is_shutdown_requested reflects the internal _shutdown_event state
+and becomes True after calling request_shutdown().
 """
 
 from __future__ import annotations

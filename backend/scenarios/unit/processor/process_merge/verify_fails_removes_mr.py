@@ -1,6 +1,7 @@
 """Test _process_mr removes MR when _verify_mr_in_queue returns False.
 
-Lines 293-295: when MR no longer has queue label, trigger_mark_removed and return REMOVED.
+When an MR no longer has the queue label, the processor should call
+trigger_mark_removed and return ProcessingResult.REMOVED.
 """
 
 from __future__ import annotations

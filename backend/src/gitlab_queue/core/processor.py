@@ -694,5 +694,6 @@ def create_processor(
 
 __all__: list[str] = [
     "MergeProcessor",
+    "ProcessingResult",
     "create_processor",
 ]

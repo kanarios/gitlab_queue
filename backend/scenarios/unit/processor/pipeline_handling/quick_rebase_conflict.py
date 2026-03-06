@@ -47,9 +47,7 @@ class Scenario(vedro.Scenario):
 
     async def when_wait_for_rebase_quick_is_called(self):
         """
-        Calls the processor's _wait_for_rebase_quick with the prepared context and captures any GitLabConflictError.
-
-        If a GitLabConflictError is raised, stores the exception on self.raised; otherwise leaves self.raised as None.
+        Calls _rebase_handler.wait_for_rebase_quick with the prepared context and captures any GitLabConflictError on self.raised.
         """
         self.raised = None
         try:

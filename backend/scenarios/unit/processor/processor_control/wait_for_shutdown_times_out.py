@@ -1,7 +1,4 @@
-"""Test wait_for_shutdown() returns False when timeout expires before shutdown.
-
-Lines 1549-1550: wait_for_shutdown() returns False on timeout.
-"""
+"""Test wait_for_shutdown() returns False when timeout expires before shutdown."""
 
 from __future__ import annotations
 

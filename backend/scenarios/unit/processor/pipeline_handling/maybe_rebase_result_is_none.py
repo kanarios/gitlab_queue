@@ -69,3 +69,6 @@ class Scenario(vedro.Scenario):
 
     def and_outcome_should_reset_is_false(self):
         assert self.outcome.should_reset is False
+
+    def and_outcome_last_check_is_updated(self):
+        assert self.outcome.last_check > self.last_rebase_check

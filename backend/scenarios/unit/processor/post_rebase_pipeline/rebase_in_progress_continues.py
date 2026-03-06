@@ -35,6 +35,7 @@ class Scenario(vedro.Scenario):
 
     def then_pipeline_is_none_due_to_timeout(self):
         # Rebase was in progress, so poll always continued → timeout
-        # After timeout, get_mr() is called again; since rebase_in_progress=True,
-        # sha may be "new_sha" and pipeline may be None
-        assert self.pipeline is None or self.new_sha is not None
+        assert self.pipeline is None
+
+    def and_new_sha_is_from_mr(self):
+        assert self.new_sha == "new_sha"
