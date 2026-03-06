@@ -31,7 +31,7 @@ class Scenario(vedro.Scenario):
         await self.sm.trigger_timeout(max_wait_hours=4)
 
     def then_notifier_should_be_called_with_timeout_template(self):
-        assert len(self.notifier.notify_calls) >= 1
+        assert len(self.notifier.notify_calls) == 1
         call_args = self.notifier.notify_calls[-1]
         assert call_args["mr_iid"] == 123
         assert call_args["status"] == "timeout"

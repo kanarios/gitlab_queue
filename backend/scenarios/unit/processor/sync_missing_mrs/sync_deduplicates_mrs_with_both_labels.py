@@ -51,7 +51,5 @@ class Scenario(vedro.Scenario):
         assert call["is_hotfix"] is True
 
     def and_both_label_queries_were_made(self):
-        # FakeGitLabClient returns the same list for both labels when listed_mrs is used
-        # The processor calls _fetch_mrs_by_label twice (once per label)
-        # and deduplicates by iid, so we verify only one add_to_queue call
-        pass
+        assert Labels.MERGE_QUEUE in self.gitlab_client.list_mrs_calls
+        assert Labels.HOTFIX in self.gitlab_client.list_mrs_calls

@@ -42,7 +42,6 @@ from scenarios.fakes import FakeDatabase, FakeGitLabClient, FakeNotifier, FakeQu
 from scenarios.library import Labels, QueueState
 from scenarios.schemas import (
     AuthorSchema,
-    JWTSecretSchema,
     QueueItemSchema,
     WebhookSecretSchema,
 )
@@ -66,7 +65,6 @@ _GENERATE = object()  # Sentinel for "generate this value"
 
 def create_mock_settings(
     *,
-    jwt_secret: str | None = None,
     jwt_expiration_hours: int = 24,
     gitlab_url: str = "https://gitlab.example.com",
     gitlab_project_id: int | None = None,
@@ -82,7 +80,6 @@ def create_mock_settings(
     Uses d42 schemas to generate realistic random data for secret values.
 
     Args:
-        jwt_secret: JWT signing secret (generated if not provided).
         jwt_expiration_hours: JWT token expiration in hours.
         gitlab_url: GitLab instance URL.
         gitlab_project_id: GitLab project ID (generated if not provided).
@@ -96,7 +93,6 @@ def create_mock_settings(
     Returns:
         Settings instance configured for API testing.
     """
-    jwt_secret if jwt_secret is not None else fake(JWTSecretSchema)
     actual_webhook_secret = webhook_secret if webhook_secret is not None else fake(WebhookSecretSchema)
     actual_project_id = gitlab_project_id if gitlab_project_id is not None else fake(AuthorSchema)["id"]
 

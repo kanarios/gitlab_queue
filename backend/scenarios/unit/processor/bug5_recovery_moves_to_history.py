@@ -34,10 +34,7 @@ class Scenario(vedro.Scenario):
         await self.processor._recover_interrupted_state()
 
     def then_complete_mr_is_called(self):
-        assert len(self.processor.queue_manager.complete_calls) == 1, (
-            "Expected queue_manager.complete_mr to be called once, "
-            f"got {len(self.processor.queue_manager.complete_calls)}"
-        )
+        assert len(self.processor.queue_manager.complete_calls) == 1
         call = self.processor.queue_manager.complete_calls[0]
         assert call["mr_iid"] == 42
         assert call["status"] == "merged"

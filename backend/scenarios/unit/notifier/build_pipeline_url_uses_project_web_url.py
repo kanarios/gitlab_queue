@@ -25,8 +25,3 @@ class Scenario(vedro.Scenario):
 
     def then_url_should_contain_project_path(self):
         assert self.url == "https://gitlab.example.com/group/project/-/pipelines/456"
-
-    def and_gitlab_api_should_be_called(self):
-        # FakeGitLabClient doesn't record get_project_web_url calls,
-        # but the URL result proves the method was invoked
-        assert "gitlab.example.com/group/project" in self.url

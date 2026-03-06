@@ -38,7 +38,7 @@ def create_oauth_transport(
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
 
-        if request.method == "POST" and "/oauth/token" in path:
+        if request.method == "POST" and path == "/oauth/token":
             return httpx.Response(
                 status_code=token_status,
                 json=token_response_json,

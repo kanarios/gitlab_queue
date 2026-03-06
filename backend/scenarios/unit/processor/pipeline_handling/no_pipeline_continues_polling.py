@@ -37,6 +37,9 @@ class Scenario(vedro.Scenario):
         self.queue_manager = FakeQueueManager()
         self.queue_manager.add_item(create_test_queue_item(mr_iid=42, state="testing"))
 
+        async def instant_sleep(_delay: float) -> None:
+            pass
+
         self.processor = MergeProcessor(
             gitlab_client=self.gitlab_client,
             queue_manager=self.queue_manager,
@@ -45,6 +48,7 @@ class Scenario(vedro.Scenario):
                 pipeline_timeout_seconds=0.5,
                 pipeline_poll_interval_seconds=0.01,
             ),
+            sleep_fn=instant_sleep,
         )
 
         self.sm = FakeStateMachine(current_state=FakeCurrentState(id="testing"))

@@ -34,7 +34,7 @@ class Scenario(vedro.Scenario):
         )
 
     def then_notifier_should_be_called_with_conflict_template(self):
-        assert len(self.notifier.notify_calls) >= 1
+        assert len(self.notifier.notify_calls) == 1
         call_args = self.notifier.notify_calls[-1]
         assert call_args["mr_iid"] == 123
         assert call_args["status"] == "conflict"

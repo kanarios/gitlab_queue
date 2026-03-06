@@ -34,12 +34,12 @@ class Scenario(vedro.Scenario):
         )
 
     def then_notifier_should_be_called_with_testing_template(self):
-        assert len(self.notifier.notify_calls) >= 1
+        assert len(self.notifier.notify_calls) == 1
         call_args = self.notifier.notify_calls[-1]
         assert call_args["mr_iid"] == 123
         assert call_args["status"] == "testing"
 
     def and_notify_should_include_pipeline_info(self):
         call_args = self.notifier.notify_calls[-1]
-        assert call_args.get("pipeline_id") == 456
-        assert call_args.get("pipeline_url") == "https://gitlab.com/pipeline/456"
+        assert call_args["pipeline_id"] == 456
+        assert call_args["pipeline_url"] == "https://gitlab.com/pipeline/456"

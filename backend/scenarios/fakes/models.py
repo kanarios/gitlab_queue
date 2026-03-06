@@ -53,7 +53,7 @@ def create_pipeline(
     status: str = "success",
     sha: str = "abc123",
     ref: str = "feature",
-    web_url: str | None = "https://gitlab.com/pipeline/100",
+    web_url: str | None = None,
     created_at: datetime | None = None,
 ) -> Pipeline:
     return Pipeline(
@@ -61,7 +61,7 @@ def create_pipeline(
         status=status,
         sha=sha,
         ref=ref,
-        web_url=web_url,
+        web_url=web_url if web_url is not None else f"https://gitlab.com/pipeline/{id}",
         created_at=created_at or datetime.now(UTC),
     )
 

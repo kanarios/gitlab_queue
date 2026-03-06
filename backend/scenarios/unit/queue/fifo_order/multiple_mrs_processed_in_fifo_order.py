@@ -1,16 +1,16 @@
-"""Integration test scenario for multiple MRs processed in FIFO order.
+"""Test that FakeQueueManager.get_next_mr() returns items in FIFO order.
 
-Tests that FakeQueueManager.get_next_mr() returns items in FIFO order
-(by queued_at) when no hotfix priority is involved.
+Verifies FIFO ordering (by queued_at) when no hotfix priority is involved.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+from vedro import given, scenario, then, when
+
 from scenarios.fakes import FakeQueueManager
 from scenarios.unit.processor._helpers import create_test_queue_item
-from vedro import given, scenario, then, when
 
 
 @scenario()
@@ -39,7 +39,7 @@ async def process_multiple_mrs_in_order():
             item.state = "merged"
 
     with then("all MRs returned in FIFO order"):
-        assert processed_order == [10, 20, 30], f"Expected [10, 20, 30], got {processed_order}"
+        assert processed_order == [10, 20, 30]
 
 
 __all__ = [

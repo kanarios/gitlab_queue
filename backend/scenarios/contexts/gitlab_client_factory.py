@@ -117,7 +117,7 @@ def created_test_settings(
         oauth_client_id=oauth_client_id,
         oauth_client_secret=oauth_client_secret,
         oauth_redirect_uri=oauth_redirect_uri,
-        cors_origins=cors_origins or ["http://localhost:5173"],
+        cors_origins=cors_origins if cors_origins is not None else ["http://localhost:5173"],
         dashboard_enabled=dashboard_enabled,
     )
     return settings

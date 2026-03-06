@@ -44,4 +44,4 @@ class Scenario(vedro.Scenario):
     def and_put_called_with_merge_endpoint(self):
         put_requests = [r for r in self.transport.history if r.method == "PUT"]
         assert len(put_requests) == 1
-        assert "/merge_requests/42/merge" in str(put_requests[0].url.path)
+        assert f"/merge_requests/{self.iid}/merge" in put_requests[0].url.path

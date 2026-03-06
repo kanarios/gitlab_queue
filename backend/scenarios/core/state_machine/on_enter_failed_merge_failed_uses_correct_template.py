@@ -26,7 +26,7 @@ class Scenario(vedro.Scenario):
         await self.sm.trigger_merge_failed(error_message="Cannot merge")
 
     def then_notifier_should_use_merge_failed_template(self):
-        assert len(self.notifier.notify_calls) >= 1
+        assert len(self.notifier.notify_calls) == 1
         template = self.notifier.notify_calls[-1]["status"]
         assert template == "merge_failed", f"Expected 'merge_failed' template, got '{template}'"
 

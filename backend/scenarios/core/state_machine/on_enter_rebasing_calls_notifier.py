@@ -30,11 +30,11 @@ class Scenario(vedro.Scenario):
         await self.sm.trigger_start_processing()
 
     def then_notifier_should_be_called_with_rebasing_template(self):
-        assert len(self.notifier.notify_calls) >= 1
+        assert len(self.notifier.notify_calls) == 1
         call_args = self.notifier.notify_calls[-1]
         assert call_args["mr_iid"] == 123
         assert call_args["status"] == "rebasing"
 
     def and_notify_should_include_target_branch(self):
         call_args = self.notifier.notify_calls[-1]
-        assert call_args.get("target_branch") == "main"
+        assert call_args["target_branch"] == "main"

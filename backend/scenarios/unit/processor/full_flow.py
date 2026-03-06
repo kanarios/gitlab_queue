@@ -1,4 +1,4 @@
-"""Integration test scenarios for processor sub-flows.
+"""Unit test scenarios for processor sub-flows.
 
 Tests processor methods (_process_rebase, _handle_pipeline_failure_retry)
 using Fakes instead of real DB + transport.
@@ -6,6 +6,10 @@ using Fakes instead of real DB + transport.
 
 from __future__ import annotations
 
+from vedro import given, scenario, then, when
+
+from gitlab_queue.clients.gitlab import GitLabConflictError
+from gitlab_queue.core.processor import ProcessingResult
 from scenarios.unit.processor._helpers import (
     create_mock_pipeline,
     create_mock_processor,
@@ -13,10 +17,6 @@ from scenarios.unit.processor._helpers import (
     create_processing_context,
     instant_poll,
 )
-from vedro import given, scenario, then, when
-
-from gitlab_queue.clients.gitlab import GitLabConflictError
-from gitlab_queue.core.processor import ProcessingResult
 
 
 @scenario()

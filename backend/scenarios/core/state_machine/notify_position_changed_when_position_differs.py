@@ -62,7 +62,7 @@ class Scenario(vedro.Scenario):
         """
         # Find the position_changed call (skip initial state notification)
         position_calls = [c for c in self.notifier.notify_calls if c["status"] == "position_changed"]
-        assert len(position_calls) > 0
+        assert len(position_calls) == 1
         assert position_calls[0]["mr_iid"] == 123
         assert position_calls[0]["status"] == "position_changed"
 

@@ -28,16 +28,10 @@ class Scenario(vedro.Scenario):
         await self.sm.pipeline_failed()
 
     def then_notifier_should_use_generic_failure_template(self):
-        assert len(self.notifier.notify_calls) >= 1
+        assert len(self.notifier.notify_calls) == 1
         call_args = self.notifier.notify_calls[-1]
-        assert call_args["status"] == "generic_failure", (
-            f"Expected 'generic_failure' template, got '{call_args['status']}'"
-        )
+        assert call_args["status"] == "generic_failure"
 
-    def and_notify_should_not_have_pipeline_id_zero(self):
+    def and_notify_should_only_contain_expected_keys(self):
         call_args = self.notifier.notify_calls[-1]
-        assert call_args.get("pipeline_id") != 0, "generic_failure should not have pipeline_id=0"
-
-    def and_notify_should_not_have_hash_url(self):
-        call_args = self.notifier.notify_calls[-1]
-        assert call_args.get("pipeline_url") != "#", "generic_failure should not have pipeline_url='#'"
+        assert set(call_args.keys()) == {"mr_iid", "status", "failed_at", "error_message"}

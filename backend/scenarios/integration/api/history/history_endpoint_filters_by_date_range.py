@@ -29,11 +29,11 @@ class Scenario(vedro.Scenario):
         self.headers = {"Authorization": f"Bearer {self.token}"}
 
     def when_history_is_called_with_date_filter(self):
-        today = datetime.now(UTC).date()
-        yesterday = today - timedelta(days=1)
+        self.today = datetime.now(UTC).date()
+        self.yesterday = self.today - timedelta(days=1)
 
         self.response = self.client.get(
-            f"/api/history?date_from={yesterday}&date_to={today}",
+            f"/api/history?date_from={self.yesterday}&date_to={self.today}",
             headers=self.headers,
         )
 
@@ -41,5 +41,5 @@ class Scenario(vedro.Scenario):
         assert self.response.status_code == OkStatusSchema
         assert len(self._history_repo.get_history_calls) == 1
         call_kwargs = self._history_repo.get_history_calls[0]
-        assert call_kwargs.get("date_from") is not None
-        assert call_kwargs.get("date_to") is not None
+        assert call_kwargs["date_from"] == self.yesterday
+        assert call_kwargs["date_to"] == self.today
