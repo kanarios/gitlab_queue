@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import vedro
+from scenarios.fakes import (
+    FakeCurrentState,
+    FakeGitLabClient,
+    FakeNotifier,
+    FakeQueueManager,
+    FakeStateMachine,
+    FakeStateMachineFactory,
+)
 
 from gitlab_queue.models.queue_item import QueueItem
 from gitlab_queue.webhooks.handlers import MRWebhookHandler
@@ -32,43 +39,32 @@ class Scenario(vedro.Scenario):
             queued_at=datetime.now(UTC) + timedelta(hours=1),
         )
 
-        self.queue_manager = MagicMock()
-        self.queue_manager.get_queue_item = AsyncMock(return_value=self.queue_item)
-        self.queue_manager.complete_mr = AsyncMock(return_value=True)
-        self.queue_manager.get_queue_length = AsyncMock(return_value=1)
+        self.queue_manager = FakeQueueManager()
+        self.queue_manager.add_item(self.queue_item)
 
-        self.gitlab_client = MagicMock()
-        self.gitlab_client.remove_mr_label = AsyncMock()
+        self.gitlab_client = FakeGitLabClient()
+        self.notifier = FakeNotifier()
 
-        self.notifier = MagicMock()
-        self.notifier.notify = AsyncMock()
+        self.fake_sm = FakeStateMachine(current_state=FakeCurrentState(id="queued"))
+        self.sm_factory = FakeStateMachineFactory(state_machine=self.fake_sm)
 
         self.handler = MRWebhookHandler(
             settings=self.settings,
             gitlab_client=self.gitlab_client,
             queue_manager=self.queue_manager,
             notifier=self.notifier,
+            state_machine_factory=self.sm_factory,
         )
         self.event = create_mr_event(iid=MR_IID, action="merge", state="merged")
 
     async def when_merge_event_is_handled(self):
-        with patch(
-            "gitlab_queue.webhooks.handlers.create_state_machine_for_mr",
-            new_callable=AsyncMock,
-        ) as mock_sm:
-            sm = MagicMock()
-            sm.current_state.id = "queued"
-            mock_sm.return_value = sm
+        await self.handler.handle(self.event)
 
-            await self.handler.handle(self.event)
-
-        # Capture the duration passed to notifier
-        notify_calls = self.notifier.notify.call_args_list
+        # Find the "merged" notification in FakeNotifier call recording
         self.duration = None
-        for c in notify_calls:
-            status = c.args[1] if len(c.args) >= 2 else c.kwargs.get("status")
-            if status == "merged":
-                self.duration = c.kwargs.get("duration")
+        for call in self.notifier.notify_calls:
+            if call.get("status") == "merged":
+                self.duration = call.get("duration")
 
     def then_duration_should_not_be_negative(self):
         assert self.duration is not None, "merged notification was not sent"

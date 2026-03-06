@@ -31,7 +31,7 @@ class Scenario(vedro.Scenario):
             state="testing",
             expected_sha="different_sha",
         )
-        self.processor.queue_manager.get_queue_item.return_value = self.queue_item
+        self.processor.queue_manager.add_item(self.queue_item)
 
         self.pipeline = create_mock_pipeline(
             pipeline_id=100,
@@ -77,14 +77,10 @@ class Scenario(vedro.Scenario):
         This verifies that trigger_pipeline_success on the mocked state machine
         was not called during the test.
         """
-        self.mock_sm.trigger_pipeline_success.assert_not_awaited()
+        assert self.mock_sm.pipeline_success_calls == []
 
     def and_pipeline_failed_is_not_triggered(self):
         """
-        Asserts that the state machine's pipeline failure trigger was not
-        invoked.
-
-        This verifies that mock_sm.trigger_pipeline_failed was not awaited
-        during the test.
+        Asserts that the state machine's pipeline failure trigger was not called.
         """
-        self.mock_sm.trigger_pipeline_failed.assert_not_awaited()
+        assert self.mock_sm.pipeline_failed_calls == []

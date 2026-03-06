@@ -6,16 +6,15 @@ with 'merged' status.
 """
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
 
 import vedro
+from scenarios.fakes import FakeNotifier, FakeQueueManager
 
 from gitlab_queue.models.queue_item import QueueItem
 from gitlab_queue.webhooks.handlers import MRWebhookHandler
 
 from ._helpers import (
     create_gitlab_client_with_transport,
-    create_mock_queue_manager,
     create_mock_settings,
     create_mr_event,
 )
@@ -37,17 +36,12 @@ class Scenario(vedro.Scenario):
             queued_at=datetime.now(UTC),
         )
 
-    def given_mock_queue_manager(self):
-        self.queue_manager = create_mock_queue_manager()
-        self.queue_manager.get_queue_item = AsyncMock(return_value=self.queue_item)
-        self.queue_manager.get_queue_position = AsyncMock(return_value=1)
-        self.queue_manager.get_queue_length = AsyncMock(return_value=1)
-        self.queue_manager.complete_mr = AsyncMock()
+    def given_queue_manager(self):
+        self.queue_manager = FakeQueueManager()
+        self.queue_manager.add_item(self.queue_item)
 
-    def given_mock_notifier(self):
-        self.notifier = MagicMock()
-        self.notifier.notify = AsyncMock()
-        self.notifier.remove_queue_label = AsyncMock()
+    def given_notifier(self):
+        self.notifier = FakeNotifier()
 
     def given_handler(self):
         self.settings = create_mock_settings()
@@ -73,14 +67,10 @@ class Scenario(vedro.Scenario):
         await self.handler.handle(self.event)
 
     def then_notifier_should_send_merged_notification(self):
-        merged_calls = [
-            c
-            for c in self.notifier.notify.await_args_list
-            if (len(c.args) > 1 and c.args[1] == "merged") or c.kwargs.get("status") == "merged"
-        ]
+        merged_calls = [c for c in self.notifier.notify_calls if c.get("status") == "merged"]
         assert len(merged_calls) > 0, (
             f"Expected notifier.notify called with 'merged' status, "
-            f"got: {[(c.args[1] if len(c.args) > 1 else c.kwargs.get('status')) for c in self.notifier.notify.await_args_list]}"
+            f"got statuses: {[c.get('status') for c in self.notifier.notify_calls]}"
         )
 
     async def cleanup(self):

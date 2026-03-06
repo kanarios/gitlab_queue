@@ -39,7 +39,6 @@ dev = [
     "mypy>=1.13",
     "vedro>=1.12",
     "vedro-d42-validator>=0.1.0",
-    "jj>=2.13",
     "watchfiles>=1.0",
     "pre-commit>=4.0",
     "coverage[toml]>=7.0",
@@ -83,6 +82,9 @@ ignore = [
 [tool.ruff.lint.isort]
 known-first-party = ["gitlab_queue"]
 
+[tool.ruff.lint.per-file-ignores]
+"scenarios/**" = ["ARG"]  # Unused arguments are expected in fakes/stubs/test helpers
+
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
@@ -105,7 +107,6 @@ show_error_codes = true
 [[tool.mypy.overrides]]
 module = [
     "vedro.*",
-    "jj.*",
     "environ.*",
     "adaptix.*",
     "statemachine.*",

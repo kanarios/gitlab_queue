@@ -261,6 +261,18 @@ class GitLabMockTransport(httpx.AsyncBaseTransport):
         paths = [str(r.url.path) for r in self._history]
         assert path in paths, f"Expected request to {path}, but got requests to: {paths}"
 
+    def get_requests(self, method: str, path_contains: str) -> list[httpx.Request]:
+        """Filter request history by method and path substring.
+
+        Args:
+            method: HTTP method to match (GET, POST, PUT, DELETE).
+            path_contains: Substring that must appear in the URL path.
+
+        Returns:
+            List of matching requests.
+        """
+        return [r for r in self._history if r.method == method and path_contains in str(r.url.path)]
+
     def clear_history(self) -> None:
         """Clear the request history."""
         self._history.clear()

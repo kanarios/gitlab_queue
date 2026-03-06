@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import vedro
+
+from scenarios.fakes import FakeWebSocketManager
 
 from ._helpers import create_test_retry_processor
 
@@ -14,10 +14,10 @@ class Scenario(vedro.Scenario):
 
     def given_processor_and_websocket_manager(self):
         self.processor = create_test_retry_processor()
-        self.mock_manager = MagicMock()
+        self.ws_manager = FakeWebSocketManager()
 
     def when_set_websocket_manager_is_called(self):
-        self.processor.set_websocket_manager(self.mock_manager)
+        self.processor.set_websocket_manager(self.ws_manager)
 
     def then_websocket_manager_is_stored(self):
-        assert self.processor.websocket_manager is self.mock_manager
+        assert self.processor.websocket_manager is self.ws_manager

@@ -6,8 +6,6 @@ recovery should call complete_mr to properly move it to the history table.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
 import vedro
 
 from scenarios.unit.processor._helpers import (
@@ -24,10 +22,9 @@ class Scenario(vedro.Scenario):
         self.processor = create_mock_processor()
 
         self.queue_item = create_test_queue_item(mr_iid=42, state="testing")
-        self.processor.queue_manager.get_active_queue.return_value = [self.queue_item]
-        self.processor.queue_manager.complete_mr = AsyncMock(return_value=True)
+        self.processor.queue_manager.add_item(self.queue_item)
 
-        self.processor.gitlab_client.get_mr.return_value = create_mock_mr(
+        self.processor.gitlab_client.mr_responses[42] = create_mock_mr(
             iid=42,
             state="merged",
             labels=["merge_queue"],
@@ -37,10 +34,10 @@ class Scenario(vedro.Scenario):
         await self.processor._recover_interrupted_state()
 
     def then_complete_mr_is_called(self):
-        assert self.processor.queue_manager.complete_mr.await_count == 1, (
-            "Expected queue_manager.complete_mr to be awaited once, "
-            f"got {self.processor.queue_manager.complete_mr.await_count}"
+        assert len(self.processor.queue_manager.complete_calls) == 1, (
+            "Expected queue_manager.complete_mr to be called once, "
+            f"got {len(self.processor.queue_manager.complete_calls)}"
         )
-        call = self.processor.queue_manager.complete_mr.await_args
-        assert call.args[0] == 42
-        assert call.kwargs.get("status") == "merged"
+        call = self.processor.queue_manager.complete_calls[0]
+        assert call["mr_iid"] == 42
+        assert call["status"] == "merged"

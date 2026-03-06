@@ -1,13 +1,15 @@
 """Test notify_position_changed calls notifier when position changed."""
 
-from unittest.mock import AsyncMock
+from datetime import UTC, datetime, timedelta
 
 import vedro
 from scenarios.contexts.state_machine_helpers import (
     create_mock_notifier,
-    create_mock_queue_manager,
     create_state_machine,
 )
+from scenarios.fakes import FakeQueueManager
+
+from gitlab_queue.models.queue_item import QueueItem
 
 
 class Scenario(vedro.Scenario):
@@ -15,9 +17,31 @@ class Scenario(vedro.Scenario):
 
     async def given_state_machine_in_queued(self):
         self.notifier = create_mock_notifier()
-        self.queue_manager = create_mock_queue_manager()
-        # Return a different position than old_position
-        self.queue_manager.get_queue_position = AsyncMock(return_value=2)
+        self.queue_manager = FakeQueueManager()
+        now = datetime.now(UTC)
+        # Add a dummy item first so mr_iid=123 is at position 2
+        self.queue_manager.add_item(
+            QueueItem(
+                mr_iid=999,
+                title="First MR",
+                author_name="Test",
+                author_username="test",
+                target_branch="master",
+                state="queued",
+                queued_at=now - timedelta(minutes=1),
+            )
+        )
+        self.queue_manager.add_item(
+            QueueItem(
+                mr_iid=123,
+                title="Test MR",
+                author_name="Test",
+                author_username="test",
+                target_branch="master",
+                state="queued",
+                queued_at=now,
+            )
+        )
         self.sm = await create_state_machine(
             self.notifier,
             self.queue_manager,
@@ -36,12 +60,13 @@ class Scenario(vedro.Scenario):
 
         Verifies that the notifier's notify method was awaited and that its first positional argument is 123 (MR IID) and its second positional argument is "position_changed".
         """
-        self.notifier.notify.assert_awaited()
-        call_args = self.notifier.notify.call_args
-        assert call_args[0][0] == 123  # mr_iid
-        assert call_args[0][1] == "position_changed"  # template
+        # Find the position_changed call (skip initial state notification)
+        position_calls = [c for c in self.notifier.notify_calls if c["status"] == "position_changed"]
+        assert len(position_calls) > 0
+        assert position_calls[0]["mr_iid"] == 123
+        assert position_calls[0]["status"] == "position_changed"
 
     def and_notify_should_include_old_and_new_position(self):
-        call_kwargs = self.notifier.notify.call_args[1]
-        assert call_kwargs.get("position") == 2
-        assert call_kwargs.get("old_position") == 3
+        position_calls = [c for c in self.notifier.notify_calls if c["status"] == "position_changed"]
+        assert position_calls[0]["position"] == 2
+        assert position_calls[0]["old_position"] == 3

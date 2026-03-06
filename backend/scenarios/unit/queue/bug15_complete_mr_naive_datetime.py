@@ -3,21 +3,18 @@
 from __future__ import annotations
 
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock
 
 import vedro
 
 from gitlab_queue.core.queue import QueueManager
 from gitlab_queue.models.queue_item import QueueItem
+from scenarios.fakes import FakeDatabase, FakeResult, FakeSession
 
 
 class Scenario(vedro.Scenario):
     subject = "complete_mr handles naive datetime without TypeError"
 
     def given_queue_manager_with_naive_datetime_item(self):
-        self.db = MagicMock()
-        self.qm = QueueManager(db=self.db)
-
         # Create a QueueItem with NAIVE datetimes (no tzinfo)
         naive_queued_at = datetime(2025, 1, 1, 12, 0, 0)  # no tzinfo
         naive_started_at = datetime(2025, 1, 1, 12, 5, 0)  # no tzinfo
@@ -33,21 +30,41 @@ class Scenario(vedro.Scenario):
             started_at=naive_started_at,
         )
 
-        # Mock get_queue_item to return item with naive datetimes
-        self.qm.get_queue_item = AsyncMock(return_value=self.queue_item)
+        # Fake session for transaction (execute is a no-op)
+        tx_session = FakeSession()
 
-        # Mock db.transaction as async context manager
-        self.session_mock = AsyncMock()
-        self.session_mock.execute = AsyncMock()
+        # Fake session for get_queue_item — returns row data
+        row_data = {
+            "iid": 42,
+            "title": "Test MR",
+            "author_name": "Test",
+            "author_username": "test",
+            "author_avatar": None,
+            "status": "merging",
+            "is_hotfix": 0,
+            "labels": "[]",
+            "target_branch": "main",
+            "queued_at": naive_queued_at.isoformat(),
+            "started_at": naive_started_at.isoformat(),
+            "finished_at": None,
+            "pipeline_id": None,
+            "pipeline_status": None,
+            "expected_sha": None,
+            "retry_count": 0,
+            "last_error": None,
+            "stale_warning_sent": 0,
+        }
 
-        class AsyncCtxManager:
-            async def __aenter__(self_inner):
-                return self.session_mock
+        async def session_execute(sql, params=None):
+            return FakeResult(_row_data=row_data)
 
-            async def __aexit__(self_inner, *args):
-                pass
+        read_session = FakeSession(execute_fn=session_execute)
 
-        self.db.transaction = lambda: AsyncCtxManager()
+        self.db = FakeDatabase(
+            _transaction_sessions=[tx_session],
+            _session_sessions=[read_session],
+        )
+        self.qm = QueueManager(db=self.db)
 
     async def when_complete_mr_is_called(self):
         self.error = None

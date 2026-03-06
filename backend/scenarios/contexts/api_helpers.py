@@ -26,20 +26,19 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
-from unittest.mock import AsyncMock, MagicMock
 
 import jwt
 import vedro
 from d42 import fake
 
 from gitlab_queue.api.websocket import WebSocketManager
-from gitlab_queue.config import Secret
-from gitlab_queue.db.database import DatabaseStatus
 from gitlab_queue.health import ApplicationHealth, ComponentStatus, GitLabHealth
 from gitlab_queue.models.queue_item import QueueItem
 from gitlab_queue.utils.circuit_breaker import CircuitBreaker, CircuitState
 from gitlab_queue.webhooks.router import WebhookAppState, create_webhook_app
+from scenarios.contexts.gitlab_client_factory import created_test_settings
 from scenarios.contexts.sqlite_client import initialized_test_database
+from scenarios.fakes import FakeDatabase, FakeGitLabClient, FakeNotifier, FakeQueueManager, FakeRetryManager
 from scenarios.library import Labels, QueueState
 from scenarios.schemas import (
     AuthorSchema,
@@ -53,11 +52,12 @@ if TYPE_CHECKING:
 
     from fastapi import FastAPI
 
+    from gitlab_queue.config import Settings
     from gitlab_queue.db.database import Database
 
 
 # =============================================================================
-# Mock Factories
+# Fake Factories
 # =============================================================================
 
 
@@ -76,8 +76,8 @@ def create_mock_settings(
     oauth_client_secret: str | None | object = _GENERATE,
     oauth_redirect_uri: str | None = "http://localhost:8080/auth/callback",
     webhook_secret: str | None = None,
-) -> MagicMock:
-    """Create mock settings for testing.
+) -> Settings:
+    """Create test settings for API testing.
 
     Uses d42 schemas to generate realistic random data for secret values.
 
@@ -94,10 +94,9 @@ def create_mock_settings(
         webhook_secret: Webhook validation secret (generated if not provided).
 
     Returns:
-        MagicMock: Mock settings object with all required attributes configured.
+        Settings instance configured for API testing.
     """
-    # Generate secrets using d42 schemas
-    actual_jwt_secret = jwt_secret if jwt_secret is not None else fake(JWTSecretSchema)
+    jwt_secret if jwt_secret is not None else fake(JWTSecretSchema)
     actual_webhook_secret = webhook_secret if webhook_secret is not None else fake(WebhookSecretSchema)
     actual_project_id = gitlab_project_id if gitlab_project_id is not None else fake(AuthorSchema)["id"]
 
@@ -109,169 +108,116 @@ def create_mock_settings(
         fake(WebhookSecretSchema) if oauth_client_secret is _GENERATE else oauth_client_secret  # type: ignore[assignment]
     )
 
-    settings = MagicMock()
-    settings.jwt_secret = Secret(actual_jwt_secret)
-    settings.jwt_expiration_hours = jwt_expiration_hours
-    settings.gitlab_url = gitlab_url
-    settings.gitlab_project_id = actual_project_id
-    settings.gitlab_token = Secret(fake(WebhookSecretSchema))
-    settings.queue_label = queue_label
-    settings.hotfix_label = hotfix_label
-    settings.webhook_host = "0.0.0.0"
-    settings.webhook_port = 8080
-    settings.cors_origins = ["http://localhost:5173"]
-    settings.dashboard_enabled = True
-    settings.oauth_client_id = actual_oauth_client_id
-    settings.oauth_client_secret = Secret(actual_oauth_client_secret) if actual_oauth_client_secret else None
-    settings.oauth_redirect_uri = oauth_redirect_uri
-    settings.webhook_secret = Secret(actual_webhook_secret)
-    assert settings.jwt_secret is not None, "Settings should have jwt_secret"
-    return settings
+    return created_test_settings(
+        project_id=actual_project_id,
+        gitlab_url=gitlab_url,
+        queue_label=queue_label,
+        hotfix_label=hotfix_label,
+        jwt_expiration_hours=jwt_expiration_hours,
+        oauth_client_id=actual_oauth_client_id,
+        oauth_client_secret=actual_oauth_client_secret,
+        oauth_redirect_uri=oauth_redirect_uri,
+        webhook_secret=actual_webhook_secret,
+    )
 
 
 # Alias for backward compatibility
 created_mock_settings = create_mock_settings
 
 
-def created_mock_database(*, connected: bool = True, wal_mode: bool = True) -> MagicMock:
-    """Create mock database with configurable health status.
+def created_mock_database(*, connected: bool = True, wal_mode: bool = True) -> FakeDatabase:
+    """Create fake database with configurable health status.
 
     Args:
         connected: Whether database is connected.
         wal_mode: Whether WAL mode is enabled.
 
     Returns:
-        MagicMock: Mock database object with health_check configured.
+        FakeDatabase with health_check configured.
     """
-    db = MagicMock()
-    db.health_check = AsyncMock(
-        return_value=DatabaseStatus(
-            connected=connected,
-            wal_mode_enabled=wal_mode,
-            foreign_keys_enabled=True,
-            database_path="sqlite+aiosqlite:///:memory:",
-            error=None if connected else "Connection failed",
-        )
+    return FakeDatabase(
+        connected=connected,
+        wal_mode=wal_mode,
+        error=None if connected else "Connection failed",
     )
-    assert db.health_check is not None, "Mock database should have health_check"
-    return db
 
 
 # Alias for backward compatibility
 create_mock_database = created_mock_database
 
 
-def created_mock_circuit_breaker(state: CircuitState = CircuitState.CLOSED) -> MagicMock:
-    """Create mock circuit breaker with configurable state.
+def created_test_circuit_breaker(state: CircuitState = CircuitState.CLOSED) -> CircuitBreaker:
+    """Create a real CircuitBreaker with configurable state.
 
     Args:
         state: Circuit breaker state.
 
     Returns:
-        MagicMock: Mock circuit breaker object.
+        CircuitBreaker configured for testing.
     """
-    cb = MagicMock(spec=CircuitBreaker)
-    cb.state = state
-    cb.failure_count = 0 if state == CircuitState.CLOSED else 5
-    cb.failure_threshold = 5
-    cb.half_open_timeout = 30.0
-    cb._time_until_half_open = MagicMock(return_value=None if state != CircuitState.OPEN else 25.0)
+    cb = CircuitBreaker(failure_threshold=5, half_open_timeout=30.0)
+    if state != CircuitState.CLOSED:
+        cb._state = state
+        cb._failure_count = 5
     return cb
 
 
-# Alias for backward compatibility
-create_mock_circuit_breaker = created_mock_circuit_breaker
+# Keep old names for backward compatibility
+created_mock_circuit_breaker = created_test_circuit_breaker
+create_mock_circuit_breaker = created_test_circuit_breaker
 
 
-def created_mock_gitlab_client(*, circuit_state: CircuitState = CircuitState.CLOSED) -> MagicMock:
-    """Create mock GitLab client with circuit breaker.
+def created_mock_gitlab_client(*, circuit_state: CircuitState = CircuitState.CLOSED) -> FakeGitLabClient:
+    """Create fake GitLab client with circuit breaker.
 
     Args:
         circuit_state: Circuit breaker state.
 
     Returns:
-        MagicMock: Mock GitLab client with circuit_breaker and rate_limit_state configured.
+        FakeGitLabClient with circuit_breaker and rate_limit_state configured.
     """
-    client = MagicMock()
-    client.circuit_breaker = created_mock_circuit_breaker(circuit_state)
-    client.rate_limit_state = MagicMock()
-    client.rate_limit_state.limit = 2000
-    client.rate_limit_state.remaining = 1900
-    client.rate_limit_state.usage_ratio = 0.05
-    client.rate_limit_state.seconds_until_reset = 3600
-    assert client.circuit_breaker is not None, "Client should have circuit_breaker"
-    return client
+    return FakeGitLabClient(
+        circuit_breaker=created_test_circuit_breaker(circuit_state),
+    )
 
 
 # Alias for backward compatibility
 create_mock_gitlab_client = created_mock_gitlab_client
 
 
-def created_mock_queue_manager() -> MagicMock:
-    """Create mock queue manager.
+def created_mock_queue_manager() -> FakeQueueManager:
+    """Create fake queue manager.
 
     Returns:
-        MagicMock: Mock queue manager with async methods configured.
+        FakeQueueManager with default empty state.
     """
-    qm = MagicMock()
-    qm.get_active_queue = AsyncMock(return_value=[])
-    qm.get_queue_stats = AsyncMock(
-        return_value={
-            QueueState.QUEUED: 0,
-            QueueState.REBASING: 0,
-            QueueState.TESTING: 0,
-            QueueState.MERGING: 0,
-        }
-    )
-    qm.get_recent_history = AsyncMock(return_value=[])
-    qm.get_dashboard_stats = AsyncMock(
-        return_value=MagicMock(
-            total_in_queue=0,
-            stats_window_days=7,
-            merged_count=0,
-            failed_count=0,
-            success_rate=0.0,
-            avg_wait_seconds=0,
-            avg_processing_seconds=0,
-        )
-    )
-    assert qm.get_active_queue is not None, "Queue manager should have get_active_queue"
-    return qm
+    return FakeQueueManager()
 
 
 # Alias for backward compatibility
 create_mock_queue_manager = created_mock_queue_manager
 
 
-def created_mock_notifier() -> MagicMock:
-    """Create mock MR notifier.
+def created_mock_notifier() -> FakeNotifier:
+    """Create fake MR notifier.
 
     Returns:
-        MagicMock: Mock notifier.
+        FakeNotifier instance.
     """
-    return MagicMock()
+    return FakeNotifier()
 
 
 # Alias for backward compatibility
 create_mock_notifier = created_mock_notifier
 
 
-def created_mock_retry_manager() -> MagicMock:
-    """Create mock webhook retry manager.
+def created_mock_retry_manager() -> FakeRetryManager:
+    """Create fake webhook retry manager.
 
     Returns:
-        MagicMock: Mock retry manager with DLQ methods configured.
+        FakeRetryManager with DLQ methods.
     """
-    manager = MagicMock()
-    manager.get_dlq_entries = AsyncMock(return_value=[])
-    manager.get_dlq_stats = AsyncMock(
-        return_value=MagicMock(
-            total_count=0,
-            by_event_type={},
-            oldest_entry=None,
-        )
-    )
-    return manager
+    return FakeRetryManager()
 
 
 # Alias for backward compatibility
@@ -317,7 +263,6 @@ def created_mock_health(
             failure_count=5,
         )
 
-    assert health.gitlab is not None, "Health should have gitlab status"
     return health
 
 
@@ -331,7 +276,7 @@ create_mock_health = created_mock_health
 
 
 def created_test_jwt(
-    settings: MagicMock,
+    settings: Any,
     *,
     user_id: int | None = None,
     username: str | None = None,
@@ -346,7 +291,7 @@ def created_test_jwt(
     Uses d42 schemas to generate realistic random data for user fields.
 
     Args:
-        settings: Mock settings with jwt_secret.
+        settings: Settings object with jwt_secret.
         user_id: GitLab user ID (generated if not provided).
         username: GitLab username (generated if not provided).
         name: User display name (generated if not provided).
@@ -390,7 +335,6 @@ def created_test_jwt(
         settings.jwt_secret.get_secret_value(),
         algorithm="HS256",
     )
-    assert token, "JWT token should be created"
     return token
 
 
@@ -398,11 +342,11 @@ def created_test_jwt(
 create_test_jwt = created_test_jwt
 
 
-def created_expired_jwt(settings: MagicMock, **kwargs: Any) -> str:
+def created_expired_jwt(settings: Any, **kwargs: Any) -> str:
     """Create an expired JWT token for testing.
 
     Args:
-        settings: Mock settings with jwt_secret.
+        settings: Settings object with jwt_secret.
         **kwargs: Additional arguments passed to created_test_jwt.
 
     Returns:
@@ -435,16 +379,16 @@ create_invalid_jwt = created_invalid_jwt
 
 def created_webhook_state(
     *,
-    settings: MagicMock | None = None,
-    database: MagicMock | None = None,
+    settings: Any | None = None,
+    database: Any | None = None,
     db_healthy: bool = True,
     gitlab_circuit_state: CircuitState = CircuitState.CLOSED,
 ) -> WebhookAppState:
-    """Create WebhookAppState with mocked dependencies.
+    """Create WebhookAppState with fake dependencies.
 
     Args:
-        settings: Optional custom settings mock.
-        database: Optional custom database mock.
+        settings: Optional custom settings.
+        database: Optional custom database.
         db_healthy: Whether database should be healthy.
         gitlab_circuit_state: GitLab circuit breaker state.
 
@@ -465,7 +409,6 @@ def created_webhook_state(
         ),
         websocket_manager=WebSocketManager(),
     )
-    assert state.settings is not None, "State should have settings"
     return state
 
 
@@ -475,16 +418,16 @@ create_webhook_state = created_webhook_state
 
 def created_test_app(
     *,
-    settings: MagicMock | None = None,
-    database: MagicMock | None = None,
+    settings: Any | None = None,
+    database: Any | None = None,
     db_healthy: bool = True,
     gitlab_circuit_state: CircuitState = CircuitState.CLOSED,
 ) -> tuple[FastAPI, WebhookAppState]:
-    """Create a test FastAPI app with mocked dependencies.
+    """Create a test FastAPI app with fake dependencies.
 
     Args:
-        settings: Optional custom settings mock.
-        database: Optional custom database mock.
+        settings: Optional custom settings.
+        database: Optional custom database.
         db_healthy: Whether database should be healthy.
         gitlab_circuit_state: GitLab circuit breaker state.
 
@@ -498,7 +441,6 @@ def created_test_app(
         gitlab_circuit_state=gitlab_circuit_state,
     )
     app = create_webhook_app(state)
-    assert app is not None, "App should be created"
     return app, state
 
 
@@ -512,7 +454,6 @@ async def created_test_app_with_db() -> AsyncIterator[tuple[FastAPI, WebhookAppS
     """Create a test FastAPI app with real in-memory database.
 
     This provides a fully functional app with real database for integration testing.
-    Includes guaranteeing assertion that app and database are properly initialized.
 
     Yields:
         Tuple of (FastAPI app, WebhookAppState, Database).
@@ -531,8 +472,6 @@ async def created_test_app_with_db() -> AsyncIterator[tuple[FastAPI, WebhookAppS
             websocket_manager=WebSocketManager(),
         )
         app = create_webhook_app(state)
-        assert app is not None, "Test app should be created"
-        assert state.database is not None, "State should have database"
         yield app, state, db
 
 
@@ -598,7 +537,6 @@ def created_test_queue_item(
     actual_author_name = author_name if author_name is not None else item_data["author_name"]
     actual_author_username = author_username if author_username is not None else item_data["author_username"]
     actual_target_branch = target_branch if target_branch is not None else item_data["target_branch"]
-    # Use generated avatar_url if available in schema, otherwise use provided or None
     actual_author_avatar = author_avatar if author_avatar is not None else item_data.get("author_avatar")
 
     item = QueueItem(
@@ -619,7 +557,6 @@ def created_test_queue_item(
         last_error=last_error,
         retry_count=retry_count,
     )
-    assert item.mr_iid == actual_mr_iid, "Queue item should have correct mr_iid"
     return item
 
 
@@ -639,7 +576,6 @@ def created_test_history_items(count: int = 5) -> list[QueueItem]:
         List of QueueItem objects representing completed MRs.
     """
     items = []
-    # Use only valid QueueState values
     statuses = [QueueState.MERGED, QueueState.FAILED, QueueState.CONFLICT, QueueState.REMOVED]
 
     for i in range(count):
@@ -648,7 +584,6 @@ def created_test_history_items(count: int = 5) -> list[QueueItem]:
         queued_at = finished_at - timedelta(minutes=30)
         started_at = queued_at + timedelta(minutes=5)
 
-        # Each item gets unique generated data via d42 schema
         items.append(
             created_test_queue_item(
                 state=status,
@@ -659,7 +594,6 @@ def created_test_history_items(count: int = 5) -> list[QueueItem]:
             )
         )
 
-    assert len(items) == count, f"Should create {count} history items"
     return items
 
 
@@ -698,6 +632,7 @@ __all__ = [
     "created_mock_settings",
     "created_test_app",
     "created_test_app_with_db",
+    "created_test_circuit_breaker",
     "created_test_history_items",
     "created_test_jwt",
     "created_test_queue_item",

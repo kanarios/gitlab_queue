@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
-
 import vedro
 from scenarios.contexts.api_helpers import (
     create_test_queue_item,
@@ -13,6 +11,8 @@ from scenarios.contexts.api_helpers import (
 from scenarios.library import QueueState
 from scenarios.schemas.status_code import OkStatusSchema
 from starlette.testclient import TestClient
+
+from gitlab_queue.models.queue_item import DashboardStats
 
 
 class Scenario(vedro.Scenario):
@@ -24,21 +24,24 @@ class Scenario(vedro.Scenario):
         self.token = created_test_jwt(self.state.settings)
         self.headers = {"Authorization": f"Bearer {self.token}"}
 
-        # Setup mock queue data
+        # Setup queue data via FakeQueueManager
         self.active_items = [
             create_test_queue_item(mr_iid=100, title="First MR", state=QueueState.REBASING),
             create_test_queue_item(mr_iid=101, title="Second MR", state=QueueState.QUEUED),
         ]
-        self.history_items = [
+        for item in self.active_items:
+            self.state.queue_manager.add_item(item)
+
+        self.state.queue_manager.recent_history = [
             create_test_queue_item(mr_iid=50, title="Old MR", state=QueueState.MERGED),
         ]
-        self.current_stats = {
+        self.state.queue_manager.queue_stats = {
             QueueState.QUEUED: 1,
             QueueState.REBASING: 1,
             QueueState.TESTING: 0,
             QueueState.MERGING: 0,
         }
-        self.dashboard_stats = MagicMock(
+        self.state.queue_manager.dashboard_stats = DashboardStats(
             total_in_queue=2,
             stats_window_days=7,
             merged_count=10,
@@ -47,11 +50,6 @@ class Scenario(vedro.Scenario):
             avg_wait_seconds=300,
             avg_processing_seconds=600,
         )
-
-        self.state.queue_manager.get_active_queue = AsyncMock(return_value=self.active_items)
-        self.state.queue_manager.get_recent_history = AsyncMock(return_value=self.history_items)
-        self.state.queue_manager.get_queue_stats = AsyncMock(return_value=self.current_stats)
-        self.state.queue_manager.get_dashboard_stats = AsyncMock(return_value=self.dashboard_stats)
 
     def when_queue_status_is_requested(self):
         self.response = self.client.get("/api/queue", headers=self.headers)

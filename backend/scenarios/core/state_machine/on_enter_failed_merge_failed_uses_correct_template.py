@@ -26,11 +26,10 @@ class Scenario(vedro.Scenario):
         await self.sm.trigger_merge_failed(error_message="Cannot merge")
 
     def then_notifier_should_use_merge_failed_template(self):
-        call_args = self.notifier.notify.call_args
-        template = call_args[0][1]
+        assert len(self.notifier.notify_calls) >= 1
+        template = self.notifier.notify_calls[-1]["status"]
         assert template == "merge_failed", f"Expected 'merge_failed' template, got '{template}'"
 
     def and_template_should_not_be_timeout(self):
-        call_args = self.notifier.notify.call_args
-        template = call_args[0][1]
+        template = self.notifier.notify_calls[-1]["status"]
         assert template != "timeout", "merge_failed should not use timeout template"

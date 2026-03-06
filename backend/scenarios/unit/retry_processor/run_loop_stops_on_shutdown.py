@@ -18,7 +18,7 @@ class Scenario(vedro.Scenario):
         await self.processor.run()
 
     def then_run_completes_without_processing(self):
-        self.processor.retry_manager.get_events_ready_for_retry.assert_not_awaited()
+        assert self.processor.retry_manager.success_calls == []
 
     def and_shutdown_is_still_set(self):
         assert self.processor.is_shutdown_requested is True

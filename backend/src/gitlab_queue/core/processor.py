@@ -16,7 +16,7 @@ import asyncio
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from gitlab_queue.clients.gitlab import (
     GitLabAPIError,
@@ -30,15 +30,18 @@ from gitlab_queue.core.rebase_during_testing import (
     RebaseDuringTestingHandler,
     RebaseRetryLimitExceeded,
 )
-from gitlab_queue.core.state_machine import MRStateMachine, create_state_machine_for_mr
+from gitlab_queue.core.state_machine import create_state_machine_for_mr
 from gitlab_queue.metrics import MR_DURATION
 from gitlab_queue.utils.logging import LogContext, get_logger
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from gitlab_queue.api.websocket import WebSocketManager
     from gitlab_queue.clients.gitlab import GitLabClient
     from gitlab_queue.config import Settings
     from gitlab_queue.core.notifier import MRNotifier
+    from gitlab_queue.core.protocols import StateMachineFactoryProtocol, StateMachineProtocol
     from gitlab_queue.core.queue import QueueManager
     from gitlab_queue.core.queue_position_notifier import QueuePositionNotifier
     from gitlab_queue.models.mr import MergeRequest
@@ -103,7 +106,7 @@ class ProcessingContext:
     """Context for current MR processing."""
 
     mr_iid: int
-    state_machine: MRStateMachine
+    state_machine: StateMachineProtocol
     start_time: datetime
     rebase_ctx: RebaseContext = field(default_factory=RebaseContext)
 
@@ -162,6 +165,10 @@ class MergeProcessor:
     notifier: MRNotifier
     settings: Settings
     position_notifier: QueuePositionNotifier | None = None
+    poll_fn: Callable[..., Any] = field(default=poll_until_done)
+    state_machine_factory: StateMachineFactoryProtocol = field(default=create_state_machine_for_mr)
+    sleep_fn: Callable[[float], Any] = field(default=asyncio.sleep)
+    wait_for_fn: Callable[..., Any] = field(default=asyncio.wait_for)
 
     # Internal state (not part of constructor)
     _shutdown_event: asyncio.Event = field(default_factory=asyncio.Event, init=False)
@@ -273,7 +280,7 @@ class MergeProcessor:
         with LogContext(mr_iid=mr_iid, operation="process_mr"):
             try:
                 # Create state machine for this MR
-                sm = await create_state_machine_for_mr(
+                sm = await self.state_machine_factory(
                     mr_iid=mr_iid,
                     notifier=self.notifier,
                     queue_manager=self.queue_manager,
@@ -452,10 +459,10 @@ class MergeProcessor:
             poll_interval_seconds=REBASE_POLL_INTERVAL_SECONDS,
             operation_name="rebase",
         )
-        outcome = await poll_until_done(config, check_rebase, self._shutdown_event)
+        outcome = await self.poll_fn(config, check_rebase, self._shutdown_event)
 
         if outcome.completed and outcome.result:
-            return outcome.result
+            return cast("ProcessingResult", outcome.result)
 
         if outcome.shutdown_requested:
             log.info("Shutdown requested during rebase", mr_iid=mr_iid)
@@ -548,7 +555,7 @@ class MergeProcessor:
             poll_interval_seconds=self.settings.pipeline_poll_interval_seconds,
             operation_name="post_rebase_pipeline",
         )
-        outcome: PollOutcome[tuple[Pipeline | None, str]] = await poll_until_done(
+        outcome: PollOutcome[tuple[Pipeline | None, str]] = await self.poll_fn(
             config, check_pipeline, self._shutdown_event
         )
 
@@ -793,7 +800,7 @@ class MergeProcessor:
     async def _check_pipeline_termination_conditions(
         self,
         ctx: ProcessingContext,
-        sm: MRStateMachine,
+        sm: StateMachineProtocol,
         timeout: timedelta,
         start_time: datetime,
     ) -> ProcessingResult | None:
@@ -860,7 +867,7 @@ class MergeProcessor:
     async def _maybe_rebase_during_testing(
         self,
         ctx: ProcessingContext,
-        sm: MRStateMachine,
+        sm: StateMachineProtocol,
         rebase_handler: RebaseDuringTestingHandler,
         rebase_ctx: RebaseDuringTestingContext,
         pipeline: Pipeline,
@@ -899,7 +906,7 @@ class MergeProcessor:
     async def _handle_pipeline_status(
         self,
         ctx: ProcessingContext,
-        sm: MRStateMachine,
+        sm: StateMachineProtocol,
         pipeline: Pipeline,
         retry_count: int,
         max_retries: int,
@@ -988,7 +995,7 @@ class MergeProcessor:
     async def _check_and_handle_rebase_during_testing(
         self,
         ctx: ProcessingContext,
-        sm: MRStateMachine,
+        sm: StateMachineProtocol,
         rebase_handler: RebaseDuringTestingHandler,
         rebase_ctx: RebaseDuringTestingContext,
         pipeline: Pipeline,
@@ -1097,7 +1104,7 @@ class MergeProcessor:
             poll_interval_seconds=QUICK_REBASE_POLL_INTERVAL_SECONDS,
             operation_name="quick_rebase",
         )
-        outcome = await poll_until_done(config, check_rebase, self._shutdown_event)
+        outcome = await self.poll_fn(config, check_rebase, self._shutdown_event)
 
         # Check for captured exception
         if captured_error is not None:
@@ -1164,7 +1171,7 @@ class MergeProcessor:
 
         try:
             # Add timeout for merge operation to prevent hanging
-            merged_mr = await asyncio.wait_for(
+            merged_mr = await self.wait_for_fn(
                 self.gitlab_client.merge_mr(mr_iid, expected_sha=expected_sha),
                 timeout=float(self.settings.merge_timeout_seconds),
             )
@@ -1206,7 +1213,7 @@ class MergeProcessor:
             # Only warn once (check is already done in SQL query, but double-check here)
             if not item.stale_warning_sent:
                 try:
-                    sm = await create_state_machine_for_mr(
+                    sm = await self.state_machine_factory(
                         mr_iid=item.mr_iid,
                         notifier=self.notifier,
                         queue_manager=self.queue_manager,
@@ -1256,7 +1263,7 @@ class MergeProcessor:
             True if sleep completed, False if interrupted by shutdown.
         """
         try:
-            await asyncio.wait_for(
+            await self.wait_for_fn(
                 self._shutdown_event.wait(),
                 timeout=seconds,
             )

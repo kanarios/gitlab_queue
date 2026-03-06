@@ -1,51 +1,50 @@
 """Test merge_mr retries when merge_status is 'checking', then succeeds."""
 
-from unittest.mock import AsyncMock, patch
-
 import vedro
 
-from gitlab_queue.clients.gitlab import GitLabClient
+from scenarios.transports import GitLabMockTransport
+from scenarios.transports.responses import mr_response
 
-from ._helpers import _mr_to_dict, create_gitlab_client_for_test, create_mr
+from ._helpers import (
+    PROJECT_ID,
+    create_merge_mr_client,
+    mr_get_path,
+    mr_get_response,
+    mr_merge_path,
+)
 
 
 class Scenario(vedro.Scenario):
     subject = "merge_mr retries when merge_status is 'checking', then succeeds"
 
     def given_mr_checking_then_ready(self):
-        self.checking_mr = create_mr(merge_status="checking")
-        self.ready_mr = create_mr(merge_status="can_be_merged")
         self.iid = 42
+        self.transport = GitLabMockTransport()
+        self.transport.register_sequence(
+            "GET",
+            mr_get_path(self.iid),
+            [
+                mr_get_response(self.iid, merge_status="checking"),
+                mr_get_response(self.iid, merge_status="checking"),
+                mr_get_response(self.iid, merge_status="can_be_merged"),
+            ],
+        )
+        self.transport.register_put(
+            mr_merge_path(self.iid),
+            json_data=mr_response(iid=self.iid, project_id=PROJECT_ID, state="merged"),
+        )
+        self.client = create_merge_mr_client(self.transport)
 
     async def when_merge_mr_is_called(self):
-        with (
-            patch.object(GitLabClient, "get_mr", new_callable=AsyncMock) as mock_get_mr,
-            patch.object(GitLabClient, "put", new_callable=AsyncMock) as mock_put,
-            patch("gitlab_queue.clients.gitlab.asyncio.sleep", new_callable=AsyncMock),
-        ):
-            # Return 'checking' twice, then 'can_be_merged'
-            mock_get_mr.side_effect = [
-                self.checking_mr,
-                self.checking_mr,
-                self.ready_mr,
-            ]
-            mock_put.return_value = _mr_to_dict("merged")
-
-            client = create_gitlab_client_for_test()
-            self.result = await client.merge_mr(self.iid)
-            self.mock_get_mr = mock_get_mr
-            self.mock_put = mock_put
+        self.result = await self.client.merge_mr(self.iid)
 
     def then_mr_is_merged(self):
         assert self.result.state == "merged"
 
     def and_get_mr_called_three_times(self):
-        assert self.mock_get_mr.await_count == 3
+        get_requests = [r for r in self.transport.history if r.method == "GET"]
+        assert len(get_requests) == 3
 
     def and_put_called_once(self):
-        """
-        Asserts that the GitLab client's `put` method was awaited exactly once.
-
-        This verifies the code under test performed a single asynchronous PUT operation to merge the merge request.
-        """
-        self.mock_put.assert_awaited_once()
+        put_requests = [r for r in self.transport.history if r.method == "PUT"]
+        assert len(put_requests) == 1

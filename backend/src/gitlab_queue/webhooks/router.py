@@ -12,7 +12,7 @@ Example:
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, FastAPI, Header, HTTPException, Request
@@ -41,13 +41,16 @@ from gitlab_queue.webhooks.handlers import MRWebhookHandler, PipelineWebhookHand
 from gitlab_queue.webhooks.retry_manager import DLQItemNotFoundError
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Callable
+
+    import httpx
 
     from gitlab_queue.clients.gitlab import GitLabClient
     from gitlab_queue.config import Settings
     from gitlab_queue.core.notifier import MRNotifier
     from gitlab_queue.core.queue import QueueManager
     from gitlab_queue.core.queue_position_notifier import QueuePositionNotifier
+    from gitlab_queue.db import UnitOfWork
     from gitlab_queue.db.database import Database
     from gitlab_queue.models.queue_item import DashboardStats, QueueItem
     from gitlab_queue.models.retry import DLQItem, DLQStats
@@ -89,6 +92,9 @@ class WebhookAppState:
     retry_manager: WebhookRetryManager
     health: ApplicationHealth
     websocket_manager: WebSocketManager
+    event_router: Callable[..., Any] | None = field(default=None)
+    oauth_transport: httpx.AsyncBaseTransport | None = field(default=None)
+    uow_factory: Callable[..., UnitOfWork] | None = field(default=None)
 
 
 # =============================================================================
@@ -478,7 +484,8 @@ async def handle_gitlab_webhook(
         }
 
     try:
-        await _route_webhook_event(state, event)
+        route_fn = state.event_router or _route_webhook_event
+        await route_fn(state, event)
     except GitLabCircuitOpenError as e:
         log.warning(
             "Webhook handling failed: GitLab circuit open",

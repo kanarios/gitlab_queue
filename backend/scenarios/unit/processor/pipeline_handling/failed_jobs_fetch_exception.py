@@ -7,8 +7,6 @@ the exception to the caller.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
 import vedro
 
 from .._helpers import create_mock_processor
@@ -19,7 +17,7 @@ class Scenario(vedro.Scenario):
 
     def given_processor_with_failing_pipeline_jobs_fetch(self):
         self.processor = create_mock_processor()
-        self.processor.gitlab_client.get_pipeline_jobs = AsyncMock(side_effect=Exception("Connection error"))
+        self.processor.gitlab_client.pipeline_jobs_response = Exception("Connection error")
 
     async def when_get_failed_jobs_is_called(self):
         self.result = await self.processor._get_failed_jobs(pipeline_id=100)

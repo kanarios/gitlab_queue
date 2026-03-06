@@ -8,9 +8,8 @@ Covers the batch processing logic in retry_processor._process_iteration.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
-
 import vedro
+from scenarios.fakes import FakeRetryManager
 from scenarios.unit.retry_processor._helpers import (
     create_test_retry_item,
     create_test_retry_processor,
@@ -21,33 +20,24 @@ class Scenario(vedro.Scenario):
     subject = "retry processor processes a batch of DLQ retry items"
 
     def given_processor_with_multiple_retry_items(self):
-        self.processor = create_test_retry_processor()
         self.item1 = create_test_retry_item(item_id=1, event_type="merge_request")
         self.item2 = create_test_retry_item(item_id=2, event_type="pipeline")
         self.item3 = create_test_retry_item(item_id=3, event_type="merge_request")
-        self.processor.retry_manager.get_events_ready_for_retry = AsyncMock(
-            return_value=[self.item1, self.item2, self.item3]
+        self.retry_manager = FakeRetryManager(
+            _ready_events=[self.item1, self.item2, self.item3],
         )
+        self.processor = create_test_retry_processor(retry_manager=self.retry_manager)
 
     async def when_process_iteration_is_called(self):
-        with (
-            patch("gitlab_queue.webhooks.handlers.MRWebhookHandler") as mock_mr_handler_cls,
-            patch("gitlab_queue.webhooks.handlers.PipelineWebhookHandler") as mock_pipeline_handler_cls,
-        ):
-            mock_mr_handler_instance = AsyncMock()
-            mock_mr_handler_cls.return_value = mock_mr_handler_instance
-            mock_pipeline_handler_instance = AsyncMock()
-            mock_pipeline_handler_cls.return_value = mock_pipeline_handler_instance
-            await self.processor._process_iteration()
+        await self.processor._process_iteration()
 
     def then_all_three_items_should_be_marked_as_success(self):
-        assert self.processor.retry_manager.mark_retry_success.await_count == 3
+        assert len(self.retry_manager.success_calls) == 3
 
     def and_each_item_id_should_be_marked(self):
-        marked_ids = [call.args[0] for call in self.processor.retry_manager.mark_retry_success.await_args_list]
-        assert 1 in marked_ids
-        assert 2 in marked_ids
-        assert 3 in marked_ids
+        assert 1 in self.retry_manager.success_calls
+        assert 2 in self.retry_manager.success_calls
+        assert 3 in self.retry_manager.success_calls
 
     def and_no_items_should_be_marked_as_failed(self):
-        self.processor.retry_manager.mark_retry_failed.assert_not_awaited()
+        assert self.retry_manager.failed_calls == []

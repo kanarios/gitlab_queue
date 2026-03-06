@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from datetime import UTC, datetime, timedelta
 
 import vedro
 from scenarios.contexts.api_helpers import (
@@ -24,6 +24,16 @@ class Scenario(vedro.Scenario):
         self.token = created_test_jwt(self.state.settings)
         self.headers = {"Authorization": f"Bearer {self.token}"}
 
+        now = datetime.now(UTC)
+
+        # Add 2 items queued before test item so position == 3
+        self.state.queue_manager.add_item(
+            create_test_queue_item(mr_iid=10, state=QueueState.QUEUED, queued_at=now - timedelta(hours=2))
+        )
+        self.state.queue_manager.add_item(
+            create_test_queue_item(mr_iid=11, state=QueueState.QUEUED, queued_at=now - timedelta(hours=1))
+        )
+
         self.test_item = create_test_queue_item(
             mr_iid=42,
             title="Feature: Add user auth",
@@ -35,10 +45,9 @@ class Scenario(vedro.Scenario):
             target_branch="main",
             pipeline_id=12345,
             pipeline_status="running",
+            queued_at=now,
         )
-
-        self.state.queue_manager.get_queue_item = AsyncMock(return_value=self.test_item)
-        self.state.queue_manager.get_queue_position = AsyncMock(return_value=3)
+        self.state.queue_manager.add_item(self.test_item)
 
     def when_queue_item_is_requested(self):
         self.response = self.client.get("/api/queue/42", headers=self.headers)

@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
-
 import vedro
 
 from gitlab_queue.core.state_machine import MRStateMachine
+from scenarios.fakes import FakeWebSocketManager
 
 from ._helpers import MockQueueItem, create_mock_notifier, create_mock_queue_manager
 
@@ -17,19 +16,15 @@ class Scenario(vedro.Scenario):
     def given_state_machine_in_merging_state(self):
         self.notifier = create_mock_notifier()
         self.queue_manager = create_mock_queue_manager()
-        self.queue_manager.get_queue_item = AsyncMock(
-            return_value=MockQueueItem(mr_iid=42),
-        )
-        self.websocket_manager = MagicMock()
-        self.websocket_manager.broadcast_mr_completed = AsyncMock()
-        self.websocket_manager.broadcast_mr_status_changed = AsyncMock()
+        self.queue_manager.get_queue_item_sequence = [MockQueueItem(mr_iid=42)]
+        self.ws = FakeWebSocketManager()
 
         self.sm = MRStateMachine(
             notifier=self.notifier,
             queue_manager=self.queue_manager,
             mr_iid=42,
             start_value="merging",
-            websocket_manager=self.websocket_manager,
+            websocket_manager=self.ws,
             skip_initial_enter=True,
         )
 
@@ -38,10 +33,11 @@ class Scenario(vedro.Scenario):
         await self.sm.trigger_merge_success()
 
     def then_merged_at_should_equal_finished_at(self):
-        notify_call = self.notifier.notify.call_args
-        merged_at = notify_call.kwargs["merged_at"]
+        assert len(self.notifier.notify_calls) >= 1
+        merged_at = self.notifier.notify_calls[-1]["merged_at"]
 
-        broadcast_call = self.websocket_manager.broadcast_mr_completed.call_args
-        finished_at = broadcast_call.kwargs["finished_at"]
+        completed_broadcasts = [c for c in self.ws.broadcast_calls if c.get("type") == "mr_completed"]
+        assert len(completed_broadcasts) >= 1
+        finished_at = completed_broadcasts[-1]["finished_at"]
 
         assert merged_at == finished_at, f"merged_at ({merged_at}) != finished_at ({finished_at})"

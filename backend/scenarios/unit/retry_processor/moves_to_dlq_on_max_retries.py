@@ -2,38 +2,36 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
-
 import vedro
 
-from ._helpers import create_test_retry_item, create_test_retry_processor
+from scenarios.fakes import FakeHandler, FakeHandlerFactory
+
+from ._helpers import create_fake_retry_manager, create_test_retry_item, create_test_retry_processor
 
 
 class Scenario(vedro.Scenario):
     subject = "_process_retry_item logs DLQ warning when event is moved to dead letter queue"
 
     def given_processor_and_item_at_max_retries(self):
-        self.processor = create_test_retry_processor()
+        self.retry_manager = create_fake_retry_manager(_dlq_on_fail=True)
+        self.handler = FakeHandler(handle_error=RuntimeError("max retries exceeded"))
+        self.processor = create_test_retry_processor(
+            retry_manager=self.retry_manager,
+            mr_handler_factory=FakeHandlerFactory(handler=self.handler),
+        )
         self.item = create_test_retry_item(
             event_type="merge_request",
             attempt_count=2,
         )
-        # mark_retry_failed returns True to indicate the event was moved to DLQ
-        self.processor.retry_manager.mark_retry_failed = AsyncMock(return_value=True)
 
     async def when_process_retry_item_is_called_and_handler_raises(self):
-        with patch("gitlab_queue.webhooks.handlers.MRWebhookHandler") as mock_handler_cls:
-            mock_handler_instance = AsyncMock()
-            mock_handler_instance.handle.side_effect = RuntimeError("max retries exceeded")
-            mock_handler_cls.return_value = mock_handler_instance
-            await self.processor._process_retry_item(self.item)
+        await self.processor._process_retry_item(self.item)
 
     def then_mark_retry_failed_is_called(self):
-        self.processor.retry_manager.mark_retry_failed.assert_awaited_once()
+        assert len(self.retry_manager.failed_calls) == 1
 
     def and_mark_retry_failed_returns_true(self):
-        result = self.processor.retry_manager.mark_retry_failed.return_value
-        assert result is True
+        assert self.retry_manager._dlq_on_fail is True
 
     def and_mark_retry_success_is_not_called(self):
-        self.processor.retry_manager.mark_retry_success.assert_not_awaited()
+        assert self.retry_manager.success_calls == []

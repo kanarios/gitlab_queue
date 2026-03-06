@@ -71,10 +71,10 @@ class Scenario(vedro.Scenario):
 
         Fails the test if the mock state machine's `trigger_timeout` coroutine was not awaited exactly one time.
         """
-        self.mock_sm.trigger_timeout.assert_awaited_once()
+        assert len(self.mock_sm.timeout_calls) == 1
 
     def and_pipeline_failed_is_not_triggered(self):
         """
         Asserts that the state machine's pipeline_failed transition was not triggered.
         """
-        self.mock_sm.trigger_pipeline_failed.assert_not_awaited()
+        assert self.mock_sm.pipeline_failed_calls == []

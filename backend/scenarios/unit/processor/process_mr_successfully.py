@@ -5,209 +5,92 @@ This scenario tests the happy path where an MR is successfully:
 2. Tested (pipeline passes)
 3. Merged
 
-Uses JJ Remote Mock to simulate GitLab API responses.
+Tests `_execute_workflow` with FakeStateMachine starting in "queued" state.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
 
-import jj
-import vedro
-from jj.mock import mocked
+from vedro import given, scenario, then, when
 
-from gitlab_queue.clients.gitlab import GitLabClient
-from gitlab_queue.config import Settings
-from gitlab_queue.core.notifier import MRNotifier
-from gitlab_queue.core.processor import MergeProcessor, ProcessingResult
-from gitlab_queue.core.queue import QueueManager
-from gitlab_queue.db.database import Database
-from gitlab_queue.models.mr import Author, MergeRequest
-from scenarios.contexts.jj_gitlab_mock import get_mock_url
+from gitlab_queue.core.processor import ProcessingContext, ProcessingResult
+from scenarios.fakes import FakeCurrentState, FakeStateMachine, create_mr, create_pipeline
+from scenarios.unit.processor._helpers import (
+    create_mock_processor,
+    create_test_queue_item,
+    instant_poll,
+)
 
 
-class Scenario(vedro.Scenario):
-    subject = "process mr successfully from queue to merge"
+@scenario()
+async def process_mr_successfully_from_queue_to_merge():
+    """Test full happy path: queued -> rebasing -> testing -> merging -> merged."""
 
-    async def given_mr_in_queue_and_gitlab_api_mocked(self):
-        # Setup test database and queue
-        self.db = Database(database_url="sqlite+aiosqlite:///:memory:")
-        await self.db.initialize()
-        self.queue = QueueManager(self.db)
-        await self.queue.ensure_schema()
-
-        # Create test MR
-        test_mr = MergeRequest(
+    with given("a processor with faked collaborators and an MR in queue"):
+        mr = create_mr(
             iid=42,
-            title="Test MR",
-            state="opened",
-            target_branch="main",
-            source_branch="feature/test",
             sha="abc123",
             labels=["merge_queue"],
-            author=Author(id=1, name="Test User", username="testuser"),
-            merge_status="can_be_merged",
-            web_url="https://gitlab.com/test/project/-/merge_requests/42",
+            state="opened",
+            source_branch="feature/test",
         )
 
-        # Add MR to queue
-        await self.queue.add_to_queue(test_mr, is_hotfix=False)
+        pipeline = create_pipeline(id=1001, sha="abc123", status="success")
 
-        # Setup JJ mocks for the full flow
-        self.mock_url = get_mock_url()
+        sm = FakeStateMachine(current_state=FakeCurrentState(id="queued"))
+        processor = create_mock_processor(poll_fn=instant_poll)
 
-        # Mock data
-        self.mr_data = {
-            "iid": 42,
-            "project_id": 123,
-            "title": "Test MR",
-            "description": "Test description",
-            "state": "opened",
-            "target_branch": "main",
-            "source_branch": "feature/test",
-            "sha": "abc123",
-            "labels": ["merge_queue"],
-            "author": {"id": 1, "name": "Test User", "username": "testuser"},
-            "web_url": "https://gitlab.com/test/project/-/merge_requests/42",
-            "merge_status": "can_be_merged",
-            "has_conflicts": False,
-            "rebase_in_progress": False,
-        }
+        # MR responses consumed in order:
+        # 1. _capture_pre_rebase_sha (in _process_rebase)
+        # 2. _wait_for_post_rebase_pipeline -> check_pipeline -> get_mr
+        # 3. _verify_mr_in_queue (in _check_pipeline_termination_conditions)
+        processor.gitlab_client.mr_response_sequence = [mr, mr, mr]
 
-        self.pipeline_data = {
-            "id": 1001,
-            "status": "success",
-            "sha": "abc123",
-            "ref": "feature/test",
-            "web_url": "https://gitlab.com/test/project/-/pipelines/1001",
-        }
+        # Pipeline responses consumed in order:
+        # 1. _wait_for_post_rebase_pipeline -> get_latest_mr_pipeline
+        # 2. _wait_for_pipeline loop -> get_latest_mr_pipeline
+        processor.gitlab_client.latest_pipeline_sequence = [pipeline, pipeline]
 
-        self.merged_mr_data = {
-            **self.mr_data,
-            "state": "merged",
-            "merged_at": datetime.now(UTC).isoformat(),
-        }
+        # Merge result
+        processor.gitlab_client.merge_result = create_mr(iid=42, state="merged")
 
-        # Setup matchers and responses
-        self.get_mr_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/42")
-        self.get_mr_response = jj.Response(status=200, json=self.mr_data)
+        # Queue item needed by _should_skip_stale_pipeline and _handle_pipeline_status
+        queue_item = create_test_queue_item(mr_iid=42, state="queued")
+        processor.queue_manager.add_item(queue_item)
 
-        self.rebase_matcher = jj.match("PUT", "/api/v4/projects/123/merge_requests/42/rebase")
-        self.rebase_response = jj.Response(status=202, json={"rebase_in_progress": False})
-
-        self.pipelines_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/42/pipelines")
-        self.pipelines_response = jj.Response(status=200, json=[self.pipeline_data])
-
-        self.merge_matcher = jj.match("PUT", "/api/v4/projects/123/merge_requests/42/merge")
-        self.merge_response = jj.Response(status=200, json=self.merged_mr_data)
-
-        self.comment_matcher = jj.match("POST", "/api/v4/projects/123/merge_requests/42/notes")
-        self.comment_response = jj.Response(status=201, json={"id": 1, "body": "Processing started"})
-
-        # GET notes - needed for _find_bot_comment
-        self.get_notes_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/42/notes")
-        self.get_notes_response = jj.Response(status=200, json=[])
-
-        self.project_matcher = jj.match("GET", "/api/v4/projects/123")
-        self.project_response = jj.Response(status=200, json={"id": 123, "web_url": f"{self.mock_url}/test/project"})
-
-        # Settings with mock URL
-        self.settings = Settings(
-            gitlab_url=self.mock_url,
-            gitlab_project_id=123,
-            gitlab_token="test-token",
-            target_branch="main",
-            queue_label="merge_queue",
-            hotfix_label="hotfix",
-            jwt_secret="a" * 64,
-            webhook_secret="test-webhook-secret",
-            poll_interval_seconds=1,
-            rebase_timeout_seconds=60,
-            pipeline_timeout_seconds=300,
-            pipeline_retry_count=2,
-            stale_mr_warning_hours=24,
+        ctx = ProcessingContext(
+            mr_iid=42,
+            state_machine=sm,
+            start_time=datetime.now(UTC),
         )
 
-    async def when_processor_runs_one_processing_cycle(self):
-        """
-        Runs a single MergeProcessor cycle under HTTP mock context and records outcomes.
+    with when("processor executes the full workflow"):
+        result = await processor._execute_workflow(ctx)
 
-        Executes one processing iteration using the configured JJ HTTP mocks, creating
-        GitLabClient, MRNotifier, and MergeProcessor, then processing the next MR from
-        the queue. Records the processing result and captures HTTP call histories into
-        self.result, self.merge_history, and self.comment_history for later assertions.
-        """
-        async with (
-            mocked(self.project_matcher, self.project_response),
-            mocked(self.get_mr_matcher, self.get_mr_response),
-            mocked(self.rebase_matcher, self.rebase_response),
-            mocked(self.pipelines_matcher, self.pipelines_response),
-            mocked(self.merge_matcher, self.merge_response) as self.merge_mock,
-            mocked(self.get_notes_matcher, self.get_notes_response),
-            mocked(self.comment_matcher, self.comment_response) as self.comment_mock,
-        ):
-            # Create processor components
-            gitlab_client = GitLabClient(self.settings)
-            notifier = MRNotifier(gitlab_client=gitlab_client, settings=self.settings)
-            processor = MergeProcessor(
-                gitlab_client=gitlab_client,
-                queue_manager=self.queue,
-                notifier=notifier,
-                settings=self.settings,
-            )
+    with then("result is SUCCESS"):
+        assert result == ProcessingResult.SUCCESS
 
-            # Process the MR
-            queue_item = await self.queue.get_next_mr()
-            assert queue_item is not None
+    with then("merge was called exactly once"):
+        assert len(processor.gitlab_client.merge_calls) == 1
 
-            self.result = await processor._process_mr(queue_item)
+    with then("state machine received merge_success trigger"):
+        assert len(sm.merge_success_calls) == 1
 
-            # Fetch history while still in mock context
-            self.merge_history = await self.merge_mock.fetch_history()
-            self.comment_history = await self.comment_mock.fetch_history()
+    with then("rebase was initiated"):
+        assert len(processor.gitlab_client.rebase_calls) == 1
 
-    async def then_mr_should_be_successfully_merged(self):
-        # Check processing result
-        """
-        Verify that the merge request processing completed successfully.
+    with then("state machine transitioned through all expected states"):
+        # start_processing: queued -> rebasing
+        assert len(sm.start_processing_calls) == 1
+        # rebase_complete: rebasing -> testing
+        assert len(sm.rebase_complete_calls) == 1
+        # pipeline_success: testing -> merging
+        assert len(sm.pipeline_success_calls) == 1
+        # merge_success: merging -> merged
+        assert sm.current_state.id == "merged"
 
-        Asserts that self.result is equal to ProcessingResult.SUCCESS.
-        """
-        assert self.result == ProcessingResult.SUCCESS
 
-    async def and_merge_should_be_called_once(self):
-        """
-        Verify that exactly one merge API call was recorded during the processing cycle.
-
-        Asserts that the captured merge call history contains exactly one entry.
-        """
-        assert len(self.merge_history) == 1
-
-    async def and_queue_state_should_be_merged(self):
-        """
-        Assert that the merge request with IID 42 in the queue has status "merged".
-
-        Raises:
-            AssertionError: If the MR status is not "merged" or the MR is not present in the queue.
-        """
-        mr_state = await self.queue.get_mr_state(42)
-        assert mr_state is not None, "MR not present in queue"
-        assert mr_state["status"] == "merged"
-
-    async def and_at_least_one_comment_should_be_posted(self):
-        """
-        Assert that at least one comment was posted during processing.
-
-        Raises:
-            AssertionError: If no comments were posted (comment history is empty).
-        """
-        assert len(self.comment_history) >= 1
-
-    async def and_queue_should_be_empty_after_processing(self):
-        """
-        Assert that the merge request queue contains no remaining items after processing.
-
-        Verifies by attempting to retrieve the next queue entry and asserting that it does not exist.
-        """
-        next_item = await self.queue.get_next_mr()
-        assert next_item is None
+__all__ = [
+    "process_mr_successfully_from_queue_to_merge",
+]

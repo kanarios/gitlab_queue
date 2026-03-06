@@ -1,13 +1,11 @@
 """Test _wait_for_rebase_quick raises GitLabAPIError on timeout.
 
-When poll_until_done returns a PollOutcome with timed_out=True,
+When poll_fn returns a PollOutcome with timed_out=True,
 _wait_for_rebase_quick should raise a GitLabAPIError indicating
 that the rebase operation timed out during retry.
 """
 
 from __future__ import annotations
-
-from unittest.mock import patch
 
 import vedro
 
@@ -26,19 +24,14 @@ class Scenario(vedro.Scenario):
 
     def given_processor_with_rebase_timing_out(self):
         """
-        Set up a mock processor, a mock state machine and processing context, and a PollOutcome representing a timed-out poll for use in the test.
+        Set up a mock processor with an injected poll_fn that returns a timed-out
+        PollOutcome, a mock state machine and processing context.
 
         Attributes set on self:
-            processor: Mock processor instance created by create_mock_processor().
+            processor: Mock processor instance with fake poll_fn.
             mock_sm: Mock state machine created by create_mock_state_machine().
             ctx: Processing context for merge request iid 42 containing the mock state machine.
-            timed_out_outcome: PollOutcome with completed=False, timed_out=True, shutdown_requested=False, result=None.
         """
-        self.processor = create_mock_processor()
-
-        self.mock_sm = create_mock_state_machine()
-        self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
-
         self.timed_out_outcome = PollOutcome(
             completed=False,
             timed_out=True,
@@ -46,16 +39,20 @@ class Scenario(vedro.Scenario):
             result=None,
         )
 
+        async def fake_poll(config, check_fn, shutdown_event):
+            return self.timed_out_outcome
+
+        self.processor = create_mock_processor(poll_fn=fake_poll)
+
+        self.mock_sm = create_mock_state_machine()
+        self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
+
     async def when_wait_for_rebase_quick_is_called(self):
         self.raised = None
-        with patch(
-            "gitlab_queue.core.processor.poll_until_done",
-            return_value=self.timed_out_outcome,
-        ):
-            try:
-                await self.processor._wait_for_rebase_quick(self.ctx)
-            except GitLabAPIError as exc:
-                self.raised = exc
+        try:
+            await self.processor._wait_for_rebase_quick(self.ctx)
+        except GitLabAPIError as exc:
+            self.raised = exc
 
     def then_api_error_is_raised(self):
         """

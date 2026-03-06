@@ -29,11 +29,9 @@ class Scenario(vedro.Scenario):
         self.processor = create_mock_processor()
 
         self.queue_item = create_test_queue_item(mr_iid=42, state="queued")
-        self.processor.queue_manager.get_active_queue.return_value = [
-            self.queue_item,
-        ]
+        self.processor.queue_manager.add_item(self.queue_item)
 
-        self.processor.gitlab_client.get_mr.side_effect = GitLabCircuitOpenError("Circuit open", retry_after=30)
+        self.processor.gitlab_client.get_mr_error = GitLabCircuitOpenError("Circuit open", retry_after=30)
 
     async def when_recover_interrupted_state_is_called(self):
         """
@@ -62,4 +60,4 @@ class Scenario(vedro.Scenario):
 
         Raises an AssertionError if queue_manager.update_mr_state was awaited.
         """
-        self.processor.queue_manager.update_mr_state.assert_not_awaited()
+        assert self.processor.queue_manager.update_state_calls == []

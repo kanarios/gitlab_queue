@@ -2,65 +2,24 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
-
 from d42 import fake
 from scenarios.contexts.gitlab_client_factory import created_test_settings
+from scenarios.fakes import FakeQueueManager
 from scenarios.library import Labels, MRState
-from scenarios.schemas import AuthorSchema, MergeRequestSchema
 from scenarios.transports import GitLabMockTransport
 from scenarios.transports.responses import mr_response
 
 from gitlab_queue.clients.gitlab import GitLabClient
 from gitlab_queue.models.events import LabelChanges, MergeRequestAttributes, MergeRequestEvent
-from gitlab_queue.models.mr import Author, MergeRequest
 
 
 def create_mock_settings(queue_label: str = Labels.MERGE_QUEUE, hotfix_label: str = Labels.HOTFIX):
-    """Create mock settings."""
-    settings = MagicMock()
-    settings.queue_label = queue_label
-    settings.hotfix_label = hotfix_label
-    return settings
+    """Create test settings with queue and hotfix labels."""
+    return created_test_settings(queue_label=queue_label, hotfix_label=hotfix_label)
 
 
 # Alias for backward compatibility
 created_mock_settings = create_mock_settings
-
-
-def create_mock_gitlab_client():
-    """Create mock GitLab client using MagicMock (legacy).
-
-    DEPRECATED: Use create_gitlab_client_with_transport() instead.
-    """
-    author_data = fake(AuthorSchema)
-    mr_data = fake(
-        MergeRequestSchema
-        % {
-            "state": MRState.OPENED,
-            "labels": [Labels.MERGE_QUEUE],
-        }
-    )
-
-    client = MagicMock()
-    client.get_mr = AsyncMock(
-        return_value=MergeRequest(
-            iid=mr_data["iid"],
-            title=mr_data["title"],
-            state=mr_data["state"],
-            labels=mr_data["labels"],
-            sha=mr_data["sha"],
-            source_branch=mr_data["source_branch"],
-            target_branch=mr_data["target_branch"],
-            merge_status=mr_data["merge_status"],
-            author=Author(
-                id=author_data["id"],
-                name=author_data["name"],
-                username=author_data["username"],
-            ),
-        )
-    )
-    return client
 
 
 def create_gitlab_client_with_transport(
@@ -74,7 +33,7 @@ def create_gitlab_client_with_transport(
     """Create real GitLabClient with MockTransport.
 
     This is the preferred way to create GitLab client for testing.
-    It uses real GitLabClient with injected MockTransport instead of MagicMock.
+    It uses real GitLabClient with injected MockTransport.
 
     Args:
         mr_iid: MR internal ID to mock.
@@ -114,15 +73,9 @@ def create_gitlab_client_with_transport(
     return client, transport
 
 
-def create_mock_queue_manager():
-    """Create mock queue manager."""
-    qm = MagicMock()
-    qm.add_to_queue = AsyncMock()
-    qm.remove_from_queue = AsyncMock(return_value=True)
-    qm.get_queue_item = AsyncMock(return_value=None)
-    qm.update_mr_state = AsyncMock(return_value=True)
-    qm.update_hotfix_status = AsyncMock(return_value=True)
-    return qm
+def create_mock_queue_manager() -> FakeQueueManager:
+    """Create FakeQueueManager for MR webhook tests."""
+    return FakeQueueManager()
 
 
 def create_mr_event(

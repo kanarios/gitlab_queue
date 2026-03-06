@@ -81,15 +81,13 @@ class Scenario(vedro.Scenario):
 
         Asserts that trigger_pipeline_failed was awaited exactly one time and that its call keyword arguments include `failed_jobs` equal to the scenario's failed_jobs and `retry_count` equal to the scenario's retry_count.
         """
-        self.mock_sm.trigger_pipeline_failed.assert_awaited_once()
-        call_kwargs = self.mock_sm.trigger_pipeline_failed.call_args.kwargs
+        assert len(self.mock_sm.pipeline_failed_calls) == 1
+        call_kwargs = self.mock_sm.pipeline_failed_calls[0]
         assert call_kwargs["failed_jobs"] == self.failed_jobs
         assert call_kwargs["retry_count"] == self.retry_count
 
     def and_rebase_is_not_attempted(self):
         """
         Asserts that the processor did not attempt to rebase the merge request.
-
-        Verifies that the `rebase_mr` coroutine on the processor's GitLab client was not awaited.
         """
-        self.processor.gitlab_client.rebase_mr.assert_not_awaited()
+        assert self.processor.gitlab_client.rebase_calls == []

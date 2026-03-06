@@ -25,9 +25,7 @@ class Scenario(vedro.Scenario):
         is configured to raise `GitLabCircuitOpenError("Circuit open", retry_after=30)`.
         """
         self.processor = create_mock_processor()
-        self.processor.gitlab_client.list_mrs_with_label.side_effect = GitLabCircuitOpenError(
-            "Circuit open", retry_after=30
-        )
+        self.processor.gitlab_client.list_mrs_error = GitLabCircuitOpenError("Circuit open", retry_after=30)
 
     async def when_sync_missing_mrs_from_gitlab_is_called(self):
         """

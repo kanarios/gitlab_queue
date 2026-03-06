@@ -1,7 +1,5 @@
 """Test: ignore pipeline for MR not in queue."""
 
-from unittest.mock import AsyncMock
-
 import vedro
 
 from gitlab_queue.webhooks.handlers import PipelineWebhookHandler
@@ -22,7 +20,7 @@ class Scenario(vedro.Scenario):
         self.settings = create_mock_settings()
         self.gitlab_client, self.transport = create_gitlab_client_with_transport()
         self.queue_manager = create_mock_queue_manager()
-        self.queue_manager.get_queue_item = AsyncMock(return_value=None)
+        # MR not in queue (default for FakeQueueManager)
         self.handler = PipelineWebhookHandler(
             settings=self.settings,
             gitlab_client=self.gitlab_client,
@@ -35,10 +33,10 @@ class Scenario(vedro.Scenario):
         await self.handler.handle(self.event)
 
     def then_queue_item_should_be_checked(self):
-        self.queue_manager.get_queue_item.assert_awaited_once_with(123)
+        assert 123 in self.queue_manager.get_queue_item_calls
 
     def and_no_state_update_should_happen(self):
-        self.queue_manager.update_mr_state.assert_not_awaited()
+        assert self.queue_manager.update_state_calls == []
 
     async def cleanup(self):
         await self.gitlab_client.close()

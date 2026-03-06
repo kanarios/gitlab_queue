@@ -1,30 +1,63 @@
 """Helpers for QueueManager test scenarios."""
 
+from __future__ import annotations
+
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from typing import Any
 
 from scenarios.library import Labels, MRState, QueueState
 
 from gitlab_queue.models.mr import Author, MergeRequest
 
 
-def create_mock_database() -> tuple[MagicMock, AsyncMock, AsyncMock]:
-    """Create a mock database with async context managers."""
-    db = MagicMock()
+class _FakeSession:
+    """Async session stub with a configurable execute result."""
 
-    # Create async context managers for session and transaction
-    session_cm = AsyncMock()
-    session_cm.__aenter__ = AsyncMock()
-    session_cm.__aexit__ = AsyncMock(return_value=None)
+    def __init__(self) -> None:
+        self.execute_result: Any = None
 
-    transaction_cm = AsyncMock()
-    transaction_cm.__aenter__ = AsyncMock()
-    transaction_cm.__aexit__ = AsyncMock(return_value=None)
+    async def execute(self, stmt: Any, params: Any = None) -> Any:
+        return self.execute_result
 
-    db.session.return_value = session_cm
-    db.transaction.return_value = transaction_cm
+    async def commit(self) -> None:
+        pass
 
-    return db, session_cm, transaction_cm
+
+class _FakeAsyncCtx:
+    """Async context manager that yields a given value."""
+
+    def __init__(self, value: Any) -> None:
+        self._value = value
+
+    async def __aenter__(self) -> Any:
+        return self._value
+
+    async def __aexit__(self, *args: Any) -> None:
+        pass
+
+
+class FakeMockDatabase:
+    """Lightweight database stub for QueueManager tests.
+
+    Provides session() and transaction() as async context managers
+    that yield FakeSession instances.
+    """
+
+    def __init__(self) -> None:
+        self.session_obj = _FakeSession()
+        self.transaction_obj = _FakeSession()
+
+    def session(self) -> _FakeAsyncCtx:
+        return _FakeAsyncCtx(self.session_obj)
+
+    def transaction(self) -> _FakeAsyncCtx:
+        return _FakeAsyncCtx(self.transaction_obj)
+
+
+def create_mock_database() -> tuple[FakeMockDatabase, _FakeSession, _FakeSession]:
+    """Create a fake database with async context managers."""
+    db = FakeMockDatabase()
+    return db, db.session_obj, db.transaction_obj
 
 
 def create_test_mr(iid: int = 123, title: str = "Test MR") -> MergeRequest:

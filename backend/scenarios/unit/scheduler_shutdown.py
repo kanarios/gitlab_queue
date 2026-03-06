@@ -7,44 +7,22 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from unittest.mock import AsyncMock, Mock
 
 import vedro
 from vedro import scenario
 
-
-def create_mock_rate_limit_state(is_critical: bool = False) -> Mock:
-    """Create a properly configured mock for rate_limit_state."""
-    state = Mock()
-    state.is_critical = Mock(return_value=is_critical)
-    state.seconds_until_reset = 0.0
-    state.usage_ratio = 0.1
-    return state
+from gitlab_queue.clients.gitlab import GitLabAPIError
+from gitlab_queue.core.scheduler import QueueScheduler
+from scenarios.fakes import FakeGitLabClient, FakeQueueManager, FakeSettings
 
 
 @scenario()
 async def scheduler_shutdown_stops_polling_loop():
     """Test that requesting shutdown stops the polling loop."""
     with vedro.given:
-        # Mock GitLab client
-        gitlab_client = AsyncMock()
-        gitlab_client.list_mrs_with_label = AsyncMock(return_value=[])
-        gitlab_client.rate_limit_state = create_mock_rate_limit_state()
-
-        # Mock queue manager
-        queue_manager = AsyncMock()
-        queue_manager.get_active_queue = AsyncMock(return_value=[])
-
-        # Mock settings with short poll interval for testing
-        settings = Mock(
-            queue_label="merge_queue",
-            hotfix_label="hotfix",
-            poll_interval_seconds=0.1,  # 100ms for quick test
-            rate_limit_critical_threshold=0.95,
-        )
-
-        # Create scheduler
-        from gitlab_queue.core.scheduler import QueueScheduler
+        gitlab_client = FakeGitLabClient()
+        queue_manager = FakeQueueManager()
+        settings = FakeSettings(poll_interval_seconds=0.1)
 
         scheduler = QueueScheduler(
             gitlab_client=gitlab_client,
@@ -85,31 +63,17 @@ async def scheduler_completes_current_sync_before_shutdown():
         sync_started = asyncio.Event()
         sync_completed = asyncio.Event()
 
-        # Mock GitLab client with slow operation
-        async def slow_list_mrs(*_args: object, **_kwargs: object) -> list[object]:
-            sync_started.set()
-            await asyncio.sleep(0.2)  # Simulate slow API call
-            sync_completed.set()
-            return []
+        class SlowGitLabClient(FakeGitLabClient):
+            async def list_mrs_with_label(self, label: str, *, state: str = "opened") -> list[object]:
+                self.list_mrs_calls.append(label)
+                sync_started.set()
+                await asyncio.sleep(0.2)  # Simulate slow API call
+                sync_completed.set()
+                return []
 
-        gitlab_client = AsyncMock()
-        gitlab_client.list_mrs_with_label = AsyncMock(side_effect=slow_list_mrs)
-        gitlab_client.rate_limit_state = create_mock_rate_limit_state()
-
-        # Mock queue manager
-        queue_manager = AsyncMock()
-        queue_manager.get_active_queue = AsyncMock(return_value=[])
-
-        # Mock settings
-        settings = Mock(
-            queue_label="merge_queue",
-            hotfix_label="hotfix",
-            poll_interval_seconds=10,  # Long interval so only one sync runs
-            rate_limit_critical_threshold=0.95,
-        )
-
-        # Create scheduler
-        from gitlab_queue.core.scheduler import QueueScheduler
+        gitlab_client = SlowGitLabClient()
+        queue_manager = FakeQueueManager()
+        settings = FakeSettings(poll_interval_seconds=10)
 
         scheduler = QueueScheduler(
             gitlab_client=gitlab_client,
@@ -147,25 +111,9 @@ async def scheduler_completes_current_sync_before_shutdown():
 async def scheduler_handles_cancellation_during_sleep():
     """Test that scheduler handles cancellation during sleep between polls."""
     with vedro.given:
-        # Mock GitLab client
-        gitlab_client = AsyncMock()
-        gitlab_client.list_mrs_with_label = AsyncMock(return_value=[])
-        gitlab_client.rate_limit_state = create_mock_rate_limit_state()
-
-        # Mock queue manager
-        queue_manager = AsyncMock()
-        queue_manager.get_active_queue = AsyncMock(return_value=[])
-
-        # Mock settings with long poll interval
-        settings = Mock(
-            queue_label="merge_queue",
-            hotfix_label="hotfix",
-            poll_interval_seconds=60,  # Long sleep period
-            rate_limit_critical_threshold=0.95,
-        )
-
-        # Create scheduler
-        from gitlab_queue.core.scheduler import QueueScheduler
+        gitlab_client = FakeGitLabClient()
+        queue_manager = FakeQueueManager()
+        settings = FakeSettings(poll_interval_seconds=60)
 
         scheduler = QueueScheduler(
             gitlab_client=gitlab_client,
@@ -194,43 +142,23 @@ async def scheduler_handles_cancellation_during_sleep():
         # Verify task was properly cancelled
         assert was_cancelled is True
         # Verify at least one sync was attempted
-        assert gitlab_client.list_mrs_with_label.called is True
+        assert len(gitlab_client.list_mrs_calls) >= 1
 
 
 @scenario()
 async def scheduler_continues_after_sync_error():
     """Test that scheduler continues polling after a sync error."""
     with vedro.given:
-        call_count = 0
-
-        # Mock GitLab client that fails first time, succeeds second time
-        async def failing_then_success(*_args: object, **_kwargs: object) -> list[object]:
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                from gitlab_queue.clients.gitlab import GitLabAPIError
-
-                raise GitLabAPIError("Temporary error", status_code=500)
-            return []
-
-        gitlab_client = AsyncMock()
-        gitlab_client.list_mrs_with_label = AsyncMock(side_effect=failing_then_success)
-        gitlab_client.rate_limit_state = create_mock_rate_limit_state()
-
-        # Mock queue manager
-        queue_manager = AsyncMock()
-        queue_manager.get_active_queue = AsyncMock(return_value=[])
-
-        # Mock settings with short poll interval
-        settings = Mock(
-            queue_label="merge_queue",
-            hotfix_label="hotfix",
-            poll_interval_seconds=0.1,  # Quick polling for test
-            rate_limit_critical_threshold=0.95,
+        # First two calls fail (queue label + hotfix label in first sync),
+        # then succeed for subsequent syncs
+        gitlab_client = FakeGitLabClient(
+            list_mrs_error_sequence=[
+                GitLabAPIError("Temporary error", status_code=500),
+                # After this error, the sequence is exhausted and normal behavior resumes
+            ],
         )
-
-        # Create scheduler
-        from gitlab_queue.core.scheduler import QueueScheduler
+        queue_manager = FakeQueueManager()
+        settings = FakeSettings(poll_interval_seconds=0.1)
 
         scheduler = QueueScheduler(
             gitlab_client=gitlab_client,
@@ -258,8 +186,8 @@ async def scheduler_continues_after_sync_error():
 
     with vedro.then:
         # Verify scheduler continued after error and made multiple attempts
-        assert gitlab_client.list_mrs_with_label.call_count >= 2
-        assert call_count >= 2
+        # At least 3 calls: 1 failed + 2 successful (queue + hotfix label)
+        assert len(gitlab_client.list_mrs_calls) >= 3
 
 
 @scenario()
@@ -270,34 +198,19 @@ async def scheduler_sync_lock_prevents_concurrent_syncs():
         concurrent_syncs = 0
         max_concurrent = 0
 
-        # Track sync operations via get_active_queue (called once per sync)
-        async def tracked_get_active_queue() -> list[object]:
-            nonlocal sync_operations, concurrent_syncs, max_concurrent
-            concurrent_syncs += 1
-            max_concurrent = max(max_concurrent, concurrent_syncs)
-            sync_operations += 1
-            await asyncio.sleep(0.1)  # Simulate work
-            concurrent_syncs -= 1
-            return []
+        class TrackingQueueManager(FakeQueueManager):
+            async def get_active_queue(self) -> list[object]:
+                nonlocal sync_operations, concurrent_syncs, max_concurrent
+                concurrent_syncs += 1
+                max_concurrent = max(max_concurrent, concurrent_syncs)
+                sync_operations += 1
+                await asyncio.sleep(0.1)  # Simulate work
+                concurrent_syncs -= 1
+                return []
 
-        gitlab_client = AsyncMock()
-        gitlab_client.list_mrs_with_label = AsyncMock(return_value=[])
-        gitlab_client.rate_limit_state = create_mock_rate_limit_state()
-
-        # Mock queue manager with tracking
-        queue_manager = AsyncMock()
-        queue_manager.get_active_queue = AsyncMock(side_effect=tracked_get_active_queue)
-
-        # Mock settings
-        settings = Mock(
-            queue_label="merge_queue",
-            hotfix_label="hotfix",
-            poll_interval_seconds=30,
-            rate_limit_critical_threshold=0.95,
-        )
-
-        # Create scheduler
-        from gitlab_queue.core.scheduler import QueueScheduler
+        gitlab_client = FakeGitLabClient()
+        queue_manager = TrackingQueueManager()
+        settings = FakeSettings()
 
         scheduler = QueueScheduler(
             gitlab_client=gitlab_client,
@@ -318,6 +231,5 @@ async def scheduler_sync_lock_prevents_concurrent_syncs():
 
     with vedro.then:
         # Verify syncs ran sequentially (lock prevented concurrency)
-        # Each sync_queue() call = 1 sync operation
         assert sync_operations == 3
         assert max_concurrent == 1  # Never more than 1 concurrent sync

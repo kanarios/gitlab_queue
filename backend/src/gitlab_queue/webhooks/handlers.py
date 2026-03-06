@@ -6,7 +6,7 @@ operations based on label changes and MR state transitions.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from gitlab_queue.clients.gitlab import GitLabClient
     from gitlab_queue.config import Settings
     from gitlab_queue.core.notifier import MRNotifier
+    from gitlab_queue.core.protocols import StateMachineFactoryProtocol
     from gitlab_queue.core.queue import QueueManager
     from gitlab_queue.core.queue_position_notifier import QueuePositionNotifier
     from gitlab_queue.models.queue_item import QueueItem
@@ -49,6 +50,7 @@ class MRWebhookHandler:
     notifier: MRNotifier | None = None
     position_notifier: QueuePositionNotifier | None = None
     websocket_manager: WebSocketManager | None = None
+    state_machine_factory: StateMachineFactoryProtocol = field(default=create_state_machine_for_mr)
 
     async def _notify_position_after_add(
         self,
@@ -208,7 +210,7 @@ class MRWebhookHandler:
             return
 
         if self.notifier:
-            state_machine = await create_state_machine_for_mr(
+            state_machine = await self.state_machine_factory(
                 mr_iid=mr_iid,
                 notifier=self.notifier,
                 queue_manager=self.queue_manager,
@@ -252,7 +254,7 @@ class MRWebhookHandler:
             return
 
         if self.notifier:
-            state_machine = await create_state_machine_for_mr(
+            state_machine = await self.state_machine_factory(
                 mr_iid=mr_iid,
                 notifier=self.notifier,
                 queue_manager=self.queue_manager,
@@ -343,7 +345,7 @@ class MRWebhookHandler:
             return
 
         if self.notifier:
-            state_machine = await create_state_machine_for_mr(
+            state_machine = await self.state_machine_factory(
                 mr_iid=mr_iid,
                 notifier=self.notifier,
                 queue_manager=self.queue_manager,
@@ -589,6 +591,7 @@ class PipelineWebhookHandler:
     notifier: MRNotifier
     position_notifier: QueuePositionNotifier | None = None
     websocket_manager: WebSocketManager | None = None
+    state_machine_factory: StateMachineFactoryProtocol = field(default=create_state_machine_for_mr)
 
     async def handle(self, event: PipelineEvent) -> None:
         """Dispatch event to appropriate handler based on pipeline status.
@@ -737,7 +740,7 @@ class PipelineWebhookHandler:
             pipeline_id=pipeline_id,
         )
 
-        state_machine = await create_state_machine_for_mr(
+        state_machine = await self.state_machine_factory(
             mr_iid=mr_iid,
             notifier=self.notifier,
             queue_manager=self.queue_manager,

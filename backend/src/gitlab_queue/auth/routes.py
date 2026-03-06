@@ -167,15 +167,25 @@ async def exchange_token(
 
     _validate_oauth_params(code, state, oauth_state, error, error_description)
 
-    # Exchange code for access token (code is validated above)
-    access_token = await _exchange_code_for_token(oauth_config, code)  # type: ignore[arg-type]
-    user_info = await _fetch_user_info(oauth_config, access_token)
+    # Exchange code for access token (code is validated above by _validate_oauth_params)
+    assert code is not None  # guaranteed by _validate_oauth_params
+    access_token = await _exchange_code_for_token(
+        oauth_config,
+        code,
+        transport=app_state.oauth_transport,
+    )
+    user_info = await _fetch_user_info(
+        oauth_config,
+        access_token,
+        transport=app_state.oauth_transport,
+    )
 
     # Validate project access
     has_access = await validate_project_access(
         gitlab_url=app_state.settings.gitlab_url,
         access_token=access_token,
         project_id=app_state.settings.gitlab_project_id,
+        transport=app_state.oauth_transport,
     )
 
     if not has_access:
@@ -301,7 +311,12 @@ async def logout() -> dict[str, str]:
 # =============================================================================
 
 
-async def _exchange_code_for_token(config: OAuthConfig, code: str) -> str:
+async def _exchange_code_for_token(
+    config: OAuthConfig,
+    code: str,
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> str:
     """Exchange authorization code for access token.
 
     Args:
@@ -314,7 +329,7 @@ async def _exchange_code_for_token(config: OAuthConfig, code: str) -> str:
     Raises:
         HTTPException: 502 if token exchange fails.
     """
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(transport=transport) as client:
         try:
             response = await client.post(
                 config.token_url,
@@ -359,7 +374,12 @@ async def _exchange_code_for_token(config: OAuthConfig, code: str) -> str:
             )
 
 
-async def _fetch_user_info(config: OAuthConfig, access_token: str) -> dict[str, Any]:
+async def _fetch_user_info(
+    config: OAuthConfig,
+    access_token: str,
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> dict[str, Any]:
     """Fetch user information from GitLab API.
 
     Args:
@@ -372,7 +392,7 @@ async def _fetch_user_info(config: OAuthConfig, access_token: str) -> dict[str, 
     Raises:
         HTTPException: 502 if user info fetch fails.
     """
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(transport=transport) as client:
         try:
             response = await client.get(
                 config.userinfo_url,

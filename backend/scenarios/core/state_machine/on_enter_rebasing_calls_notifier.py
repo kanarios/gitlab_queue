@@ -30,16 +30,11 @@ class Scenario(vedro.Scenario):
         await self.sm.trigger_start_processing()
 
     def then_notifier_should_be_called_with_rebasing_template(self):
-        """
-        Verify that notifier.notify was awaited and invoked with mr_iid 123 and template "rebasing".
-
-        Asserts the notify coroutine was awaited and that its first positional argument equals 123 (mr_iid) and its second positional argument equals "rebasing" (template).
-        """
-        self.notifier.notify.assert_awaited()
-        call_args = self.notifier.notify.call_args
-        assert call_args[0][0] == 123  # mr_iid
-        assert call_args[0][1] == "rebasing"  # template
+        assert len(self.notifier.notify_calls) >= 1
+        call_args = self.notifier.notify_calls[-1]
+        assert call_args["mr_iid"] == 123
+        assert call_args["status"] == "rebasing"
 
     def and_notify_should_include_target_branch(self):
-        call_kwargs = self.notifier.notify.call_args[1]
-        assert call_kwargs.get("target_branch") == "main"
+        call_args = self.notifier.notify_calls[-1]
+        assert call_args.get("target_branch") == "main"

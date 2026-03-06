@@ -7,8 +7,6 @@ stop and trigger_pipeline_failed should be called on the state machine.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
 import vedro
 
 from gitlab_queue.clients.gitlab import GitLabConflictError
@@ -29,29 +27,20 @@ class Scenario(vedro.Scenario):
     def given_processor_with_rebase_raising_conflict(self):
         """
         Set up a mock processor and test context where a rebase operation raises GitLabConflictError.
-
-        Creates:
-        - a mock processor with its queue manager returning a queue item for MR IID 42 (state "testing", expected SHA "abc123"),
-        - a failed pipeline (id 100, sha "abc123"),
-        - a mock MR (IID 42, sha "abc123") returned by gitlab_client.get_mr,
-        - gitlab_client.rebase_mr configured as an AsyncMock that raises GitLabConflictError("Merge conflict"),
-        - a mock state machine and a processing context for MR IID 42.
-
-        Also initializes retry_count = 0, max_retries = 1, and failed_jobs = ["unit_tests"].
         """
         self.processor = create_mock_processor()
 
         self.queue_item = create_test_queue_item(mr_iid=42, state="testing", expected_sha="abc123")
-        self.processor.queue_manager.get_queue_item.return_value = self.queue_item
+        self.processor.queue_manager.add_item(self.queue_item)
 
         self.pipeline = create_mock_pipeline(pipeline_id=100, sha="abc123", status="failed")
 
         # _capture_pre_rebase_sha calls get_mr
         self.mock_mr = create_mock_mr(iid=42, sha="abc123")
-        self.processor.gitlab_client.get_mr.return_value = self.mock_mr
+        self.processor.gitlab_client.mr_responses[42] = self.mock_mr
 
         # Rebase raises conflict error
-        self.processor.gitlab_client.rebase_mr = AsyncMock(side_effect=GitLabConflictError("Merge conflict"))
+        self.processor.gitlab_client.rebase_mr_error = GitLabConflictError("Merge conflict")
 
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
@@ -96,4 +85,4 @@ class Scenario(vedro.Scenario):
 
         This verifies the processor signaled a pipeline-failure transition to the state machine.
         """
-        self.mock_sm.trigger_pipeline_failed.assert_awaited_once()
+        assert len(self.mock_sm.pipeline_failed_calls) == 1

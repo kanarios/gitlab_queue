@@ -31,16 +31,11 @@ class Scenario(vedro.Scenario):
         await self.sm.trigger_timeout(max_wait_hours=4)
 
     def then_notifier_should_be_called_with_timeout_template(self):
-        """
-        Asserts that the notifier's notify coroutine was awaited and invoked with the timeout template for mr_iid 123.
-
-        Verifies that notify was awaited, that the first positional argument equals 123 (mr_iid) and the second positional argument equals "timeout" (template).
-        """
-        self.notifier.notify.assert_awaited()
-        call_args = self.notifier.notify.call_args
-        assert call_args[0][0] == 123  # mr_iid
-        assert call_args[0][1] == "timeout"  # template
+        assert len(self.notifier.notify_calls) >= 1
+        call_args = self.notifier.notify_calls[-1]
+        assert call_args["mr_iid"] == 123
+        assert call_args["status"] == "timeout"
 
     def and_notify_should_include_max_wait(self):
-        call_kwargs = self.notifier.notify.call_args[1]
-        assert call_kwargs.get("max_wait") == 4
+        call_args = self.notifier.notify_calls[-1]
+        assert call_args.get("max_wait") == 4

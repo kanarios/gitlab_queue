@@ -11,9 +11,10 @@ rebase succeeds and a new pipeline is found.
 from __future__ import annotations
 
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock
 
 import vedro
+
+from scenarios.fakes import create_mr
 
 from .._helpers import (
     create_mock_pipeline,
@@ -30,20 +31,12 @@ class Scenario(vedro.Scenario):
     def given_processor_with_failed_pipeline_and_retry_available(self):
         """
         Prepare a test scenario with a mock processor where a failed pipeline is eligible for a retry and a new pipeline is started after a successful rebase.
-
-        Sets up:
-        - a mock processor and queue item (MR IID 42) carrying the pre-rebase expected SHA,
-        - an old failed pipeline and a new running pipeline with an updated SHA,
-        - GitLab client mocks: rebase status returns (not in progress, no conflicts), `get_mr` yields pre- and post-rebase MR states, and `get_latest_mr_pipeline` returns the new pipeline,
-        - notifier to build pipeline URLs,
-        - a mock state machine and processing context,
-        - test variables `failed_jobs`, `retry_count` (0), and `max_retries` (1).
         """
         self.processor = create_mock_processor()
 
         # Queue item carries the expected SHA for the MR
         self.queue_item = create_test_queue_item(mr_iid=42, state="testing", expected_sha="sha_old")
-        self.processor.queue_manager.get_queue_item.return_value = self.queue_item
+        self.processor.queue_manager.add_item(self.queue_item)
 
         # Old pipeline (the one that failed)
         self.old_pipeline = create_mock_pipeline(pipeline_id=100, sha="sha_old", status="failed")
@@ -52,24 +45,16 @@ class Scenario(vedro.Scenario):
         self.new_pipeline = create_mock_pipeline(pipeline_id=200, sha="sha_new", status="running")
 
         # Rebase completes immediately (not in progress, no conflicts)
-        self.processor.gitlab_client.check_rebase_status = AsyncMock(return_value=(False, False))
+        self.processor.gitlab_client.rebase_status = (False, False)
 
         # _capture_pre_rebase_sha calls get_mr (returns pre-rebase SHA),
         # then _wait_for_post_rebase_pipeline calls get_mr again (returns post-rebase SHA).
-        mock_mr_before = MagicMock()
-        mock_mr_before.sha = "sha_old"
-        mock_mr_before.rebase_in_progress = False
-        mock_mr_before.source_branch = "feature/mr-42"
+        mock_mr_before = create_mr(iid=42, sha="sha_old", source_branch="feature/mr-42")
+        mock_mr_after = create_mr(iid=42, sha="sha_new", source_branch="feature/mr-42")
 
-        mock_mr_after = MagicMock()
-        mock_mr_after.sha = "sha_new"
-        mock_mr_after.rebase_in_progress = False
-        mock_mr_after.source_branch = "feature/mr-42"
+        self.processor.gitlab_client.mr_response_sequence = [mock_mr_before, mock_mr_after, mock_mr_after]
 
-        self.processor.gitlab_client.get_mr = AsyncMock(side_effect=[mock_mr_before, mock_mr_after, mock_mr_after])
-
-        self.processor.gitlab_client.get_latest_mr_pipeline = AsyncMock(return_value=self.new_pipeline)
-        self.processor.notifier.build_pipeline_url.side_effect = lambda pid: f"https://gitlab.com/pipeline/{pid}"
+        self.processor.gitlab_client.latest_pipeline_response = self.new_pipeline
 
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
@@ -111,8 +96,8 @@ class Scenario(vedro.Scenario):
         """
         Assert that the state machine was notified exactly once about a pipeline retry and that the notification contained the expected old_pipeline_id (100), new_pipeline_id (200), retry_count (1), and max_retries (1).
         """
-        self.mock_sm.notify_pipeline_retry.assert_awaited_once()
-        call_kwargs = self.mock_sm.notify_pipeline_retry.call_args.kwargs
+        assert len(self.mock_sm.pipeline_retry_calls) == 1
+        call_kwargs = self.mock_sm.pipeline_retry_calls[0]
         assert call_kwargs["old_pipeline_id"] == 100
         assert call_kwargs["new_pipeline_id"] == 200
         assert call_kwargs["retry_count"] == 1
@@ -120,8 +105,6 @@ class Scenario(vedro.Scenario):
 
     def and_pipeline_failed_is_not_triggered(self):
         """
-        Asserts that the state machine's trigger_pipeline_failed coroutine was not awaited.
-
-        Verifies the pipeline-failed transition was not triggered in this scenario.
+        Asserts that the state machine's trigger_pipeline_failed was not called.
         """
-        self.mock_sm.trigger_pipeline_failed.assert_not_awaited()
+        assert self.mock_sm.pipeline_failed_calls == []

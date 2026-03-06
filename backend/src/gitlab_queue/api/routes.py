@@ -33,6 +33,19 @@ if TYPE_CHECKING:
 log = get_logger(__name__)
 
 
+def _create_uow(state: WebhookAppState) -> UnitOfWork:
+    """Create a UnitOfWork using state's uow_factory if available, otherwise default.
+
+    Args:
+        state: Application state with optional uow_factory.
+
+    Returns:
+        UnitOfWork context manager instance.
+    """
+    factory = state.uow_factory or UnitOfWork
+    return factory(state.database)
+
+
 # =============================================================================
 # History API Router
 # =============================================================================
@@ -66,7 +79,7 @@ async def get_history(
     """
     state: WebhookAppState = request.app.state.webhook_state
 
-    async with UnitOfWork(state.database) as uow:
+    async with _create_uow(state) as uow:
         # Get paginated history with filters
         result = await uow.history.get_history(
             page=page,
@@ -116,7 +129,7 @@ async def get_history_item(request: Request, iid: int) -> dict[str, Any]:
     """
     state: WebhookAppState = request.app.state.webhook_state
 
-    async with UnitOfWork(state.database) as uow:
+    async with _create_uow(state) as uow:
         item = await uow.history.get_by_iid(iid)
         if item is None:
             raise HTTPException(status_code=404, detail=f"MR !{iid} not found in history")
@@ -152,7 +165,7 @@ async def get_analytics_summary(
     date_from = (now - timedelta(days=days)).date()
     date_to = now.date()
 
-    async with UnitOfWork(state.database) as uow:
+    async with _create_uow(state) as uow:
         stats = await uow.history.get_stats_for_period(date_from, date_to)
 
     total_processed = stats.total_processed
@@ -188,7 +201,7 @@ async def get_hourly_analytics(
     # Convert hours to days for get_metrics (round up)
     period_days = (hours + 23) // 24
 
-    async with UnitOfWork(state.database) as uow:
+    async with _create_uow(state) as uow:
         metrics = await uow.analytics.get_metrics(period_days)
 
     # Filter hourly_trend to requested hours
@@ -220,7 +233,7 @@ async def get_outcomes_analytics(
     date_from = (now - timedelta(days=days)).date()
     date_to = now.date()
 
-    async with UnitOfWork(state.database) as uow:
+    async with _create_uow(state) as uow:
         stats = await uow.history.get_stats_for_period(date_from, date_to)
 
     total = stats.total_processed or 1  # Avoid division by zero
@@ -274,7 +287,7 @@ async def get_failure_reasons(
     date_from = (now - timedelta(days=days)).date()
     date_to = now.date()
 
-    async with UnitOfWork(state.database) as uow:
+    async with _create_uow(state) as uow:
         # Get failure reasons from history
         result = await uow.history.get_history(
             page=1,

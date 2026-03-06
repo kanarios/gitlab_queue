@@ -2,31 +2,33 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import vedro
 
 from gitlab_queue.webhooks.retry_processor import (
     WebhookRetryProcessor,
     create_retry_processor,
 )
-
-from ._helpers import (
-    create_mock_retry_manager,
-    create_mock_settings,
+from scenarios.fakes import (
+    FakeGitLabClient,
+    FakeNotifier,
+    FakeQueueManager,
+    FakeRetryManager,
+    FakeWebSocketManager,
 )
+
+from ._helpers import create_test_settings
 
 
 class Scenario(vedro.Scenario):
     subject = "create_retry_processor returns a configured WebhookRetryProcessor instance"
 
     def given_dependencies(self):
-        self.retry_manager = create_mock_retry_manager()
-        self.settings = create_mock_settings()
-        self.gitlab_client = MagicMock()
-        self.queue_manager = MagicMock()
-        self.notifier = MagicMock()
-        self.websocket_manager = MagicMock()
+        self.retry_manager = FakeRetryManager()
+        self.settings = create_test_settings()
+        self.gitlab_client = FakeGitLabClient()
+        self.queue_manager = FakeQueueManager()
+        self.notifier = FakeNotifier()
+        self.websocket_manager = FakeWebSocketManager()
 
     def when_create_retry_processor_is_called(self):
         self.processor = create_retry_processor(

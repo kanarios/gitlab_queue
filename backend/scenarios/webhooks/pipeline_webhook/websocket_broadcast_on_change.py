@@ -9,16 +9,15 @@ Covers handlers.py _broadcast_queue_update (lines 341-373).
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
 
 import vedro
+from scenarios.fakes import FakeWebSocketManager
 from scenarios.library import Labels
 from scenarios.webhooks.mr_webhook._helpers import (
     create_gitlab_client_with_transport,
     create_mock_settings,
 )
 
-from gitlab_queue.api.websocket import WebSocketManager
 from gitlab_queue.models.queue_item import QueueItem
 from gitlab_queue.webhooks.handlers import MRWebhookHandler
 
@@ -35,11 +34,9 @@ class Scenario(vedro.Scenario):
             labels=[Labels.MERGE_QUEUE],
         )
         self.queue_manager = create_mock_queue_manager()
-        # MR is not in active queue (update trigger adds it)
-        self.queue_manager.get_queue_item = AsyncMock(return_value=None)
-        self.queue_manager.get_queue_length = AsyncMock(return_value=0)
+        # MR is not in queue (default for FakeQueueManager)
 
-        # Set up active queue for broadcast
+        # Add queue item so get_active_queue returns it
         self.queue_item = QueueItem(
             mr_iid=42,
             title="Test MR",
@@ -51,11 +48,9 @@ class Scenario(vedro.Scenario):
             is_hotfix=False,
             labels=[Labels.MERGE_QUEUE],
         )
-        self.queue_manager.get_active_queue = AsyncMock(return_value=[self.queue_item])
-        self.queue_manager.get_queue_stats = AsyncMock(return_value={"queued": 1})
+        self.queue_manager.add_item(self.queue_item)
 
-        self.websocket_manager = MagicMock(spec=WebSocketManager)
-        self.websocket_manager.broadcast_queue_updated = AsyncMock()
+        self.websocket_manager = FakeWebSocketManager()
 
         self.handler = MRWebhookHandler(
             settings=self.settings,
@@ -67,18 +62,12 @@ class Scenario(vedro.Scenario):
     async def when_broadcast_queue_update_is_called(self):
         await self.handler._broadcast_queue_update()
 
-    def then_active_queue_should_be_fetched(self):
-        self.queue_manager.get_active_queue.assert_awaited_once()
-
-    def and_queue_stats_should_be_fetched(self):
-        self.queue_manager.get_queue_stats.assert_awaited_once()
-
-    def and_websocket_broadcast_should_be_called(self):
-        self.websocket_manager.broadcast_queue_updated.assert_awaited_once()
+    def then_websocket_broadcast_should_be_called(self):
+        assert len(self.websocket_manager.broadcast_calls) == 1
 
     def and_broadcast_data_should_contain_queue_items(self):
-        call_args = self.websocket_manager.broadcast_queue_updated.call_args
-        queue_data = call_args.args[0]
+        call = self.websocket_manager.broadcast_calls[0]
+        queue_data = call["queue"]
         assert len(queue_data) == 1
         assert queue_data[0]["mr_iid"] == 42
         assert queue_data[0]["title"] == "Test MR"

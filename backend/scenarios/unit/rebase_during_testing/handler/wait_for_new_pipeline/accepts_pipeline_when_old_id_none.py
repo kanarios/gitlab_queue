@@ -48,8 +48,5 @@ class Scenario(vedro.Scenario):
     def then_pipeline_was_fetched_once(self):
         """
         Assert that the handler fetched the latest merge request pipeline exactly once.
-
-        Raises:
-            AssertionError: If the mock client's `get_latest_mr_pipeline` coroutine was not awaited exactly once.
         """
-        self.client.get_latest_mr_pipeline.assert_awaited_once()
+        assert len(self.client.get_latest_pipeline_calls) == 1

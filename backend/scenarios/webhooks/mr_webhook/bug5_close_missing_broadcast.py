@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import UTC, datetime
 
 import vedro
+from scenarios.fakes import (
+    FakeGitLabClient,
+    FakeNotifier,
+    FakeQueueManager,
+    FakeStateMachine,
+    FakeStateMachineFactory,
+    FakeWebSocketManager,
+)
 
+from gitlab_queue.models.queue_item import QueueItem
 from gitlab_queue.webhooks.handlers import MRWebhookHandler
 
 from ._helpers import create_mock_settings, create_mr_event
@@ -19,20 +28,25 @@ class Scenario(vedro.Scenario):
     def given_handler_with_websocket_manager(self):
         self.settings = create_mock_settings()
 
-        self.queue_manager = MagicMock()
-        self.queue_manager.get_queue_item = AsyncMock(return_value=MagicMock())
-        self.queue_manager.get_active_queue = AsyncMock(return_value=[])
-        self.queue_manager.get_queue_stats = AsyncMock(return_value={})
-        self.queue_manager.complete_mr = AsyncMock(return_value=True)
+        self.queue_manager = FakeQueueManager()
+        self.queue_manager.add_item(
+            QueueItem(
+                mr_iid=MR_IID,
+                title="Test",
+                author_name="A",
+                author_username="a",
+                target_branch="main",
+                state="queued",
+                queued_at=datetime.now(UTC),
+            )
+        )
 
-        self.gitlab_client = MagicMock()
-        self.gitlab_client.remove_mr_label = AsyncMock()
+        self.gitlab_client = FakeGitLabClient()
+        self.notifier = FakeNotifier()
+        self.websocket_manager = FakeWebSocketManager()
 
-        self.notifier = MagicMock()
-        self.notifier.notify = AsyncMock()
-
-        self.websocket_manager = MagicMock()
-        self.websocket_manager.broadcast_queue_updated = AsyncMock()
+        self.fake_sm = FakeStateMachine()
+        self.sm_factory = FakeStateMachineFactory(state_machine=self.fake_sm)
 
         self.handler = MRWebhookHandler(
             settings=self.settings,
@@ -40,19 +54,15 @@ class Scenario(vedro.Scenario):
             queue_manager=self.queue_manager,
             notifier=self.notifier,
             websocket_manager=self.websocket_manager,
+            state_machine_factory=self.sm_factory,
         )
         self.event = create_mr_event(iid=MR_IID, action="close", state="closed")
 
     async def when_close_event_is_handled(self):
-        with patch(
-            "gitlab_queue.webhooks.handlers.create_state_machine_for_mr",
-            new_callable=AsyncMock,
-        ) as mock_sm:
-            sm = MagicMock()
-            sm.trigger_mark_removed = AsyncMock()
-            mock_sm.return_value = sm
-
-            await self.handler.handle(self.event)
+        await self.handler.handle(self.event)
 
     def then_websocket_broadcast_should_happen(self):
-        self.websocket_manager.broadcast_queue_updated.assert_awaited()
+        queue_updated = [c for c in self.websocket_manager.broadcast_calls if c.get("type") == "queue_updated"]
+        assert len(queue_updated) > 0, (
+            f"Expected broadcast_queue_updated call, got: {self.websocket_manager.broadcast_calls}"
+        )

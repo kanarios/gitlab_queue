@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
 import vedro
+
+from scenarios.fakes import FakeGitLabClient
 
 from ._helpers import create_test_notifier
 
@@ -16,14 +16,13 @@ class Scenario(vedro.Scenario):
         """
         Set up a notifier whose GitLab client raises an exception when removing a merge request label.
 
-        Creates an AsyncMock gitlab_client whose remove_mr_label raises RuntimeError("GitLab API unavailable"), assigns a test notifier configured with that client to `self.notifier`, and sets `self.mr_iid` to 42.
+        Creates a FakeGitLabClient with remove_label_error configured to raise RuntimeError,
+        assigns a test notifier configured with that client to `self.notifier`, and sets `self.mr_iid` to 42.
         """
-        gitlab_client = AsyncMock()
-        gitlab_client.remove_mr_label = AsyncMock(
-            side_effect=RuntimeError("GitLab API unavailable"),
+        self.gitlab_client = FakeGitLabClient(
+            remove_label_error=RuntimeError("GitLab API unavailable"),
         )
-
-        self.notifier = create_test_notifier(gitlab_client=gitlab_client)
+        self.notifier = create_test_notifier(gitlab_client=self.gitlab_client)
         self.mr_iid = 42
 
     async def when_remove_queue_label_is_called(self):
@@ -49,9 +48,11 @@ class Scenario(vedro.Scenario):
 
     def and_gitlab_client_was_called_with_correct_args(self):
         """
-        Asserts that the notifier's GitLab client was awaited exactly once to remove the queue label using the scenario's MR IID and the notifier's configured queue label.
+        Asserts that the notifier's GitLab client was called to remove the queue label
+        using the scenario's MR IID and the notifier's configured queue label.
         """
-        self.notifier.gitlab_client.remove_mr_label.assert_awaited_once_with(
+        assert len(self.gitlab_client.remove_label_calls) == 1
+        assert self.gitlab_client.remove_label_calls[0] == (
             self.mr_iid,
             self.notifier.settings.queue_label,
         )

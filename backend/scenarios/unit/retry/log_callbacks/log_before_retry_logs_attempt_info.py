@@ -2,26 +2,26 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import vedro
 
 from gitlab_queue.clients.gitlab import GitLabServerError
 from gitlab_queue.utils.retry import log_before_retry
+from scenarios.fakes import FakeNextAction, FakeOutcome, FakeRetryCallState
 
 
 class Scenario(vedro.Scenario):
     subject = "log_before_retry logs attempt info without raising"
 
     def given_retry_call_state_with_failed_outcome(self):
-        self.state = MagicMock()
-        self.state.outcome = MagicMock()
-        self.state.outcome.exception.return_value = GitLabServerError("Internal Server Error", status_code=500)
-        self.state.outcome.failed = True
-        self.state.next_action = MagicMock()
-        self.state.next_action.sleep = 1.0
-        self.state.seconds_since_start = 0.5
-        self.state.attempt_number = 2
+        self.state = FakeRetryCallState(
+            outcome=FakeOutcome(
+                _exception=GitLabServerError("Internal Server Error", status_code=500),
+                failed=True,
+            ),
+            next_action=FakeNextAction(sleep=1.0),
+            seconds_since_start=0.5,
+            attempt_number=2,
+        )
 
     def when_log_before_retry_is_called(self):
         self.raised = None

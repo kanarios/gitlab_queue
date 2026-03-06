@@ -1,47 +1,47 @@
 """Test merge_mr succeeds when merge_status is 'can_be_merged'."""
 
-from unittest.mock import AsyncMock, patch
-
 import vedro
 
-from gitlab_queue.clients.gitlab import GitLabClient
+from scenarios.transports import GitLabMockTransport
+from scenarios.transports.responses import mr_response
 
-from ._helpers import _mr_to_dict, create_gitlab_client_for_test, create_mr
+from ._helpers import (
+    PROJECT_ID,
+    create_merge_mr_client,
+    mr_get_path,
+    mr_get_response,
+    mr_merge_path,
+)
 
 
 class Scenario(vedro.Scenario):
     subject = "merge_mr succeeds when merge_status is 'can_be_merged'"
 
     def given_mr_ready_to_merge(self):
-        self.mr = create_mr(merge_status="can_be_merged")
         self.iid = 42
+        self.transport = GitLabMockTransport()
+        self.transport.register_sequence(
+            "GET",
+            mr_get_path(self.iid),
+            [mr_get_response(self.iid, merge_status="can_be_merged")],
+        )
+        self.transport.register_put(
+            mr_merge_path(self.iid),
+            json_data=mr_response(iid=self.iid, project_id=PROJECT_ID, state="merged"),
+        )
+        self.client = create_merge_mr_client(self.transport)
 
     async def when_merge_mr_is_called(self):
-        with (
-            patch.object(GitLabClient, "get_mr", new_callable=AsyncMock) as mock_get_mr,
-            patch.object(GitLabClient, "put", new_callable=AsyncMock) as mock_put,
-        ):
-            mock_get_mr.return_value = self.mr
-            mock_put.return_value = _mr_to_dict("merged")
-
-            client = create_gitlab_client_for_test()
-            self.result = await client.merge_mr(self.iid)
-            self.mock_get_mr = mock_get_mr
-            self.mock_put = mock_put
+        self.result = await self.client.merge_mr(self.iid)
 
     def then_mr_is_merged(self):
         assert self.result.state == "merged"
 
     def and_get_mr_called_once(self):
-        self.mock_get_mr.assert_awaited_once()
+        get_requests = [r for r in self.transport.history if r.method == "GET"]
+        assert len(get_requests) == 1
 
     def and_put_called_with_merge_endpoint(self):
-        """
-        Verify the GitLab client's PUT was awaited once and targeted the merge endpoint for the MR with iid 42.
-
-        Raises:
-                AssertionError: If the PUT was not awaited exactly once or if the request URL does not include '/merge_requests/42/merge'.
-        """
-        self.mock_put.assert_awaited_once()
-        call_args = self.mock_put.call_args
-        assert "/merge_requests/42/merge" in call_args.args[0]
+        put_requests = [r for r in self.transport.history if r.method == "PUT"]
+        assert len(put_requests) == 1
+        assert "/merge_requests/42/merge" in str(put_requests[0].url.path)

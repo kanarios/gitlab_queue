@@ -282,13 +282,17 @@ class GitLabClient:
         self,
         settings: Settings,
         transport: httpx.AsyncBaseTransport | None = None,
+        *,
+        sleep_fn: Any | None = None,
     ) -> None:
         """Initialize GitLab client with settings.
 
         Args:
             settings: Application settings with GitLab configuration.
             transport: Optional custom transport for testing. If None, uses default.
+            sleep_fn: Optional async sleep function for testing. Defaults to asyncio.sleep.
         """
+        self._sleep_fn = sleep_fn or asyncio.sleep
         self._settings = settings
         self._gitlab_url = settings.gitlab_url.rstrip("/")
         self._base_url = f"{self._gitlab_url}/api/v4"
@@ -501,7 +505,7 @@ class GitLabClient:
         wait_seconds = min(wait_seconds, 300)  # Cap at 5 minutes
 
         log.info("Waiting for rate limit reset", wait_seconds=wait_seconds)
-        await asyncio.sleep(wait_seconds)
+        await self._sleep_fn(wait_seconds)
 
     async def _update_rate_limit_state(self, response: httpx.Response) -> None:
         """Update rate limit state from response headers.
@@ -580,7 +584,7 @@ class GitLabClient:
             usage_ratio=round(ratio, 3),
         )
 
-        await asyncio.sleep(delay)
+        await self._sleep_fn(delay)
 
     async def _request(
         self,
@@ -1191,7 +1195,7 @@ class GitLabClient:
 
             if mr.merge_status == "checking":
                 log.info("Waiting for merge status check", mr_iid=iid, attempt=attempt + 1, max_retries=max_retries)
-                await asyncio.sleep(retry_delay)
+                await self._sleep_fn(retry_delay)
                 continue
 
             if mr.merge_status != "can_be_merged":
@@ -1211,7 +1215,7 @@ class GitLabClient:
                         attempt=attempt + 1,
                         error=str(e),
                     )
-                    await asyncio.sleep(retry_delay)
+                    await self._sleep_fn(retry_delay)
                     continue
                 log.exception("Failed to merge MR", mr_iid=iid)
                 raise

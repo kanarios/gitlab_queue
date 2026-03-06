@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import vedro
 
 from gitlab_queue.core.queue import QueueCache
+
+_STUB_ITEM = object()
 
 
 class Scenario(vedro.Scenario):
@@ -14,7 +14,7 @@ class Scenario(vedro.Scenario):
         self.cache = QueueCache()
 
     def when_cache_is_invalidated_and_stale_set_attempted(self):
-        initial_items = [MagicMock()]
+        initial_items = [_STUB_ITEM]
         self.cache.set_active_queue(initial_items, version=self.cache.version)
         assert self.cache.get_active_queue() is initial_items
 
@@ -23,7 +23,7 @@ class Scenario(vedro.Scenario):
         assert self.cache.version == version_before + 1
         assert self.cache.get_active_queue() is None
 
-        stale_items = [MagicMock()]
+        stale_items = [object()]
         self.cache.set_active_queue(stale_items, version=version_before)
 
     def then_cache_should_remain_invalid(self):

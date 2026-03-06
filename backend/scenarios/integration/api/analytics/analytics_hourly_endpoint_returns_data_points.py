@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
 
 import vedro
 from scenarios.contexts.api_helpers import (
     created_test_app,
     created_test_jwt,
 )
+from scenarios.fakes import AnalyticsMetrics, FakeAnalyticsRepo, FakeUnitOfWork
 from scenarios.schemas.status_code import OkStatusSchema
 from starlette.testclient import TestClient
 
@@ -23,26 +23,18 @@ class Scenario(vedro.Scenario):
         self.token = created_test_jwt(self.state.settings)
         self.headers = {"Authorization": f"Bearer {self.token}"}
 
-        # Mock hourly data
         now = datetime.now(UTC)
         hourly_data = [
             {"timestamp": (now).isoformat(), "queue_depth": 5, "processed_count": 3},
             {"timestamp": (now).isoformat(), "queue_depth": 4, "processed_count": 2},
         ]
 
-        mock_metrics = MagicMock()
-        mock_metrics.hourly_trend = hourly_data
+        analytics_repo = FakeAnalyticsRepo(
+            metrics_result=AnalyticsMetrics(hourly_trend=hourly_data),
+        )
+        uow = FakeUnitOfWork(analytics=analytics_repo)
 
-        mock_uow = AsyncMock()
-        mock_uow.analytics = AsyncMock()
-        mock_uow.analytics.get_metrics = AsyncMock(return_value=mock_metrics)
-        mock_uow.__aenter__ = AsyncMock(return_value=mock_uow)
-        mock_uow.__aexit__ = AsyncMock(return_value=None)
-
-        import gitlab_queue.api.routes as routes_module
-
-        self._original_uow = routes_module.UnitOfWork
-        routes_module.UnitOfWork = MagicMock(return_value=mock_uow)
+        self.state.uow_factory = lambda db: uow
 
     def when_hourly_endpoint_is_called(self):
         self.response = self.client.get(
@@ -64,8 +56,3 @@ class Scenario(vedro.Scenario):
             assert "timestamp" in point
             assert "queue_depth" in point
             assert "processed_count" in point
-
-    def cleanup(self):
-        import gitlab_queue.api.routes as routes_module
-
-        routes_module.UnitOfWork = self._original_uow

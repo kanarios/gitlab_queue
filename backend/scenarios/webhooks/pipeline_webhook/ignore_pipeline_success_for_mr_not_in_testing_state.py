@@ -1,7 +1,5 @@
 """Test: ignore pipeline success for MR not in testing state."""
 
-from unittest.mock import AsyncMock
-
 import vedro
 
 from gitlab_queue.webhooks.handlers import PipelineWebhookHandler
@@ -23,7 +21,7 @@ class Scenario(vedro.Scenario):
         self.settings = create_mock_settings()
         self.gitlab_client, self.transport = create_gitlab_client_with_transport()
         self.queue_manager = create_mock_queue_manager()
-        self.queue_manager.get_queue_item = AsyncMock(return_value=create_queue_item_in_state("queued", mr_iid=123))
+        self.queue_manager.add_item(create_queue_item_in_state("queued", mr_iid=123))
         self.handler = PipelineWebhookHandler(
             settings=self.settings,
             gitlab_client=self.gitlab_client,
@@ -36,7 +34,7 @@ class Scenario(vedro.Scenario):
         await self.handler.handle(self.event)
 
     def then_no_state_update_should_happen(self):
-        self.queue_manager.update_mr_state.assert_not_awaited()
+        assert self.queue_manager.update_state_calls == []
 
     async def cleanup(self):
         await self.gitlab_client.close()

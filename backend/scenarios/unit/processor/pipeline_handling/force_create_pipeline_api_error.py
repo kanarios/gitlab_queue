@@ -8,14 +8,12 @@ return (False, None).
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
 import vedro
 
 from gitlab_queue.clients.gitlab import GitLabAPIError
+from scenarios.fakes import create_mr
 
 from .._helpers import (
-    create_mock_mr,
     create_mock_pipeline,
     create_mock_processor,
     create_mock_state_machine,
@@ -30,40 +28,27 @@ class Scenario(vedro.Scenario):
     def given_processor_with_create_pipeline_failing(self):
         """
         Prepare a mock processor and context where forcing a pipeline creation fails with a GitLabAPIError.
-
-        Configures:
-        - a test queue item (mr_iid=42) and an old failed pipeline (id=100, sha="sha_old");
-        - gitlab client to report rebase complete and to return an MR with sha "sha_new";
-        - get_latest_mr_pipeline to return the old pipeline (no new auto-created pipeline);
-        - create_pipeline to raise GitLabAPIError("Pipeline creation failed");
-        - notifier.build_pipeline_url to format pipeline URLs;
-        - a mock state machine and processing context for mr_iid=42;
-        - retry parameters: retry_count=0, max_retries=1, and failed_jobs=["test_job"].
         """
         self.processor = create_mock_processor()
 
         self.queue_item = create_test_queue_item(mr_iid=42, state="testing", expected_sha="sha_old")
-        self.processor.queue_manager.get_queue_item.return_value = self.queue_item
+        self.processor.queue_manager.add_item(self.queue_item)
 
         self.old_pipeline = create_mock_pipeline(pipeline_id=100, sha="sha_old", status="failed")
 
         # Rebase completes immediately
-        self.processor.gitlab_client.check_rebase_status = AsyncMock(return_value=(False, False))
+        self.processor.gitlab_client.rebase_status = (False, False)
 
         # MR after rebase has new SHA
-        self.mock_mr = create_mock_mr(iid=42, sha="sha_new")
-        self.mock_mr.source_branch = "feature/mr-42"
-        self.mock_mr.rebase_in_progress = False
-        self.processor.gitlab_client.get_mr.return_value = self.mock_mr
+        self.mock_mr = create_mr(iid=42, sha="sha_new", source_branch="feature/mr-42")
+        self.processor.gitlab_client.mr_responses[42] = self.mock_mr
 
         # _wait_for_post_rebase_pipeline returns the same pipeline
         # (simulates no new auto-created pipeline found, same old id)
-        self.processor.gitlab_client.get_latest_mr_pipeline = AsyncMock(return_value=self.old_pipeline)
+        self.processor.gitlab_client.latest_pipeline_response = self.old_pipeline
 
         # Force-create pipeline raises API error
-        self.processor.gitlab_client.create_pipeline = AsyncMock(side_effect=GitLabAPIError("Pipeline creation failed"))
-
-        self.processor.notifier.build_pipeline_url.side_effect = lambda pid: f"https://gitlab.com/pipeline/{pid}"
+        self.processor.gitlab_client.create_pipeline_error = GitLabAPIError("Pipeline creation failed")
 
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)

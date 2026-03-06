@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
 import vedro
 from scenarios.contexts.api_helpers import (
     created_test_app,
@@ -21,8 +19,6 @@ class Scenario(vedro.Scenario):
         self.client = TestClient(self.app, raise_server_exceptions=False)
         self.token = created_test_jwt(self.state.settings)
         self.headers = {"Authorization": f"Bearer {self.token}"}
-
-        self.state.queue_manager.get_active_queue = AsyncMock(return_value=[])
 
     def when_active_queue_is_requested(self):
         self.response = self.client.get("/api/queue/active", headers=self.headers)
