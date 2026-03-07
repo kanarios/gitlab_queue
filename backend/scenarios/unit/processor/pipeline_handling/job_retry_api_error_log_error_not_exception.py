@@ -50,6 +50,7 @@ class Scenario(vedro.Scenario):
         exception_entries = [e for e in self.captured if e.get("log_level") == "error"]
         assert exception_entries == [], f"Expected no log.exception calls, got: {exception_entries}"
 
-    def and_log_warning_was_called(self):
+    def and_log_warning_about_retry_failure_was_emitted(self):
         warning_entries = [e for e in self.captured if e.get("log_level") == "warning"]
-        assert len(warning_entries) >= 1
+        retry_warnings = [e for e in warning_entries if "Failed to retry pipeline jobs" in e.get("event", "")]
+        assert len(retry_warnings) == 1

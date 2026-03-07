@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 import vedro
 
 from gitlab_queue.core.rebase_during_testing import RebaseDuringTestingContext
-from gitlab_queue.core.types import RebaseCheckOutcome
+from gitlab_queue.core.types import ProcessingResult, RebaseCheckOutcome
 from scenarios.fakes import FakeGitLabClient, FakeQueueManager
 
 from .._helpers import (
@@ -75,7 +75,10 @@ class Scenario(vedro.Scenario):
     async def when_wait_for_pipeline_is_called(self):
         self.result = await self.handler.wait_for_pipeline(self.ctx)
 
-    def then_retried_jobs_persisted_to_db_as_empty(self):
+    def then_result_is_success(self):
+        assert self.result == ProcessingResult.SUCCESS
+
+    def and_retried_jobs_persisted_to_db_as_empty(self):
         retried_jobs_values = [
             call.get("retried_jobs") for call in self.queue_manager.update_state_calls if "retried_jobs" in call
         ]

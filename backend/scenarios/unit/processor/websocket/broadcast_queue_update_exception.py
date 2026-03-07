@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import structlog.testing
 import vedro
 
 from .._helpers import create_mock_processor
@@ -36,15 +37,21 @@ class Scenario(vedro.Scenario):
         self.processor.set_websocket_manager(self.websocket_manager)
 
     async def when_broadcast_queue_update_is_called(self):
-        # Should not raise — exception is caught at lines 1516-1517
+        # Should not raise — exception is caught and logged as warning
         self.exception = None
-        try:
-            await self.processor._broadcast_queue_update()
-        except Exception as e:
-            self.exception = e
+        with structlog.testing.capture_logs() as self.captured:
+            try:
+                await self.processor._broadcast_queue_update()
+            except Exception as e:
+                self.exception = e
 
     def then_no_exception_was_raised(self):
         assert self.exception is None
 
     def and_broadcast_was_attempted(self):
         assert self.websocket_manager.broadcast_attempted is True
+
+    def and_warning_about_broadcast_failure_was_logged(self):
+        warning_entries = [e for e in self.captured if e.get("log_level") == "warning"]
+        broadcast_warnings = [e for e in warning_entries if "Failed to broadcast queue update" in e.get("event", "")]
+        assert len(broadcast_warnings) == 1

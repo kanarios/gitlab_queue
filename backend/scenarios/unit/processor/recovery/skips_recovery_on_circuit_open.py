@@ -19,7 +19,7 @@ class Scenario(vedro.Scenario):
     def given_processor_with_circuit_open(self):
         self.processor = create_mock_processor()
 
-        self.queue_item = create_test_queue_item(mr_iid=42, state="queued")
+        self.queue_item = create_test_queue_item(mr_iid=42, state="rebasing")
         self.processor.queue_manager.add_item(self.queue_item)
 
         self.processor.gitlab_client.get_mr_error = GitLabCircuitOpenError("Circuit open", retry_after=30)

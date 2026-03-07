@@ -62,7 +62,7 @@ class Scenario(vedro.Scenario):
     def and_pipeline_failed_is_triggered_on_state_machine(self):
         assert len(self.mock_sm.pipeline_failed_calls) == 1
         call_kwargs = self.mock_sm.pipeline_failed_calls[0]
-        assert "unit_tests" in call_kwargs["failed_jobs"] or "lint" in call_kwargs["failed_jobs"]
+        assert {"unit_tests", "lint"} <= set(call_kwargs["failed_jobs"])
 
     def and_rebase_is_not_attempted(self):
         assert self.processor.gitlab_client.rebase_calls == []
