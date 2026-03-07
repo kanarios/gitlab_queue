@@ -258,18 +258,11 @@ class RebaseHandler:
 
             # SHA changed, need pipeline with new SHA
             if pipeline and pipeline.sha == new_sha:
-                if pipeline.status in TERMINAL_PIPELINE_STATUSES:
-                    log.info(
-                        "Skipping pre-existing terminal pipeline after rebase",
-                        mr_iid=mr_iid,
-                        pipeline_id=pipeline.id,
-                        pipeline_status=pipeline.status,
-                    )
-                    return PollStatus.CONTINUE, None
                 log.info(
                     "Found pipeline with new SHA after rebase",
                     mr_iid=mr_iid,
                     pipeline_id=pipeline.id,
+                    pipeline_status=pipeline.status,
                     old_sha=old_sha[:8],
                     new_sha=new_sha[:8],
                 )
