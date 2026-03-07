@@ -721,6 +721,7 @@ class MRStateMachine(StateMachine):
         new_pipeline_id: int,
         rebase_count: int,
         max_attempts: int,
+        expected_sha: str | None = None,
     ) -> None:
         """Notify about rebase during testing (stays in testing state).
 
@@ -732,6 +733,7 @@ class MRStateMachine(StateMachine):
             new_pipeline_id: ID of the new pipeline after rebase.
             rebase_count: Current rebase attempt number.
             max_attempts: Maximum rebase attempts allowed.
+            expected_sha: New SHA after rebase (for race condition prevention).
         """
         log.info(
             "Notifying rebase during testing",
@@ -742,12 +744,13 @@ class MRStateMachine(StateMachine):
             max_attempts=max_attempts,
         )
 
-        # Update pipeline_id in DB
+        # Update pipeline_id and expected_sha in DB
         await self.queue_manager.update_mr_state(
             self.mr_iid,
             "testing",
             pipeline_id=new_pipeline_id,
             pipeline_status="running",
+            expected_sha=expected_sha,
         )
 
         # Build pipeline URL
@@ -756,6 +759,7 @@ class MRStateMachine(StateMachine):
         # Update context
         self._context["pipeline_id"] = new_pipeline_id
         self._context["pipeline_url"] = pipeline_url
+        self._context["expected_sha"] = expected_sha
 
         await self.notifier.notify(
             self.mr_iid,

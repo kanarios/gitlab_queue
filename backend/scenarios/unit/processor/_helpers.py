@@ -227,6 +227,41 @@ async def instant_poll(
     )
 
 
+async def exhaustive_poll(
+    config: PollingConfig,
+    fn: Callable[[], Awaitable[tuple[PollStatus, Any]]],
+    shutdown_event: asyncio.Event,
+    max_iterations: int = 10,
+    **kwargs: Any,
+) -> PollOutcome[Any]:
+    """Poll function that calls fn repeatedly until DONE (max iterations).
+
+    Useful for testing multi-step polling scenarios like race conditions.
+    """
+    for _ in range(max_iterations):
+        if shutdown_event.is_set():
+            return PollOutcome(
+                completed=False,
+                timed_out=False,
+                shutdown_requested=True,
+                result=None,
+            )
+        status, result = await fn()
+        if status == PollStatus.DONE:
+            return PollOutcome(
+                completed=True,
+                timed_out=False,
+                shutdown_requested=False,
+                result=result,
+            )
+    return PollOutcome(
+        completed=False,
+        timed_out=True,
+        shutdown_requested=False,
+        result=None,
+    )
+
+
 __all__ = [
     "create_mock_gitlab_client",
     "create_mock_mr",
@@ -240,5 +275,6 @@ __all__ = [
     "create_processing_context",
     "create_test_pipeline_handler",
     "create_test_queue_item",
+    "exhaustive_poll",
     "instant_poll",
 ]

@@ -29,7 +29,7 @@ class Scenario(vedro.Scenario):
 
     def given_processor_with_mr_in_rebasing_state(self):
         self.gitlab_client = FakeGitLabClient()
-        # First get_mr (for _capture_pre_rebase_sha) returns pre-rebase SHA
+        # First get_mr (for _capture_pre_rebase_state) returns pre-rebase SHA
         self.gitlab_client.mr_response_sequence = [
             create_mr(iid=42, sha="old_sha", labels=["merge_queue"]),
         ]

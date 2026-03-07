@@ -63,7 +63,12 @@ class FakeDatabase:
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[FakeSession]:
         if self._transaction_sessions:
-            session = self._transaction_sessions[self._transaction_index % len(self._transaction_sessions)]
+            if self._transaction_index >= len(self._transaction_sessions):
+                raise AssertionError(
+                    f"FakeDatabase: no more transaction sessions "
+                    f"(seeded {len(self._transaction_sessions)}, requested #{self._transaction_index + 1})"
+                )
+            session = self._transaction_sessions[self._transaction_index]
             self._transaction_index += 1
         else:
             session = FakeSession()
@@ -72,7 +77,12 @@ class FakeDatabase:
     @asynccontextmanager
     async def session(self) -> AsyncIterator[FakeSession]:
         if self._session_sessions:
-            session = self._session_sessions[self._session_index % len(self._session_sessions)]
+            if self._session_index >= len(self._session_sessions):
+                raise AssertionError(
+                    f"FakeDatabase: no more read sessions "
+                    f"(seeded {len(self._session_sessions)}, requested #{self._session_index + 1})"
+                )
+            session = self._session_sessions[self._session_index]
             self._session_index += 1
         else:
             session = FakeSession()
