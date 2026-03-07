@@ -358,6 +358,9 @@ async def concurrent_add_and_remove():
             if unexpected:
                 raise unexpected[0]
 
+            successes = [r for r in results if not isinstance(r, Exception)]
+            assert len(successes) >= 1
+
             queue_items = await queue.get_active_queue()
 
         with then("queue state is consistent (MR removed or never added)"):

@@ -239,6 +239,13 @@ async def exhaustive_poll(
     Useful for testing multi-step polling scenarios like race conditions.
     """
     for _ in range(max_iterations):
+        if shutdown_event.is_set():
+            return PollOutcome(
+                completed=False,
+                timed_out=False,
+                shutdown_requested=True,
+                result=None,
+            )
         status, result = await fn()
         if status == PollStatus.DONE:
             return PollOutcome(

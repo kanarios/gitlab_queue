@@ -216,16 +216,6 @@ class RebaseHandler:
             new_sha = mr.sha
             pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
 
-            # Skip stale pipeline from before rebase (race condition protection)
-            if pipeline and old_pipeline_id is not None and pipeline.id == old_pipeline_id:
-                log.info(
-                    "Skipping stale pipeline from before rebase",
-                    mr_iid=mr_iid,
-                    pipeline_id=pipeline.id,
-                    old_pipeline_id=old_pipeline_id,
-                )
-                return PollStatus.CONTINUE, None
-
             # Fast-forward case: SHA unchanged (no commits ahead of target)
             if new_sha == old_sha:
                 if pipeline and pipeline.sha == new_sha:
@@ -237,7 +227,33 @@ class RebaseHandler:
                             pipeline_status=pipeline.status,
                         )
                         return PollStatus.CONTINUE, None
+                    # Terminal success pipeline with old_pipeline_id may be stale
+                    # (race condition: SHA not yet updated by GitLab API).
+                    # Non-terminal (running/pending) pipeline is always valid here.
+                    if (
+                        old_pipeline_id is not None
+                        and pipeline.id == old_pipeline_id
+                        and pipeline.status in TERMINAL_PIPELINE_STATUSES
+                    ):
+                        log.info(
+                            "Skipping possibly stale terminal pipeline in fast-forward case",
+                            mr_iid=mr_iid,
+                            pipeline_id=pipeline.id,
+                            old_pipeline_id=old_pipeline_id,
+                            pipeline_status=pipeline.status,
+                        )
+                        return PollStatus.CONTINUE, None
                     return PollStatus.DONE, (pipeline, new_sha)
+                return PollStatus.CONTINUE, None
+
+            # SHA changed — skip stale pipeline from before rebase (race condition)
+            if pipeline and old_pipeline_id is not None and pipeline.id == old_pipeline_id:
+                log.info(
+                    "Skipping stale pipeline from before rebase",
+                    mr_iid=mr_iid,
+                    pipeline_id=pipeline.id,
+                    old_pipeline_id=old_pipeline_id,
+                )
                 return PollStatus.CONTINUE, None
 
             # SHA changed, need pipeline with new SHA
