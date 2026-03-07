@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import vedro
 
+from scenarios.fakes import create_job
+
 from .._helpers import (
     create_mock_pipeline,
     create_mock_processor,
@@ -29,8 +31,6 @@ class Scenario(vedro.Scenario):
         self.pipeline = create_mock_pipeline(pipeline_id=100, sha="abc123", status="failed")
 
         # Set up jobs that have already been retried to the max (job_retry_count=1 by default)
-        from scenarios.fakes import create_job
-
         self.processor.gitlab_client.pipeline_jobs_response = [
             create_job(id=1, name="unit_tests", status="failed"),
             create_job(id=2, name="lint", status="failed"),

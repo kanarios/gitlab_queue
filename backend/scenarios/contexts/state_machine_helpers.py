@@ -7,9 +7,12 @@ MRStateMachine transitions and callbacks.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING
 
 from gitlab_queue.core.state_machine import MRStateMachine
+
+if TYPE_CHECKING:
+    from gitlab_queue.core.protocols import NotifierProtocol, QueueManagerProtocol
 from gitlab_queue.models.queue_item import QueueItem
 from scenarios.fakes import FakeNotifier, FakeQueueManager
 from scenarios.library import QueueState
@@ -46,8 +49,8 @@ def create_mock_queue_manager() -> FakeQueueManager:
 
 
 async def create_state_machine(
-    notifier: Any,
-    queue_manager: Any,
+    notifier: NotifierProtocol,
+    queue_manager: QueueManagerProtocol,
     mr_iid: int = 123,
     *,
     start_value: str | None = None,

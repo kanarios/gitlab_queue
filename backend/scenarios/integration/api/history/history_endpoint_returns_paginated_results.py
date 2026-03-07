@@ -24,6 +24,7 @@ class Scenario(vedro.Scenario):
 
     def given_app_with_history_data(self):
         history_items = create_test_history_items(count=15)
+        self.first_item = history_items[0]
         history_repo = FakeHistoryRepo(
             get_history_result=PaginatedHistoryResult(
                 items=[_queue_item_to_history_model(item) for item in history_items[:10]],
@@ -48,15 +49,19 @@ class Scenario(vedro.Scenario):
             headers=self.headers,
         )
 
-    def then_it_should_return_paginated_data(self):
+    def then_it_should_return_ok(self):
         assert self.response.status_code == OkStatusSchema
+
+    def and_it_should_return_exactly_10_items(self):
         data = self.response.json()
+        assert len(data["items"]) == 10
 
-        assert "items" in data
-        assert "pagination" in data
-        assert len(data["items"]) <= 10
+    def and_first_item_should_match(self):
+        data = self.response.json()
+        assert data["items"][0]["mr_iid"] == self.first_item.mr_iid
 
-        pagination = data["pagination"]
+    def and_pagination_should_be_correct(self):
+        pagination = self.response.json()["pagination"]
         assert pagination["page"] == 1
         assert pagination["per_page"] == 10
         assert pagination["total"] == 15

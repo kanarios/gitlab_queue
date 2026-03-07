@@ -38,8 +38,11 @@ async def hotfix_jumps_to_front_of_queue():
         assert first is not None
         assert first.mr_iid == 99
 
+    with when("hotfix is completed and get_next_mr is called again"):
         first.state = "merged"
         second = await queue_manager.get_next_mr()
+
+    with then("regular MR is returned next"):
         assert second is not None
         assert second.mr_iid == 10
 

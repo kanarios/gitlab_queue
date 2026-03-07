@@ -343,13 +343,16 @@ async def concurrent_add_and_remove():
             )
 
             # Run add then remove concurrently (multiple times)
-            await asyncio.gather(
+            results = await asyncio.gather(
                 webhook_handler.handle_merge_request_event(webhook_labeled),
                 webhook_handler.handle_merge_request_event(webhook_unlabeled),
                 webhook_handler.handle_merge_request_event(webhook_labeled),
                 webhook_handler.handle_merge_request_event(webhook_unlabeled),
                 return_exceptions=True,
             )
+            for r in results:
+                if isinstance(r, Exception):
+                    raise r
 
             queue_items = await queue.get_active_queue()
 
@@ -361,7 +364,8 @@ async def concurrent_add_and_remove():
             # If MR is in queue, it should not be in 'removed' state
             for item in queue_items:
                 item_state = await queue.get_mr_state(item.mr_iid)
-                assert item_state != "removed", "Active queue item should not be 'removed'"
+                assert item_state is not None
+                assert item_state["status"] != "removed", "Active queue item should not be 'removed'"
 
 
 @scenario()

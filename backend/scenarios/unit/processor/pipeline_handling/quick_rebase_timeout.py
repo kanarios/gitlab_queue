@@ -31,6 +31,8 @@ class Scenario(vedro.Scenario):
             notifier=FakeNotifier(),
             settings=FakeSettings(),
             shutdown_event=asyncio.Event(),
+            quick_rebase_timeout=1,
+            quick_rebase_poll_interval=0,
         )
 
         self.ctx = create_processing_context(mr_iid=42)

@@ -90,7 +90,9 @@ class FakeRetryManager:
         self.retry_dlq_calls.append(entry_id)
         if self.dlq_error:
             raise self.dlq_error
-        return self._next_id
+        current_id = self._next_id
+        self._next_id += 1
+        return current_id
 
     async def delete_dlq_entry(self, entry_id: int) -> bool:
         self.delete_dlq_calls.append(entry_id)

@@ -7,14 +7,14 @@ from typing import TYPE_CHECKING, Any
 from gitlab_queue.db.database import DatabaseStatus
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
+    from collections.abc import AsyncIterator, Awaitable, Callable
 
 
 @dataclass
 class FakeSession:
     """Fake SQLAlchemy async session for QueueManager tests."""
 
-    execute_fn: Callable[..., Any] | None = None
+    execute_fn: Callable[..., Awaitable[Any]] | None = None
     execute_calls: list[tuple[Any, ...]] = field(default_factory=list)
 
     async def execute(self, sql: Any, params: Any = None) -> Any:

@@ -1,24 +1,26 @@
-"""Test _wait_for_pipeline sleeps and continues when _handle_pipeline_status returns None.
+"""Test wait_for_pipeline sleeps and continues when handle_pipeline_status returns None.
 
-Lines 830-831: when _handle_pipeline_status returns None (no action needed), sleep and continue.
+When pipeline status is "running", handle_pipeline_status returns None (no action needed),
+and the loop sleeps then continues.
 """
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 
 import vedro
 
-import gitlab_queue.core.pipeline_handler as _ph_mod
 from gitlab_queue.core.processor import ProcessingResult
 from gitlab_queue.core.types import RebaseCheckOutcome
+from scenarios.fakes import FakeGitLabClient, FakeQueueManager
 
 from .._helpers import (
     create_mock_pipeline,
-    create_mock_processor,
     create_mock_settings,
     create_mock_state_machine,
     create_processing_context,
+    create_test_pipeline_handler,
     create_test_queue_item,
 )
 
@@ -26,66 +28,40 @@ from .._helpers import (
 class Scenario(vedro.Scenario):
     subject = "wait_for_pipeline sleeps and continues when handle_pipeline_status returns None"
 
-    def given_processor_where_handle_status_returns_none_then_removed(self):
-        self.processor = create_mock_processor(settings=create_mock_settings(pipeline_poll_interval_seconds=0.001))
+    def given_handler_where_pipeline_is_running_then_shutdown(self):
+        gitlab_client = FakeGitLabClient()
+        gitlab_client.latest_pipeline_response = create_mock_pipeline(pipeline_id=100, sha="abc123", status="running")
 
-        self.pipeline = create_mock_pipeline(pipeline_id=100, sha="abc123", status="running")
-        self.processor.gitlab_client.latest_pipeline_response = self.pipeline
+        queue_manager = FakeQueueManager()
+        queue_manager.add_item(create_test_queue_item(mr_iid=42, state="testing"))
 
-        queue_item = create_test_queue_item(mr_iid=42, state="testing")
-        self.processor.queue_manager.add_item(queue_item)
-
-        self.mock_sm = create_mock_state_machine()
-        self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
-
-        self.termination_call_count = 0
-        self.status_call_count = 0
         self.sleep_call_count = 0
+        self.shutdown_event = asyncio.Event()
 
-        self.no_result_rebase = RebaseCheckOutcome(
-            context=None, result=None, last_check=datetime.now(UTC), should_reset=False
-        )
-
-    async def when_wait_for_pipeline_is_called(self):
-        handler = self.processor._pipeline_handler
-
-        async def termination_side_effect(_ctx, _sm, _timeout, _start):
-            self.termination_call_count += 1
-            if self.termination_call_count >= 2:
-                return ProcessingResult.REMOVED
-            return None
-
-        async def status_side_effect(_ctx, _sm, _pipeline, _retried_jobs):
-            self.status_call_count += 1
-            return None  # Continue polling
+        async def fake_rebase(*args, **kwargs):
+            return RebaseCheckOutcome(context=None, result=None, last_check=datetime.now(UTC), should_reset=False)
 
         async def fake_sleep(seconds):
             self.sleep_call_count += 1
+            self.shutdown_event.set()
             return True
 
-        async def fake_skip(_mr_iid, _pipeline):
-            return False
+        self.handler = create_test_pipeline_handler(
+            gitlab_client=gitlab_client,
+            queue_manager=queue_manager,
+            settings=create_mock_settings(pipeline_poll_interval_seconds=0.001),
+            shutdown_event=self.shutdown_event,
+            rebase_check_fn=fake_rebase,
+            sleep_fn=fake_sleep,
+        )
 
-        handler.check_pipeline_termination_conditions = termination_side_effect
-        handler.should_skip_stale_pipeline = fake_skip
-        handler.handle_pipeline_status = status_side_effect
-        handler._interruptible_sleep = fake_sleep
+        self.ctx = create_processing_context(mr_iid=42, state_machine=create_mock_state_machine())
 
-        async def fake_rebase(*args, **kwargs):
-            return self.no_result_rebase
+    async def when_wait_for_pipeline_is_called(self):
+        self.result = await self.handler.wait_for_pipeline(self.ctx)
 
-        original = _ph_mod.maybe_rebase_during_testing
-        _ph_mod.maybe_rebase_during_testing = fake_rebase
-        try:
-            self.result = await self.processor._wait_for_pipeline(self.ctx)
-        finally:
-            _ph_mod.maybe_rebase_during_testing = original
-
-    def then_result_is_removed(self):
-        assert self.result == ProcessingResult.REMOVED
-
-    def and_handle_pipeline_status_returned_none(self):
-        assert self.status_call_count >= 1
+    def then_result_is_error(self):
+        assert self.result == ProcessingResult.ERROR
 
     def and_sleep_was_called(self):
         assert self.sleep_call_count >= 1

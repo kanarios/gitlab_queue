@@ -36,8 +36,8 @@ class Scenario(vedro.Scenario):
         self.pipeline = create_mock_pipeline(pipeline_id=100, sha="abc123", status="failed")
 
         # Pipeline has a failed job; with job_retry_count=0, it will be exhausted immediately
-        failed_job = create_job(id=10, name="unit_tests", status="failed")
-        self.processor.gitlab_client.pipeline_jobs_response = [failed_job]
+        self.failed_job = create_job(id=10, name="unit_tests", status="failed")
+        self.processor.gitlab_client.pipeline_jobs_response = [self.failed_job]
 
     async def when_handle_pipeline_status_is_called(self):
         self.result = await self.processor._pipeline_handler.handle_pipeline_status(
@@ -50,5 +50,8 @@ class Scenario(vedro.Scenario):
     def then_result_is_pipeline_failed(self):
         assert self.result == ProcessingResult.PIPELINE_FAILED
 
-    def and_pipeline_failed_was_triggered(self):
+    def and_pipeline_failed_was_triggered_with_exhausted_job(self):
         assert len(self.mock_sm.pipeline_failed_calls) == 1
+        call = self.mock_sm.pipeline_failed_calls[0]
+        assert call["failed_jobs"] == [self.failed_job.name]
+        assert call["retried_jobs"] == {}

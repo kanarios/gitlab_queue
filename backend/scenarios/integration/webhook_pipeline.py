@@ -102,7 +102,11 @@ async def webhook_concurrent_pipeline_events():
         gitlab_client, _transport = create_gitlab_client_with_transport()
         queue_manager = create_mock_queue_manager()
 
+        success_event = create_pipeline_event(mr_iid=202, status="success")
+        correct_sha = success_event.object_attributes.sha
+
         item = create_queue_item_in_state("testing", mr_iid=202)
+        item.expected_sha = correct_sha
         queue_manager.add_item(item)
 
         fake_sm = FakeStateMachine(current_state=FakeCurrentState(id="testing"))
@@ -118,7 +122,7 @@ async def webhook_concurrent_pipeline_events():
 
         events = [
             create_pipeline_event(mr_iid=202, status="running"),
-            create_pipeline_event(mr_iid=202, status="success"),
+            success_event,
             create_pipeline_event(mr_iid=202, status="failed", sha="wrong_sha"),
         ]
 
@@ -129,6 +133,13 @@ async def webhook_concurrent_pipeline_events():
     with then("no exceptions occur"):
         exceptions = [r for r in results if isinstance(r, Exception)]
         assert len(exceptions) == 0, f"Unexpected exceptions: {exceptions}"
+
+    with then("success event triggers pipeline_success transition"):
+        assert len(fake_sm.pipeline_success_calls) == 1
+        assert fake_sm.current_state.id == "merging"
+
+    with then("stale failed event with wrong SHA is filtered out"):
+        assert len(fake_sm.pipeline_failed_calls) == 0
 
     await gitlab_client.close()
 

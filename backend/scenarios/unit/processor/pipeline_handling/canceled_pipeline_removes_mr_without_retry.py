@@ -50,9 +50,3 @@ class Scenario(vedro.Scenario):
 
     def and_retry_pipeline_job_was_not_called(self):
         assert len(self.processor.gitlab_client.retry_job_calls) == 0
-
-    def and_get_pipeline_jobs_was_not_called(self):
-        # FakeGitLabClient doesn't record get_pipeline_jobs calls explicitly,
-        # but since pipeline_failed was triggered directly for canceled status,
-        # get_pipeline_jobs is never reached in the code path
-        pass

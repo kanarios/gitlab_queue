@@ -18,15 +18,6 @@ class Scenario(vedro.Scenario):
     subject = "recover interrupted state skips MR on GitLab API error"
 
     def given_processor_with_api_error_for_mr(self):
-        """
-        Prepare a mock processor with an active queue containing a merge request (IID 42) in the "testing" state and configure its GitLab client to raise GitLabAPIError when fetching that MR.
-
-        Sets:
-            - self.processor: mock processor
-            - self.queue_item: test queue item for MR IID 42
-            - processor.queue_manager.get_active_queue to return a list with the queue item
-            - processor.gitlab_client.get_mr to raise GitLabAPIError("API unavailable")
-        """
         self.processor = create_mock_processor()
 
         self.queue_item = create_test_queue_item(mr_iid=42, state="testing")

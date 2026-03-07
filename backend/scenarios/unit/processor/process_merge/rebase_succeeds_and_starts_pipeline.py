@@ -25,7 +25,7 @@ from .._helpers import (
 
 
 class Scenario(vedro.Scenario):
-    subject = "handle pipeline failure retry returns retry signal when new pipeline found"
+    subject = "handle pipeline failure retry returns retry signal for job-level retry path"
 
     def given_processor_with_failed_pipeline_and_retry_available(self):
         self.processor = create_mock_processor()

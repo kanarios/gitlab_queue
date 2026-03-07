@@ -23,11 +23,6 @@ class Scenario(vedro.Scenario):
         )
 
     async def when_pipeline_failed_is_triggered(self):
-        """
-        Trigger the state machine's pipeline-failed event using a predefined failure payload.
-
-        Sets failed_jobs to ["test", "lint", "typecheck"], retry_count to 2, and error_message to "Tests failed".
-        """
         await self.sm.trigger_pipeline_failed(
             failed_jobs=["test", "lint", "typecheck"],
             retried_jobs={"test": 2, "lint": 1},

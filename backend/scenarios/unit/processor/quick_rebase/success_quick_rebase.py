@@ -35,3 +35,6 @@ class Scenario(vedro.Scenario):
 
     def then_no_exception_is_raised(self):
         assert self.exception is None
+
+    def and_result_is_none(self):
+        assert self.result is None

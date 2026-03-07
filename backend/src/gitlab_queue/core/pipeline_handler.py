@@ -8,7 +8,7 @@ and delegates rebase-during-testing to rebase_coordinator.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -19,10 +19,12 @@ from gitlab_queue.core.rebase_coordinator import (
     create_pipeline_wait_state,
     maybe_rebase_during_testing,
 )
-from gitlab_queue.core.types import ProcessingContext, ProcessingResult, RetrySignal
+from gitlab_queue.core.types import ProcessingContext, ProcessingResult, RebaseCheckOutcome, RetrySignal
 from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from gitlab_queue.clients.gitlab import GitLabClient
     from gitlab_queue.config import Settings
     from gitlab_queue.core.notifier import MRNotifier
@@ -46,6 +48,8 @@ class PipelineHandler:
     notifier: MRNotifier
     settings: Settings
     shutdown_event: asyncio.Event
+    rebase_check_fn: Callable[..., Awaitable[RebaseCheckOutcome]] | None = field(default=None)
+    sleep_fn: Callable[[float], Awaitable[bool]] | None = field(default=None)
 
     def classify_failed_jobs(
         self,
@@ -290,7 +294,8 @@ class PipelineHandler:
             result = await self._process_pipeline_iteration(ctx, state, timeout)
             if result is not None:
                 return result
-            await self._interruptible_sleep(self.settings.pipeline_poll_interval_seconds)
+            sleep = self.sleep_fn or self._interruptible_sleep
+            await sleep(self.settings.pipeline_poll_interval_seconds)
 
     async def _init_pipeline_wait_state(self, ctx: ProcessingContext) -> PipelineWaitState:
         """Initialize mutable state for the pipeline wait loop."""
@@ -332,7 +337,8 @@ class PipelineHandler:
         log.debug("Pipeline status", mr_iid=mr_iid, pipeline_id=pipeline.id, status=pipeline.status)
 
         # Check if rebase needed
-        outcome = await maybe_rebase_during_testing(self.settings, ctx, state, pipeline)
+        rebase_check = self.rebase_check_fn or maybe_rebase_during_testing
+        outcome = await rebase_check(self.settings, ctx, state, pipeline)
         state.last_rebase_check = outcome.last_check
         if outcome.result is not None:
             return outcome.result

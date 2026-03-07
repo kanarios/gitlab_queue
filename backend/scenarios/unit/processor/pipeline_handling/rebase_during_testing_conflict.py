@@ -29,12 +29,13 @@ class Scenario(vedro.Scenario):
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
 
-        self.rebase_handler = FakeRebaseDuringTestingHandler(
-            error=GitLabConflictError("MR has conflicts during testing"),
-        )
-
         self.gitlab_client = FakeGitLabClient()
         self.gitlab_client.mr_conflicts = ["file1.py"]
+
+        self.rebase_handler = FakeRebaseDuringTestingHandler(
+            error=GitLabConflictError("MR has conflicts during testing"),
+            gitlab_client=self.gitlab_client,
+        )
 
         self.state = create_pipeline_wait_state(rebase_handler=self.rebase_handler)
 

@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
-from gitlab_queue.core.polling import PollOutcome, PollStatus
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
+from gitlab_queue.core.pipeline_handler import PipelineHandler
+from gitlab_queue.core.polling import PollingConfig, PollOutcome, PollStatus
 from gitlab_queue.core.processor import MergeProcessor
 from gitlab_queue.core.rebase_coordinator import PipelineWaitState
 from gitlab_queue.core.rebase_during_testing import RebaseDuringTestingContext
@@ -181,7 +187,25 @@ def create_pipeline_wait_state(
     )
 
 
-async def instant_poll(config, fn, shutdown_event, **kwargs):
+def create_test_pipeline_handler(**overrides: object) -> PipelineHandler:
+    """Create a PipelineHandler with fake collaborators for testing."""
+    defaults: dict[str, object] = {
+        "gitlab_client": FakeGitLabClient(),
+        "queue_manager": FakeQueueManager(),
+        "notifier": FakeNotifier(),
+        "settings": FakeSettings(),
+        "shutdown_event": asyncio.Event(),
+    }
+    defaults.update(overrides)
+    return PipelineHandler(**defaults)
+
+
+async def instant_poll(
+    config: PollingConfig,
+    fn: Callable[[], Awaitable[tuple[PollStatus, Any]]],
+    shutdown_event: asyncio.Event,
+    **kwargs: Any,
+) -> PollOutcome[Any]:
     """Poll function that calls fn once and returns the result immediately.
 
     Useful in tests to avoid real polling loops. If the first call
@@ -214,6 +238,7 @@ __all__ = [
     "create_mock_state_machine",
     "create_pipeline_wait_state",
     "create_processing_context",
+    "create_test_pipeline_handler",
     "create_test_queue_item",
     "instant_poll",
 ]

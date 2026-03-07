@@ -57,6 +57,8 @@ class RebaseHandler:
     settings: Settings
     shutdown_event: asyncio.Event
     poll_fn: Callable[..., Any] = field(default=poll_until_done)
+    quick_rebase_timeout: int = QUICK_REBASE_TIMEOUT_SECONDS
+    quick_rebase_poll_interval: int = QUICK_REBASE_POLL_INTERVAL_SECONDS
 
     async def process_rebase(self, ctx: ProcessingContext) -> ProcessingResult:
         """Initiate rebase and wait for completion.
@@ -317,8 +319,8 @@ class RebaseHandler:
         await wait_for_rebase_completion(
             self.gitlab_client,
             ctx.mr_iid,
-            timeout_seconds=QUICK_REBASE_TIMEOUT_SECONDS,
-            poll_interval_seconds=QUICK_REBASE_POLL_INTERVAL_SECONDS,
+            timeout_seconds=self.quick_rebase_timeout,
+            poll_interval_seconds=self.quick_rebase_poll_interval,
             operation_name="quick_rebase",
             shutdown_event=self.shutdown_event,
             fetch_conflict_details=True,

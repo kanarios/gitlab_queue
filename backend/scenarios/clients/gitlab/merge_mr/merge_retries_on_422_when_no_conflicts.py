@@ -45,9 +45,10 @@ class Scenario(vedro.Scenario):
         assert self.result.state == "merged"
 
     def and_get_mr_called_twice(self):
-        get_requests = [r for r in self.transport.history if r.method == "GET"]
+        get_requests = self.transport.get_requests("GET", mr_get_path(self.iid))
         assert len(get_requests) == 2
 
-    def and_put_called_twice(self):
-        put_requests = [r for r in self.transport.history if r.method == "PUT"]
+    def and_put_merge_called_twice(self):
+        merge_path = f"/api/v4/projects/123/merge_requests/{self.iid}/merge"
+        put_requests = self.transport.get_requests("PUT", merge_path)
         assert len(put_requests) == 2

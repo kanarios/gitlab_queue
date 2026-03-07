@@ -43,6 +43,7 @@ class Scenario(vedro.Scenario):
             pipeline=self.pipeline,
             retried_jobs={},
         )
+        self.retry_calls_after_first_poll = list(self.processor.gitlab_client.retry_job_calls)
 
     async def and_second_poll_sees_failed_jobs(self):
         self.processor.gitlab_client.pipeline_jobs_response = [self.failed_job]
@@ -70,3 +71,9 @@ class Scenario(vedro.Scenario):
 
     def and_second_poll_increments_retried_jobs(self):
         assert self.second_retried_jobs.get("unit_tests") == 1
+
+    def and_first_poll_did_not_call_retry_api(self):
+        assert self.retry_calls_after_first_poll == []
+
+    def and_second_poll_called_retry_api_for_failed_job(self):
+        assert self.failed_job.id in self.processor.gitlab_client.retry_job_calls

@@ -49,14 +49,11 @@ class Scenario(vedro.Scenario):
             headers=self.headers,
         )
 
-    def then_it_should_filter_results(self):
+    def then_it_should_return_ok(self):
         assert self.response.status_code == OkStatusSchema
+
+    def and_it_should_return_only_matching_item(self):
         data = self.response.json()
-        # Search filter is applied in-memory, so check results
-        for item in data["items"]:
-            # Either title, author_name, or author_username should contain search term
-            title_match = "login" in item.get("title", "").lower()
-            author_name_match = "login" in item.get("author", {}).get("name", "").lower()
-            author_username_match = "login" in item.get("author", {}).get("username", "").lower()
-            iid_match = str(item.get("mr_iid", "")) == "login"
-            assert title_match or author_name_match or author_username_match or iid_match
+        assert len(data["items"]) == 1
+        assert data["items"][0]["mr_iid"] == 100
+        assert "login" in data["items"][0]["title"].lower()

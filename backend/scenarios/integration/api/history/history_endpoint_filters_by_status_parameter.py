@@ -49,8 +49,15 @@ class Scenario(vedro.Scenario):
             headers=self.headers,
         )
 
-    def then_it_should_pass_status_to_repository(self):
+    def then_it_should_return_ok(self):
         assert self.response.status_code == OkStatusSchema
+
+    def and_it_should_pass_status_to_repository(self):
         assert len(self._history_repo.get_history_calls) == 1
         call_kwargs = self._history_repo.get_history_calls[0]
         assert call_kwargs.get("status_filter") == "merged"
+
+    def and_response_should_contain_the_filtered_item(self):
+        data = self.response.json()
+        assert len(data["items"]) == 1
+        assert data["items"][0]["mr_iid"] == 100

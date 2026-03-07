@@ -7,8 +7,6 @@ rather than crashing or stopping entirely.
 
 from __future__ import annotations
 
-import asyncio
-
 import vedro
 
 from gitlab_queue.clients.gitlab import GitLabCircuitOpenError
@@ -26,20 +24,22 @@ class Scenario(vedro.Scenario):
             ],
         )
 
+        self.sleep_durations: list[float] = []
+
+        async def recording_sleep(seconds: float) -> bool:
+            self.sleep_durations.append(seconds)
+            return False  # Signal shutdown to stop the loop
+
         self.processor = MergeProcessor(
             gitlab_client=FakeGitLabClient(),
             queue_manager=self.queue_manager,
             notifier=FakeNotifier(),
             settings=FakeSettings(),
+            sleep_fn=recording_sleep,
         )
 
     async def when_run_is_called(self):
-        async def delayed_shutdown():
-            await asyncio.sleep(0.05)
-            self.processor._shutdown_event.set()
-
-        self.shutdown_task = asyncio.create_task(delayed_shutdown())
         await self.processor.run()
 
-    def then_processing_completed_without_crash(self):
-        assert self.processor._shutdown_event.is_set()
+    def then_sleep_was_called_with_retry_after(self):
+        assert self.sleep_durations[0] == 1

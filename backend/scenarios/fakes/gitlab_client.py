@@ -24,6 +24,7 @@ class FakeGitLabClient:
     pipeline_jobs_response: list[Job] | Exception = field(default_factory=list)
     rebase_result: bool = True
     rebase_status: tuple[bool, bool] = (False, False)
+    rebase_status_sequence: list[tuple[bool, bool]] = field(default_factory=list)
     mr_conflicts: list[str] = field(default_factory=list)
     merge_result: MergeRequest | Exception | None = None
     listed_mrs: list[MergeRequest] = field(default_factory=list)
@@ -56,6 +57,7 @@ class FakeGitLabClient:
     get_mr_calls: list[int] = field(default_factory=list)
     get_latest_pipeline_calls: list[int] = field(default_factory=list)
     list_mrs_calls: list[str] = field(default_factory=list)
+    check_rebase_status_calls: list[int] = field(default_factory=list)
 
     async def get_mr(self, iid: int) -> MergeRequest:
         self.get_mr_calls.append(iid)
@@ -86,6 +88,10 @@ class FakeGitLabClient:
         return self.rebase_result
 
     async def check_rebase_status(self, iid: int) -> tuple[bool, bool]:
+        self.check_rebase_status_calls.append(iid)
+        if self.rebase_status_sequence:
+            idx = min(len(self.check_rebase_status_calls) - 1, len(self.rebase_status_sequence) - 1)
+            return self.rebase_status_sequence[idx]
         return self.rebase_status
 
     async def get_mr_conflicts(self, iid: int) -> list[str]:

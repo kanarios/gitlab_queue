@@ -6,7 +6,7 @@ catch it and log warning without propagating.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import vedro
@@ -19,7 +19,6 @@ class FailingWebSocketManager:
     """WebSocket manager that raises on broadcast_queue_updated."""
 
     broadcast_attempted: bool = False
-    broadcast_calls: list[dict[str, Any]] = field(default_factory=list)
 
     async def broadcast_queue_updated(self, queue: list[dict[str, Any]], stats: dict[str, Any]) -> None:
         self.broadcast_attempted = True

@@ -12,7 +12,7 @@ import vedro
 from gitlab_queue.clients.gitlab import GitLabAPIError
 from gitlab_queue.core.processor import ProcessingResult
 from gitlab_queue.core.rebase_coordinator import check_and_handle_rebase_during_testing
-from scenarios.fakes import FakeRebaseDuringTestingHandler
+from scenarios.fakes import FakeGitLabClient, FakeRebaseDuringTestingHandler
 
 from .._helpers import (
     create_mock_pipeline,
@@ -29,8 +29,11 @@ class Scenario(vedro.Scenario):
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
 
+        self.gitlab_client = FakeGitLabClient()
+
         self.rebase_handler = FakeRebaseDuringTestingHandler(
             error=GitLabAPIError("API down"),
+            gitlab_client=self.gitlab_client,
         )
 
         self.state = create_pipeline_wait_state(rebase_handler=self.rebase_handler)
@@ -39,7 +42,7 @@ class Scenario(vedro.Scenario):
 
     async def when_check_and_handle_rebase_during_testing_is_called(self):
         self.result = await check_and_handle_rebase_during_testing(
-            gitlab_client=self.mock_sm,  # Not used in API error path
+            gitlab_client=self.gitlab_client,
             ctx=self.ctx,
             state=self.state,
             pipeline=self.pipeline,

@@ -31,7 +31,7 @@ from gitlab_queue.metrics import MR_DURATION
 from gitlab_queue.utils.logging import LogContext, get_logger
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Awaitable, Callable
 
     from gitlab_queue.api.websocket import WebSocketManager
     from gitlab_queue.clients.gitlab import GitLabClient
@@ -82,14 +82,15 @@ class MergeProcessor:
     state_machine_factory: StateMachineFactoryProtocol = field(default=create_state_machine_for_mr)
     poll_fn: Callable[..., Any] = field(default=poll_until_done)
     wait_for_fn: Callable[..., Any] = field(default=asyncio.wait_for)
+    sleep_fn: Callable[[float], Awaitable[bool]] | None = field(default=None)
 
     # Internal state (not part of constructor)
     _shutdown_event: asyncio.Event = field(default_factory=asyncio.Event, init=False)
     _current_mr_iid: int | None = field(default=None, init=False)
     _processing_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False)
     _websocket_manager: WebSocketManager | None = field(default=None, init=False)
-    _ph: PipelineHandler | None = field(default=None, init=False, repr=False)
-    _rh: RebaseHandler | None = field(default=None, init=False, repr=False)
+    _ph: PipelineHandler | None = field(default=None, repr=False)
+    _rh: RebaseHandler | None = field(default=None, repr=False)
 
     @property
     def _pipeline_handler(self) -> PipelineHandler:
@@ -456,6 +457,8 @@ class MergeProcessor:
 
     async def _interruptible_sleep(self, seconds: float) -> bool:
         """Sleep that can be interrupted by shutdown event."""
+        if self.sleep_fn is not None:
+            return await self.sleep_fn(seconds)
         return await interruptible_sleep(self._shutdown_event, seconds)
 
     async def _verify_mr_in_queue(self, mr_iid: int) -> bool:

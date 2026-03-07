@@ -35,4 +35,4 @@ class Scenario(vedro.Scenario):
         assert self.fake_sm.stale_warning_calls == [{"warning_hours": 24}]
 
     def and_warning_flag_is_marked(self):
-        assert 42 in self.processor.queue_manager.stale_warning_calls
+        assert self.processor.queue_manager.stale_warning_calls == [42]

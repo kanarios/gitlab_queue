@@ -7,10 +7,15 @@ not both jobs.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import vedro
 
 from gitlab_queue.clients.gitlab import GitLabAPIError
 from scenarios.fakes import FakeGitLabClient, create_job
+
+if TYPE_CHECKING:
+    from gitlab_queue.models.pipeline import Job
 
 from .._helpers import (
     create_mock_pipeline,
@@ -23,24 +28,22 @@ from .._helpers import (
 class _PartialErrorGitLabClient(FakeGitLabClient):
     """FakeGitLabClient that fails only for specific job IDs."""
 
-    fail_job_ids: set[int] = frozenset()
+    def __init__(self, *, fail_job_ids: set[int]) -> None:
+        super().__init__()
+        self.fail_job_ids = fail_job_ids
 
-    async def retry_pipeline_job(self, job_id):
+    async def retry_pipeline_job(self, job_id: int) -> Job:
         self.retry_job_calls.append(job_id)
         if job_id in self.fail_job_ids:
             raise GitLabAPIError("Retry failed for job")
-        return (
-            await super().retry_pipeline_job.__wrapped__(self, job_id)
-            if False
-            else create_job(id=job_id, status="pending")
-        )
+        return create_job(id=job_id, status="pending")
 
 
 class Scenario(vedro.Scenario):
     subject = "partial job retry API error reports only the failed jobs"
 
     def given_two_jobs_where_one_retry_fails(self):
-        client = FakeGitLabClient()
+        client = _PartialErrorGitLabClient(fail_job_ids={20})
         self.processor = create_mock_processor(gitlab_client=client)
 
         self.pipeline = create_mock_pipeline(pipeline_id=100, sha="abc123", status="failed")
@@ -49,17 +52,6 @@ class Scenario(vedro.Scenario):
         job_b = create_job(id=20, name="job_b", status="failed")
 
         self.jobs_still_failed = [job_a, job_b]
-
-        # We need per-job error injection. Override retry_pipeline_job with a custom function.
-        original_calls = client.retry_job_calls
-
-        async def retry_side_effect(job_id: int):
-            original_calls.append(job_id)
-            if job_id == 20:
-                raise GitLabAPIError("Retry failed for job_b")
-            return create_job(id=job_id, status="pending")
-
-        client.retry_pipeline_job = retry_side_effect
 
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)

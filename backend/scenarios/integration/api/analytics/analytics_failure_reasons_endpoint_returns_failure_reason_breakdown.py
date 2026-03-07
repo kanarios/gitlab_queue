@@ -59,19 +59,17 @@ class Scenario(vedro.Scenario):
             headers=self.headers,
         )
 
-    def then_it_should_return_reasons(self):
+    def then_it_should_return_ok(self):
         assert self.response.status_code == OkStatusSchema
+
+    def and_it_should_have_two_total_failures(self):
         data = self.response.json()
-
-        assert "reasons" in data
-        assert "total_failures" in data
-        assert "period_days" in data
-
-        # Should have 2 failures
         assert data["total_failures"] == 2
 
-        # Verify reason structure
-        for reason in data["reasons"]:
-            assert "reason" in reason
-            assert "count" in reason
-            assert "percentage" in reason
+    def and_it_should_contain_both_failure_reasons(self):
+        reasons = self.response.json()["reasons"]
+        reason_map = {r["reason"]: r["count"] for r in reasons}
+        assert reason_map == {
+            "Pipeline failed: test failure": 1,
+            "Merge conflict in src/main.py": 1,
+        }

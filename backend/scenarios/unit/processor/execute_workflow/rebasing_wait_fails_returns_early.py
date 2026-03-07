@@ -6,7 +6,6 @@ Line 340: return result when _wait_for_rebase returns non-SUCCESS in the rebasin
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
 
 import vedro
 
@@ -22,8 +21,8 @@ from .._helpers import (
 @dataclass
 class FakeRebaseHandler:
     wait_for_rebase_result: ProcessingResult = ProcessingResult.SUCCESS
-    capture_pre_rebase_sha_calls: list[Any] = field(default_factory=list)
-    wait_for_rebase_calls: list[Any] = field(default_factory=list)
+    capture_pre_rebase_sha_calls: list[ProcessingContext] = field(default_factory=list)
+    wait_for_rebase_calls: list[ProcessingContext] = field(default_factory=list)
 
     async def capture_pre_rebase_sha(self, ctx: ProcessingContext) -> str:
         self.capture_pre_rebase_sha_calls.append(ctx)
