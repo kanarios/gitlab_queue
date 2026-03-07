@@ -26,7 +26,6 @@ class FakeStateMachine:
     timeout_calls: list[dict[str, Any]] = field(default_factory=list)
 
     # Call recording for notifications
-    pipeline_retry_calls: list[dict[str, Any]] = field(default_factory=list)
     job_retry_calls: list[dict[str, Any]] = field(default_factory=list)
     position_changed_calls: list[dict[str, Any]] = field(default_factory=list)
     rebase_complete_notify_calls: list[dict[str, Any]] = field(default_factory=list)
@@ -87,20 +86,17 @@ class FakeStateMachine:
         self,
         *,
         failed_jobs: list[str],
-        retried_jobs: dict[str, int] | None = None,
-        retry_count: int | None = None,
+        retried_jobs: dict[str, int],
         error_message: str,
     ) -> None:
         self._check_error("pipeline_failed")
-        call_record: dict[str, Any] = {
-            "failed_jobs": failed_jobs,
-            "error_message": error_message,
-        }
-        if retried_jobs is not None:
-            call_record["retried_jobs"] = retried_jobs
-        if retry_count is not None:
-            call_record["retry_count"] = retry_count
-        self.pipeline_failed_calls.append(call_record)
+        self.pipeline_failed_calls.append(
+            {
+                "failed_jobs": failed_jobs,
+                "retried_jobs": retried_jobs,
+                "error_message": error_message,
+            }
+        )
         self.current_state.id = "failed"
 
     async def trigger_merge_success(self) -> None:
@@ -122,31 +118,6 @@ class FakeStateMachine:
         self._check_error("timeout")
         self.timeout_calls.append({"max_wait_hours": max_wait_hours})
         self.current_state.id = "failed"
-
-    async def notify_pipeline_retry(
-        self,
-        *,
-        old_pipeline_id: int,
-        old_pipeline_url: str,
-        new_pipeline_id: int,
-        new_pipeline_url: str,
-        retry_count: int,
-        max_retries: int,
-        failed_jobs: list[str],
-        expected_sha: str | None = None,
-    ) -> None:
-        self.pipeline_retry_calls.append(
-            {
-                "old_pipeline_id": old_pipeline_id,
-                "old_pipeline_url": old_pipeline_url,
-                "new_pipeline_id": new_pipeline_id,
-                "new_pipeline_url": new_pipeline_url,
-                "retry_count": retry_count,
-                "max_retries": max_retries,
-                "failed_jobs": failed_jobs,
-                "expected_sha": expected_sha,
-            }
-        )
 
     async def notify_job_retry(
         self,
