@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from gitlab_queue.clients.gitlab import (
@@ -26,7 +26,7 @@ from gitlab_queue.clients.gitlab import (
 from gitlab_queue.core.handler_utils import interruptible_sleep, verify_mr_in_queue
 from gitlab_queue.core.polling import poll_until_done
 from gitlab_queue.core.state_machine import create_state_machine_for_mr
-from gitlab_queue.core.types import ProcessingContext, ProcessingResult
+from gitlab_queue.core.types import ProcessingContext, ProcessingResult, RetrySignal
 from gitlab_queue.metrics import MR_DURATION
 from gitlab_queue.utils.logging import LogContext, get_logger
 
@@ -38,11 +38,12 @@ if TYPE_CHECKING:
     from gitlab_queue.config import Settings
     from gitlab_queue.core.notifier import MRNotifier
     from gitlab_queue.core.pipeline_handler import PipelineHandler
-    from gitlab_queue.core.protocols import StateMachineFactoryProtocol
+    from gitlab_queue.core.protocols import StateMachineFactoryProtocol, StateMachineProtocol
     from gitlab_queue.core.queue import QueueManager
     from gitlab_queue.core.queue_position_notifier import QueuePositionNotifier
     from gitlab_queue.core.rebase_handler import RebaseHandler
     from gitlab_queue.models.mr import MergeRequest
+    from gitlab_queue.models.pipeline import Pipeline
     from gitlab_queue.models.queue_item import QueueItem
 
 log = get_logger(__name__)
@@ -325,32 +326,42 @@ class MergeProcessor:
     async def _wait_for_rebase_quick(self, ctx: ProcessingContext) -> None:
         return await self._rebase_handler.wait_for_rebase_quick(ctx)
 
-    async def _should_skip_stale_pipeline(self, mr_iid: int, pipeline: Any) -> bool:
+    async def _should_skip_stale_pipeline(self, mr_iid: int, pipeline: Pipeline) -> bool:
         return await self._pipeline_handler.should_skip_stale_pipeline(mr_iid, pipeline)
 
     async def _check_pipeline_termination_conditions(
-        self, ctx: ProcessingContext, sm: Any, timeout: Any, start_time: Any
+        self,
+        ctx: ProcessingContext,
+        sm: StateMachineProtocol,
+        timeout: timedelta,
+        start_time: datetime,
     ) -> ProcessingResult | None:
         return await self._pipeline_handler.check_pipeline_termination_conditions(ctx, sm, timeout, start_time)
 
-    async def _handle_pipeline_failure_retry(self, *args: Any, **kwargs: Any) -> Any:
-        return await self._pipeline_handler.handle_pipeline_failure_retry(*args, **kwargs)
+    async def _handle_pipeline_failure_retry(
+        self,
+        ctx: ProcessingContext,
+        pipeline: Pipeline,
+        retried_jobs: dict[str, int],
+    ) -> tuple[bool, datetime | None, dict[str, int]]:
+        return await self._pipeline_handler.handle_pipeline_failure_retry(ctx, pipeline, retried_jobs)
 
-    async def _handle_pipeline_failure(self, *args: Any, **kwargs: Any) -> Any:
-        return await self._pipeline_handler.handle_pipeline_failure(*args, **kwargs)
+    async def _handle_pipeline_failure(
+        self,
+        ctx: ProcessingContext,
+        pipeline: Pipeline,
+        retried_jobs: dict[str, int],
+    ) -> ProcessingResult | RetrySignal:
+        return await self._pipeline_handler.handle_pipeline_failure(ctx, pipeline, retried_jobs)
 
-    async def _handle_pipeline_status(self, *args: Any, **kwargs: Any) -> Any:
-        return await self._pipeline_handler.handle_pipeline_status(*args, **kwargs)
-
-    async def _check_and_handle_rebase_during_testing(self, *args: Any, **kwargs: Any) -> Any:
-        from gitlab_queue.core.rebase_coordinator import check_and_handle_rebase_during_testing
-
-        return await check_and_handle_rebase_during_testing(*args, **kwargs)
-
-    async def _maybe_rebase_during_testing(self, *args: Any, **kwargs: Any) -> Any:
-        from gitlab_queue.core.rebase_coordinator import maybe_rebase_during_testing
-
-        return await maybe_rebase_during_testing(*args, **kwargs)
+    async def _handle_pipeline_status(
+        self,
+        ctx: ProcessingContext,
+        sm: StateMachineProtocol,
+        pipeline: Pipeline,
+        retried_jobs: dict[str, int],
+    ) -> ProcessingResult | RetrySignal | None:
+        return await self._pipeline_handler.handle_pipeline_status(ctx, sm, pipeline, retried_jobs)
 
     # =========================================================================
     # Merge Step

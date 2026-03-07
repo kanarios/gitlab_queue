@@ -190,64 +190,40 @@ class WebhookRetryProcessor:
             async with self._processing_lock:
                 self._processing_count -= 1
 
-    async def _handle_mr_event(self, event: MergeRequestEvent) -> None:
-        """Handle a merge request webhook event.
+    @property
+    def _handler_kwargs(self) -> dict[str, Any]:
+        """Common kwargs for webhook handler construction."""
+        return {
+            "settings": self.settings,
+            "gitlab_client": self.gitlab_client,
+            "queue_manager": self.queue_manager,
+            "notifier": self.notifier,
+            "position_notifier": self.position_notifier,
+            "websocket_manager": self.websocket_manager,
+        }
 
-        Args:
-            event: The merge request event to process.
-        """
+    def _create_mr_handler(self) -> MRWebhookHandler:
         if self.mr_handler_factory is not None:
-            handler = self.mr_handler_factory(
-                settings=self.settings,
-                gitlab_client=self.gitlab_client,
-                queue_manager=self.queue_manager,
-                notifier=self.notifier,
-                position_notifier=self.position_notifier,
-                websocket_manager=self.websocket_manager,
-            )
-        else:
-            # Import here to avoid circular imports
-            from gitlab_queue.webhooks.handlers import MRWebhookHandler
+            return self.mr_handler_factory(**self._handler_kwargs)
+        from gitlab_queue.webhooks.handlers import MRWebhookHandler
 
-            handler = MRWebhookHandler(
-                settings=self.settings,
-                gitlab_client=self.gitlab_client,
-                queue_manager=self.queue_manager,
-                notifier=self.notifier,
-                position_notifier=self.position_notifier,
-                websocket_manager=self.websocket_manager,
-            )
+        return MRWebhookHandler(**self._handler_kwargs)
 
+    def _create_pipeline_handler(self) -> PipelineWebhookHandler:
+        if self.pipeline_handler_factory is not None:
+            return self.pipeline_handler_factory(**self._handler_kwargs)
+        from gitlab_queue.webhooks.handlers import PipelineWebhookHandler
+
+        return PipelineWebhookHandler(**self._handler_kwargs)
+
+    async def _handle_mr_event(self, event: MergeRequestEvent) -> None:
+        """Handle a merge request webhook event."""
+        handler = self._create_mr_handler()
         await handler.handle(event)
 
     async def _handle_pipeline_event(self, event: PipelineEvent) -> None:
-        """Handle a pipeline webhook event.
-
-        Args:
-            event: The pipeline event to process.
-        """
-        if self.pipeline_handler_factory is not None:
-            handler = self.pipeline_handler_factory(
-                settings=self.settings,
-                gitlab_client=self.gitlab_client,
-                queue_manager=self.queue_manager,
-                notifier=self.notifier,
-                position_notifier=self.position_notifier,
-                websocket_manager=self.websocket_manager,
-            )
-        else:
-            # Import here to avoid circular imports
-            from gitlab_queue.webhooks.handlers import PipelineWebhookHandler
-
-            handler = PipelineWebhookHandler(
-                settings=self.settings,
-                gitlab_client=self.gitlab_client,
-                queue_manager=self.queue_manager,
-                notifier=self.notifier,
-                position_notifier=self.position_notifier,
-                websocket_manager=self.websocket_manager,
-            )
-
+        """Handle a pipeline webhook event."""
+        handler = self._create_pipeline_handler()
         await handler.handle(event)
 
     async def _interruptible_sleep(self, seconds: float) -> bool:

@@ -41,7 +41,7 @@ from gitlab_queue.webhooks.handlers import MRWebhookHandler, PipelineWebhookHand
 from gitlab_queue.webhooks.retry_manager import DLQItemNotFoundError
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
+    from collections.abc import AsyncIterator, Awaitable, Callable
 
     import httpx
 
@@ -92,9 +92,11 @@ class WebhookAppState:
     retry_manager: WebhookRetryManager
     health: ApplicationHealth
     websocket_manager: WebSocketManager
-    event_router: Callable[..., Any] | None = field(default=None)
+    event_router: Callable[[WebhookAppState, MergeRequestEvent | PipelineEvent], Awaitable[None]] | None = field(
+        default=None
+    )
     oauth_transport: httpx.AsyncBaseTransport | None = field(default=None)
-    uow_factory: Callable[..., UnitOfWork] | None = field(default=None)
+    uow_factory: Callable[[Database], UnitOfWork] | None = field(default=None)
 
 
 # =============================================================================
