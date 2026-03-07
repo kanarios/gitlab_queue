@@ -1,4 +1,4 @@
-"""Test _handle_pipeline_failure when retry count is at maximum.
+"""Test _handle_pipeline_failure_retry when retry count is at maximum.
 
 When a pipeline fails and retry_count >= max_retries, the processor must
 trigger pipeline_failed on the state machine and signal the caller to stop
