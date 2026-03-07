@@ -1,83 +1,59 @@
-"""Test _wait_for_pipeline continues polling when no pipeline is found.
+"""Test wait_for_pipeline continues polling when no pipeline is found.
 
 When get_latest_mr_pipeline returns None, the pipeline wait loop should
-continue polling rather than terminating. This test uses
-_check_pipeline_termination_conditions side_effect to eventually return
-ERROR on the second call to stop the loop.
+continue polling rather than terminating. A short timeout causes the loop
+to exit, proving it continued polling multiple times.
 """
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+import asyncio
 
 import vedro
 
+from gitlab_queue.core.pipeline_handler import PipelineHandler
 from gitlab_queue.core.processor import ProcessingResult
-
-from .._helpers import (
-    create_mock_processor,
-    create_mock_state_machine,
-    create_processing_context,
+from scenarios.fakes import (
+    FakeCurrentState,
+    FakeGitLabClient,
+    FakeNotifier,
+    FakeQueueManager,
+    FakeSettings,
+    FakeStateMachine,
 )
+
+from .._helpers import create_processing_context, create_test_queue_item
 
 
 class Scenario(vedro.Scenario):
     subject = "wait for pipeline continues polling when no pipeline found"
 
     def given_processor_with_no_pipeline(self):
-        """
-        Prepare the scenario with a mock processor and processing context where no pipeline exists for the merge request.
+        self.gitlab_client = FakeGitLabClient()
+        # latest_pipeline_response=None by default — no pipeline found
 
-        Configures:
-        - a mock processor,
-        - a mock state machine with current state id "testing",
-        - a processing context with mr_iid 42 using that state machine,
-        and sets the processor's GitLab client's get_latest_mr_pipeline to return None to simulate "no pipeline found".
-        """
-        self.processor = create_mock_processor()
+        self.queue_manager = FakeQueueManager()
+        self.queue_manager.add_item(create_test_queue_item(mr_iid=42, state="testing"))
 
-        self.mock_sm = create_mock_state_machine()
-        self.mock_sm.current_state.id = "testing"
-        self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
+        self.handler = PipelineHandler(
+            gitlab_client=self.gitlab_client,
+            queue_manager=self.queue_manager,
+            notifier=FakeNotifier(),
+            settings=FakeSettings(
+                pipeline_timeout_seconds=0.05,
+                pipeline_poll_interval_seconds=0.001,
+            ),
+            shutdown_event=asyncio.Event(),
+        )
 
-        # No pipeline found
-        self.processor.gitlab_client.get_latest_mr_pipeline = AsyncMock(return_value=None)
+        self.sm = FakeStateMachine(current_state=FakeCurrentState(id="testing"))
+        self.ctx = create_processing_context(mr_iid=42, state_machine=self.sm)
 
     async def when_wait_for_pipeline_is_called(self):
-        """
-        Invokes the processor's _wait_for_pipeline while simulating a "no pipeline found" poll followed by a termination.
+        self.result = await self.handler.wait_for_pipeline(self.ctx)
 
-        Patches _check_pipeline_termination_conditions to first yield None (continue polling) and then ProcessingResult.ERROR (stop), patches _interruptible_sleep to be awaitable, awaits _wait_for_pipeline, and stores the outcome on self.result.
-        """
-        with (
-            patch.object(
-                self.processor._pipeline_handler,
-                "check_pipeline_termination_conditions",
-                new_callable=AsyncMock,
-                side_effect=[None, ProcessingResult.ERROR],
-            ),
-            patch.object(
-                self.processor._pipeline_handler,
-                "_interruptible_sleep",
-                new_callable=AsyncMock,
-                return_value=True,
-            ) as self.mock_sleep,
-        ):
-            self.result = await self.processor._wait_for_pipeline(self.ctx)
+    def then_result_indicates_timeout(self):
+        assert self.result == ProcessingResult.TIMEOUT
 
-    def then_result_is_error(self):
-        """
-        Asserts that the processor's wait result indicates an error.
-
-        Checks that `self.result` is equal to `ProcessingResult.ERROR`.
-        """
-        assert self.result == ProcessingResult.ERROR
-
-    def and_interruptible_sleep_was_called(self):
-        """
-        Asserts that the processor's interruptible sleep was awaited exactly once.
-
-        Raises:
-            AssertionError: If the interruptible sleep was not awaited exactly one time.
-        """
-        self.mock_sleep.assert_awaited_once()
+    def and_pipeline_was_polled_multiple_times(self):
+        assert len(self.gitlab_client.get_latest_pipeline_calls) >= 2

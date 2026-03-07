@@ -5,16 +5,15 @@ the handler does not call websocket_manager.broadcast_mr_completed.
 """
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
 
 import vedro
+from scenarios.fakes import FakeNotifier, FakeQueueManager, FakeWebSocketManager
 
 from gitlab_queue.models.queue_item import QueueItem
 from gitlab_queue.webhooks.handlers import MRWebhookHandler
 
 from ._helpers import (
     create_gitlab_client_with_transport,
-    create_mock_queue_manager,
     create_mock_settings,
     create_mr_event,
 )
@@ -36,25 +35,15 @@ class Scenario(vedro.Scenario):
             queued_at=datetime.now(UTC),
         )
 
-    def given_mock_queue_manager(self):
-        self.queue_manager = create_mock_queue_manager()
-        self.queue_manager.get_queue_item = AsyncMock(return_value=self.queue_item)
-        self.queue_manager.get_queue_position = AsyncMock(return_value=1)
-        self.queue_manager.get_queue_length = AsyncMock(return_value=1)
-        self.queue_manager.complete_mr = AsyncMock()
-        self.queue_manager.get_active_queue = AsyncMock(return_value=[])
-        self.queue_manager.get_queue_stats = AsyncMock(return_value={})
+    def given_queue_manager(self):
+        self.queue_manager = FakeQueueManager()
+        self.queue_manager.add_item(self.queue_item)
 
-    def given_mock_notifier(self):
-        self.notifier = MagicMock()
-        self.notifier.notify = AsyncMock()
-        self.notifier.remove_queue_label = AsyncMock()
+    def given_notifier(self):
+        self.notifier = FakeNotifier()
 
-    def given_mock_websocket_manager(self):
-        self.websocket_manager = MagicMock()
-        self.websocket_manager.broadcast_mr_completed = AsyncMock()
-        self.websocket_manager.broadcast_mr_status_changed = AsyncMock()
-        self.websocket_manager.broadcast_queue_updated = AsyncMock()
+    def given_websocket_manager(self):
+        self.websocket_manager = FakeWebSocketManager()
 
     def given_handler(self):
         self.settings = create_mock_settings()
@@ -81,9 +70,12 @@ class Scenario(vedro.Scenario):
         await self.handler.handle(self.event)
 
     def then_websocket_should_broadcast_mr_completed(self):
-        self.websocket_manager.broadcast_mr_completed.assert_awaited_once()
-        call_args = self.websocket_manager.broadcast_mr_completed.await_args
-        assert call_args.args[:2] == (MR_IID, "merged")
+        completed = [c for c in self.websocket_manager.broadcast_calls if c.get("type") == "mr_completed"]
+        assert len(completed) == 1, (
+            f"Expected one mr_completed broadcast, got: {self.websocket_manager.broadcast_calls}"
+        )
+        assert completed[0]["mr_iid"] == MR_IID
+        assert completed[0]["status"] == "merged"
 
     async def cleanup(self):
         await self.gitlab_client.close()

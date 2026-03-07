@@ -7,9 +7,10 @@ isinstance(r, Exception) misses it → retry appears successful when it wasn't.
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
 
 import vedro
+
+from scenarios.fakes import create_job
 
 from .._helpers import (
     create_mock_pipeline,
@@ -26,15 +27,9 @@ class Scenario(vedro.Scenario):
         self.processor = create_mock_processor()
         self.pipeline = create_mock_pipeline(pipeline_id=100, sha="abc123", status="failed")
 
-        job_a = MagicMock()
-        job_a.id = 10
-        job_a.name = "unit_tests"
-        job_a.status = "failed"
+        self.job_a = create_job(id=10, name="unit_tests", status="failed")
 
-        self.jobs_still_failed = [job_a]
-        self.processor.gitlab_client.retry_pipeline_job = AsyncMock(
-            side_effect=asyncio.CancelledError("Task cancelled")
-        )
+        self.processor.gitlab_client.retry_job_error = asyncio.CancelledError("Task cancelled")
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
         self.retried_jobs: dict[str, int] = {}
@@ -47,7 +42,7 @@ class Scenario(vedro.Scenario):
         ) = await self.processor._pipeline_handler.dispatch_job_retries(
             ctx=self.ctx,
             pipeline=self.pipeline,
-            jobs_to_retry=self.jobs_still_failed,
+            jobs_to_retry=[self.job_a],
             retried_jobs=self.retried_jobs,
             max_job_retries=1,
         )
@@ -59,8 +54,8 @@ class Scenario(vedro.Scenario):
         assert self.new_start_time is None
 
     def and_trigger_pipeline_failed_was_called(self):
-        self.mock_sm.trigger_pipeline_failed.assert_awaited_once()
+        assert len(self.mock_sm.pipeline_failed_calls) == 1
 
     def and_failed_job_is_reported(self):
-        call_kwargs = self.mock_sm.trigger_pipeline_failed.call_args.kwargs
-        assert "unit_tests" in call_kwargs["failed_jobs"]
+        call = self.mock_sm.pipeline_failed_calls[0]
+        assert "unit_tests" in call["failed_jobs"]

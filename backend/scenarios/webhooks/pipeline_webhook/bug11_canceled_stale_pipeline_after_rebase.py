@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
-
 import vedro
+from scenarios.fakes import FakeStateMachineFactory
 
 from gitlab_queue.webhooks.handlers import PipelineWebhookHandler
 
@@ -41,13 +40,16 @@ class Scenario(vedro.Scenario):
             mr_iid=123,
             pipeline_id=200,
         )
-        self.queue_manager.get_queue_item = AsyncMock(side_effect=[self.old_item, self.new_item])
+        self.queue_manager.get_queue_item_sequence = [self.old_item, self.new_item]
+
+        self.sm_factory = FakeStateMachineFactory()
 
         self.handler = PipelineWebhookHandler(
             settings=self.settings,
             gitlab_client=self.gitlab_client,
             queue_manager=self.queue_manager,
             notifier=create_mock_notifier(),
+            state_machine_factory=self.sm_factory,
         )
 
         # Webhook arrives for OLD pipeline_id=100
@@ -59,17 +61,13 @@ class Scenario(vedro.Scenario):
         )
 
     async def when_canceled_event_is_handled(self):
-        with patch(
-            "gitlab_queue.webhooks.handlers.create_state_machine_for_mr",
-            new=AsyncMock(),
-        ) as self.mock_create_sm:
-            await self.handler.handle(self.event)
+        await self.handler.handle(self.event)
 
     def then_update_mr_state_should_not_be_called(self):
-        self.queue_manager.update_mr_state.assert_not_awaited()
+        assert self.queue_manager.update_state_calls == []
 
     def and_state_machine_should_not_be_created(self):
-        self.mock_create_sm.assert_not_awaited()
+        assert self.sm_factory.calls == []
 
     async def cleanup(self):
         await self.gitlab_client.close()

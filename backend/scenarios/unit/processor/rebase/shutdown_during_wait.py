@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import vedro
 
-from gitlab_queue.core.processor import ProcessingResult
+from gitlab_queue.core.types import ProcessingResult
 
 from .._helpers import (
     create_mock_processor,
@@ -23,7 +23,7 @@ class Scenario(vedro.Scenario):
     def given_processor_with_shutdown_event_set(self):
         self.processor = create_mock_processor(settings=create_mock_settings(rebase_timeout_seconds=60))
         # Rebase in progress — would keep polling, but shutdown stops it
-        self.processor.gitlab_client.check_rebase_status.return_value = (True, False)
+        self.processor.gitlab_client.rebase_status = (True, False)
 
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
@@ -39,4 +39,4 @@ class Scenario(vedro.Scenario):
         assert self.result == ProcessingResult.ERROR
 
     def and_trigger_timeout_was_not_called(self):
-        self.mock_sm.trigger_timeout.assert_not_awaited()
+        assert len(self.mock_sm.timeout_calls) == 0

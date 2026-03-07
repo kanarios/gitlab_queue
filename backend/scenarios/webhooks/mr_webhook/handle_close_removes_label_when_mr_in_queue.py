@@ -1,28 +1,39 @@
 """Scenario: handle close removes queue label when MR was in queue."""
 
-from unittest.mock import AsyncMock, MagicMock
+from datetime import UTC, datetime
 
 import vedro
+from scenarios.fakes import FakeGitLabClient, FakeQueueManager
 
 from gitlab_queue.models.events import MergeRequestAttributes, MergeRequestEvent
+from gitlab_queue.models.queue_item import QueueItem
 from gitlab_queue.webhooks.handlers import MRWebhookHandler
+
+from ._helpers import create_mock_settings
 
 
 class Scenario(vedro.Scenario):
     subject = "handle close removes queue label when MR was in queue"
 
     def given_settings(self):
-        self.settings = MagicMock()
-        self.settings.queue_label = "merge_queue"
-        self.settings.hotfix_label = "hotfix"
+        self.settings = create_mock_settings()
 
     def given_gitlab_client(self):
-        self.gitlab_client = AsyncMock()
+        self.gitlab_client = FakeGitLabClient()
 
     def given_queue_manager(self):
-        self.queue_manager = AsyncMock()
-        self.queue_manager.get_queue_item = AsyncMock(return_value=MagicMock())
-        self.queue_manager.remove_from_queue = AsyncMock(return_value=True)
+        self.queue_manager = FakeQueueManager()
+        self.queue_manager.add_item(
+            QueueItem(
+                mr_iid=456,
+                title="Test",
+                author_name="A",
+                author_username="a",
+                target_branch="main",
+                state="queued",
+                queued_at=datetime.now(UTC),
+            )
+        )
 
     def given_handler(self):
         self.handler = MRWebhookHandler(
@@ -54,7 +65,7 @@ class Scenario(vedro.Scenario):
         await self.handler._handle_close(self.event)
 
     def then_it_should_remove_mr_from_queue(self):
-        self.queue_manager.remove_from_queue.assert_awaited_once_with(456)
+        assert 456 in self.queue_manager.remove_calls
 
     def then_it_should_remove_queue_label(self):
-        self.gitlab_client.remove_mr_label.assert_awaited_once_with(456, "merge_queue")
+        assert (456, "merge_queue") in self.gitlab_client.remove_label_calls

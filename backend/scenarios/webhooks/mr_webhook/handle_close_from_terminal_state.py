@@ -8,16 +8,15 @@ Fix: Handler catches TransitionNotAllowed and falls back to direct removal.
 """
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
 
 import vedro
+from scenarios.fakes import FakeNotifier, FakeQueueManager
 
 from gitlab_queue.models.queue_item import QueueItem
 from gitlab_queue.webhooks.handlers import MRWebhookHandler
 
 from ._helpers import (
     create_gitlab_client_with_transport,
-    create_mock_queue_manager,
     create_mock_settings,
     create_mr_event,
 )
@@ -39,18 +38,12 @@ class Scenario(vedro.Scenario):
             queued_at=datetime.now(UTC),
         )
 
-    def given_mock_queue_manager(self):
-        self.queue_manager = create_mock_queue_manager()
-        self.queue_manager.get_queue_item = AsyncMock(return_value=self.queue_item)
-        self.queue_manager.get_queue_position = AsyncMock(return_value=None)
-        self.queue_manager.get_queue_length = AsyncMock(return_value=0)
-        self.queue_manager.complete_mr = AsyncMock()
-        self.queue_manager.remove_from_queue = AsyncMock(return_value=True)
+    def given_queue_manager(self):
+        self.queue_manager = FakeQueueManager()
+        self.queue_manager.add_item(self.queue_item)
 
-    def given_mock_notifier(self):
-        self.notifier = MagicMock()
-        self.notifier.notify = AsyncMock()
-        self.notifier.remove_queue_label = AsyncMock()
+    def given_notifier(self):
+        self.notifier = FakeNotifier()
 
     def given_handler(self):
         self.settings = create_mock_settings()
@@ -85,10 +78,14 @@ class Scenario(vedro.Scenario):
         assert self.exc is None, f"Handler raised {self.exc!r}"
 
     def and_complete_mr_is_called(self):
-        self.queue_manager.complete_mr.assert_any_await(
-            MR_IID,
-            status="removed",
-            failure_reason="closed",
+        removed_calls = [
+            c
+            for c in self.queue_manager.complete_calls
+            if c["mr_iid"] == MR_IID and c["status"] == "removed" and c["failure_reason"] == "closed"
+        ]
+        assert len(removed_calls) > 0, (
+            f"Expected complete_mr({MR_IID}, status='removed', failure_reason='closed'), "
+            f"got: {self.queue_manager.complete_calls}"
         )
 
     async def cleanup(self):

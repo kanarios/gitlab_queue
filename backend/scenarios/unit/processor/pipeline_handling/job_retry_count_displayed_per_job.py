@@ -6,9 +6,9 @@ receive retried_jobs as a dict showing per-job retry counts.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
-
 import vedro
+
+from scenarios.fakes import create_job
 
 from .._helpers import (
     create_mock_pipeline,
@@ -28,13 +28,8 @@ class Scenario(vedro.Scenario):
         self.pipeline = create_mock_pipeline(pipeline_id=100, sha="abc123", status="failed")
 
         # test job exhausted (2 retries done, limit=2)
-        test_job = MagicMock()
-        test_job.id = 10
-        test_job.name = "test"
-        test_job.status = "failed"
-
-        self.processor.gitlab_client.get_pipeline_jobs = AsyncMock(return_value=[test_job])
-        self.processor.gitlab_client.retry_pipeline_job = AsyncMock()
+        test_job = create_job(id=10, name="test", status="failed")
+        self.processor.gitlab_client.pipeline_jobs_response = [test_job]
 
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
@@ -63,12 +58,12 @@ class Scenario(vedro.Scenario):
         assert self.updated_retried == self.retried_jobs
 
     def and_trigger_pipeline_failed_receives_retried_jobs_dict(self):
-        self.mock_sm.trigger_pipeline_failed.assert_awaited_once()
-        call_kwargs = self.mock_sm.trigger_pipeline_failed.call_args.kwargs
-        assert "retried_jobs" in call_kwargs
-        assert isinstance(call_kwargs["retried_jobs"], dict)
+        assert len(self.mock_sm.pipeline_failed_calls) == 1
+        call = self.mock_sm.pipeline_failed_calls[0]
+        assert "retried_jobs" in call
+        assert isinstance(call["retried_jobs"], dict)
 
     def and_retried_jobs_contains_per_job_counts(self):
-        call_kwargs = self.mock_sm.trigger_pipeline_failed.call_args.kwargs
-        assert call_kwargs["retried_jobs"].get("test") == 2
-        assert call_kwargs["retried_jobs"].get("lint") == 1
+        call = self.mock_sm.pipeline_failed_calls[0]
+        assert call["retried_jobs"].get("test") == 2
+        assert call["retried_jobs"].get("lint") == 1

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
 
 import vedro
+from scenarios.fakes import FakeWebSocket
 from scenarios.library import QueueState
 
 from gitlab_queue.api.websocket import WebSocketManager
@@ -14,22 +14,13 @@ from gitlab_queue.api.websocket import WebSocketManager
 class Scenario(vedro.Scenario):
     subject = "WebSocketManager broadcasts mr:completed events with failure reason"
 
-    def given_mock_websocket_connection(self):
-        # Create a mock WebSocket to test broadcast functionality
+    def given_fake_websocket_connection(self):
         self.manager = WebSocketManager()
-        self.mock_ws = MagicMock()
-        self.mock_ws.send_json = AsyncMock()
-        self.mock_ws.client_state = MagicMock()
-        self.mock_ws.client_state.name = "CONNECTED"
-        self.manager._connections.add(self.mock_ws)
+        self.fake_ws = FakeWebSocket()
+        self.manager._connections.add(self.fake_ws)
         self.finished_at = datetime.now(UTC)
 
     async def when_failed_mr_completed_is_broadcast(self):
-        """
-        Broadcast a failed merge-request completion event through the test WebSocketManager.
-
-        Calls the test manager's broadcast_mr_completed with mr_iid set to 42, status set to QueueState.FAILED, finished_at taken from the test context, and failure_reason "Merge conflict detected".
-        """
         await self.manager.broadcast_mr_completed(
             mr_iid=42,
             status=QueueState.FAILED,
@@ -38,18 +29,9 @@ class Scenario(vedro.Scenario):
         )
 
     def then_broadcast_should_contain_failure_reason(self):
-        """
-        Verify the WebSocket broadcast for a failed merge request includes the correct type, MR IID, status, and failure reason.
-
-        Asserts that send_json was awaited exactly once and that the broadcast payload:
-        - has "type" equal to "mr:completed"
-        - contains "data.iid" equal to 42
-        - contains "data.status" equal to "failed"
-        - contains "data.failureReason" equal to "Merge conflict detected"
-        """
-        self.mock_ws.send_json.assert_awaited_once()
-        call_args = self.mock_ws.send_json.call_args[0][0]
-        assert call_args["type"] == "mr:completed"
-        assert call_args["data"]["iid"] == 42
-        assert call_args["data"]["status"] == "failed"
-        assert call_args["data"]["failureReason"] == "Merge conflict detected"
+        assert self.fake_ws.send_count == 1
+        message = self.fake_ws.last_sent
+        assert message["type"] == "mr:completed"
+        assert message["data"]["iid"] == 42
+        assert message["data"]["status"] == "failed"
+        assert message["data"]["failureReason"] == "Merge conflict detected"

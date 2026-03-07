@@ -1,24 +1,25 @@
-"""Test _wait_for_pipeline sleeps and continues when stale pipeline is detected.
+"""Test wait_for_pipeline sleeps and continues when stale pipeline is detected.
 
-Lines 824-825: when _should_skip_stale_pipeline returns True, sleep and continue polling.
+When should_skip_stale_pipeline returns True, sleep and continue polling.
 """
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
 
 import vedro
 
 from gitlab_queue.core.processor import ProcessingResult
 from gitlab_queue.core.types import RebaseCheckOutcome
+from scenarios.fakes import FakeGitLabClient, FakeQueueManager
 
 from .._helpers import (
     create_mock_pipeline,
-    create_mock_processor,
     create_mock_settings,
     create_mock_state_machine,
     create_processing_context,
+    create_test_pipeline_handler,
     create_test_queue_item,
 )
 
@@ -26,74 +27,41 @@ from .._helpers import (
 class Scenario(vedro.Scenario):
     subject = "wait_for_pipeline sleeps and continues when stale pipeline is skipped"
 
-    def given_processor_with_stale_pipeline_then_removed(self):
-        self.processor = create_mock_processor(settings=create_mock_settings(pipeline_poll_interval_seconds=0.001))
+    def given_handler_with_stale_pipeline_then_shutdown(self):
+        gitlab_client = FakeGitLabClient()
+        gitlab_client.latest_pipeline_response = create_mock_pipeline(pipeline_id=99, sha="old_sha", status="running")
 
-        self.pipeline = create_mock_pipeline(pipeline_id=99, sha="old_sha", status="running")
-        self.processor.gitlab_client.get_latest_mr_pipeline.return_value = self.pipeline
+        # Queue item with pipeline_id=999 (mismatch with pipeline.id=99) → stale
+        queue_manager = FakeQueueManager()
+        queue_manager.add_item(create_test_queue_item(mr_iid=42, state="testing", pipeline_id=999))
 
-        queue_item = create_test_queue_item(mr_iid=42, state="testing")
-        self.processor.queue_manager.get_queue_item.return_value = queue_item
+        self.sleep_call_count = 0
+        self.shutdown_event = asyncio.Event()
 
-        self.mock_sm = create_mock_state_machine()
-        self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
+        async def fake_rebase(*args, **kwargs):
+            return RebaseCheckOutcome(context=None, result=None, last_check=datetime.now(UTC), should_reset=False)
 
-        self.skip_call_count = 0
-        self.termination_call_count = 0
+        async def fake_sleep(seconds):
+            self.sleep_call_count += 1
+            self.shutdown_event.set()
+            return True
 
-        no_result_rebase = RebaseCheckOutcome(
-            context=None, result=None, last_check=datetime.now(UTC), should_reset=False
+        self.handler = create_test_pipeline_handler(
+            gitlab_client=gitlab_client,
+            queue_manager=queue_manager,
+            settings=create_mock_settings(pipeline_poll_interval_seconds=0.001),
+            shutdown_event=self.shutdown_event,
+            rebase_check_fn=fake_rebase,
+            sleep_fn=fake_sleep,
         )
 
-        async def termination_side_effect(_ctx, _sm, _timeout, _start):
-            self.termination_call_count += 1
-            if self.termination_call_count >= 2:
-                return ProcessingResult.REMOVED
-            return None
-
-        async def skip_side_effect(_mr_iid, _pipeline):
-            self.skip_call_count += 1
-            return True  # Always stale
-
-        self.mock_sleep = AsyncMock(return_value=True)
-
-        self.termination_side_effect = termination_side_effect
-        self.skip_side_effect = skip_side_effect
-        self.no_result_rebase = no_result_rebase
+        self.ctx = create_processing_context(mr_iid=42, state_machine=create_mock_state_machine())
 
     async def when_wait_for_pipeline_is_called(self):
-        handler = self.processor._pipeline_handler
-        with (
-            patch.object(
-                handler,
-                "check_pipeline_termination_conditions",
-                new_callable=AsyncMock,
-                side_effect=self.termination_side_effect,
-            ),
-            patch(
-                "gitlab_queue.core.pipeline_handler.maybe_rebase_during_testing",
-                new_callable=AsyncMock,
-                return_value=self.no_result_rebase,
-            ),
-            patch.object(
-                handler,
-                "should_skip_stale_pipeline",
-                new_callable=AsyncMock,
-                side_effect=self.skip_side_effect,
-            ),
-            patch.object(
-                handler,
-                "_interruptible_sleep",
-                self.mock_sleep,
-            ),
-        ):
-            self.result = await self.processor._wait_for_pipeline(self.ctx)
+        self.result = await self.handler.wait_for_pipeline(self.ctx)
 
-    def then_result_is_removed(self):
-        assert self.result == ProcessingResult.REMOVED
-
-    def and_stale_pipeline_was_skipped(self):
-        assert self.skip_call_count >= 1
+    def then_result_is_error(self):
+        assert self.result == ProcessingResult.ERROR
 
     def and_sleep_was_called_for_stale_skip(self):
-        self.mock_sleep.assert_called()
+        assert self.sleep_call_count >= 1

@@ -7,9 +7,9 @@ trigger_pipeline_failed should NOT be called.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
-
 import vedro
+
+from scenarios.fakes import create_job
 
 from .._helpers import (
     create_mock_pipeline,
@@ -28,14 +28,8 @@ class Scenario(vedro.Scenario):
 
         self.pipeline = create_mock_pipeline(pipeline_id=100, sha="abc123", status="failed")
 
-        failed_job = MagicMock()
-        failed_job.id = 10
-        failed_job.name = "unit_tests"
-        failed_job.status = "failed"
-        self.processor.gitlab_client.get_pipeline_jobs = AsyncMock(return_value=[failed_job])
-        self.processor.gitlab_client.retry_pipeline_job = AsyncMock()
-
-        self.processor.notifier.build_pipeline_url = AsyncMock(return_value="https://gitlab.com/pipeline/100")
+        failed_job = create_job(id=10, name="unit_tests", status="failed")
+        self.processor.gitlab_client.pipeline_jobs_response = [failed_job]
 
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
@@ -60,13 +54,13 @@ class Scenario(vedro.Scenario):
         assert self.new_start_time is not None
 
     def and_trigger_pipeline_failed_is_not_called(self):
-        self.mock_sm.trigger_pipeline_failed.assert_not_awaited()
+        assert len(self.mock_sm.pipeline_failed_calls) == 0
 
     def and_retry_pipeline_job_was_called(self):
-        self.processor.gitlab_client.retry_pipeline_job.assert_awaited_once_with(10)
+        assert self.processor.gitlab_client.retry_job_calls == [10]
 
     def and_retried_jobs_updated(self):
         assert self.updated_retried.get("unit_tests") == 1
 
     def and_notify_job_retry_called(self):
-        self.mock_sm.notify_job_retry.assert_awaited_once()
+        assert len(self.mock_sm.job_retry_calls) == 1

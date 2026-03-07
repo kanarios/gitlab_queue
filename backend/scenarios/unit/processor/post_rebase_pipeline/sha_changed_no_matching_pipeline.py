@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import vedro
 
+from scenarios.fakes import create_mr
+
 from .._helpers import (
-    create_mock_mr,
     create_mock_processor,
     create_mock_settings,
 )
@@ -25,23 +26,19 @@ class Scenario(vedro.Scenario):
         self.new_sha = "new_sha_after_rebase"
 
         # MR: SHA changed to new_sha, rebase complete
-        mock_mr = create_mock_mr(iid=42, sha=self.new_sha)
-        mock_mr.rebase_in_progress = False
-        self.processor.gitlab_client.get_mr.return_value = mock_mr
+        self.processor.gitlab_client.mr_responses[42] = create_mr(iid=42, sha=self.new_sha, rebase_in_progress=False)
 
-        # No pipeline found — line 544 returns CONTINUE
-        self.processor.gitlab_client.get_latest_mr_pipeline.return_value = None
+        # No pipeline found → CONTINUE
+        self.processor.gitlab_client.latest_pipeline_response = None
 
         # Set shutdown after the first get_mr call so the loop exits cleanly
         original_get_mr = self.processor.gitlab_client.get_mr
-
         call_count = 0
 
         async def get_mr_and_trigger_shutdown(mr_iid: int):
             nonlocal call_count
             call_count += 1
             result = await original_get_mr(mr_iid)
-            # After first poll_fn call, trigger shutdown so poll_until_done exits
             if call_count == 1:
                 self.processor._shutdown_event.set()
             return result

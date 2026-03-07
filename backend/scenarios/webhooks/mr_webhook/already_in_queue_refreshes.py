@@ -9,7 +9,6 @@ Covers handlers.py lines 143-146 (existing_item is not None branch).
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock
 
 import vedro
 from scenarios.library import Labels
@@ -36,8 +35,8 @@ class Scenario(vedro.Scenario):
         )
         self.queue_manager = create_mock_queue_manager()
         # MR is already in the queue
-        self.queue_manager.get_queue_item = AsyncMock(
-            return_value=QueueItem(
+        self.queue_manager.add_item(
+            QueueItem(
                 mr_iid=123,
                 title="Existing MR",
                 author_name="Author",
@@ -67,13 +66,13 @@ class Scenario(vedro.Scenario):
         await self.handler.handle(self.event)
 
     def then_mr_should_not_be_added_again(self):
-        self.queue_manager.add_to_queue.assert_not_awaited()
+        assert self.queue_manager.add_to_queue_calls == []
 
     def and_hotfix_status_should_be_refreshed(self):
-        self.queue_manager.update_hotfix_status.assert_awaited_once()
-        call_kwargs = self.queue_manager.update_hotfix_status.call_args.kwargs
-        assert call_kwargs["mr_iid"] == 123
-        assert call_kwargs["is_hotfix"] is True
+        assert len(self.queue_manager.update_hotfix_calls) == 1
+        call = self.queue_manager.update_hotfix_calls[0]
+        assert call["mr_iid"] == 123
+        assert call["is_hotfix"] is True
 
     def and_gitlab_api_should_not_be_called_for_mr_data(self):
         self.transport.assert_not_called()

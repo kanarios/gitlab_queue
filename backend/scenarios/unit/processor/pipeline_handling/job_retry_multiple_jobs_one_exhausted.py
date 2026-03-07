@@ -6,9 +6,9 @@ removed immediately. retry_pipeline_job should NOT be called for any job.
 
 from __future__ import annotations
 
-from unittest.mock import ANY, AsyncMock, MagicMock
-
 import vedro
+
+from scenarios.fakes import create_job
 
 from .._helpers import (
     create_mock_pipeline,
@@ -27,18 +27,10 @@ class Scenario(vedro.Scenario):
 
         self.pipeline = create_mock_pipeline(pipeline_id=100, sha="abc123", status="failed")
 
-        flaky_job = MagicMock()
-        flaky_job.id = 10
-        flaky_job.name = "flaky_test"
-        flaky_job.status = "failed"
+        flaky_job = create_job(id=10, name="flaky_test", status="failed")
+        exhausted_job = create_job(id=11, name="unit_tests", status="failed")
 
-        exhausted_job = MagicMock()
-        exhausted_job.id = 11
-        exhausted_job.name = "unit_tests"
-        exhausted_job.status = "failed"
-
-        self.processor.gitlab_client.get_pipeline_jobs = AsyncMock(return_value=[flaky_job, exhausted_job])
-        self.processor.gitlab_client.retry_pipeline_job = AsyncMock()
+        self.processor.gitlab_client.pipeline_jobs_response = [flaky_job, exhausted_job]
 
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
@@ -67,11 +59,10 @@ class Scenario(vedro.Scenario):
         assert self.updated_retried == self.retried_jobs
 
     def and_trigger_pipeline_failed_was_called(self):
-        self.mock_sm.trigger_pipeline_failed.assert_awaited_once_with(
-            failed_jobs=["unit_tests"],
-            retried_jobs={"unit_tests": 1},
-            error_message=ANY,
-        )
+        assert len(self.mock_sm.pipeline_failed_calls) == 1
+        call = self.mock_sm.pipeline_failed_calls[0]
+        assert call["failed_jobs"] == ["unit_tests"]
+        assert call["retried_jobs"] == {"unit_tests": 1}
 
     def and_retry_pipeline_job_was_not_called(self):
-        self.processor.gitlab_client.retry_pipeline_job.assert_not_called()
+        assert len(self.processor.gitlab_client.retry_job_calls) == 0

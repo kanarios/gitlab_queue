@@ -1,12 +1,8 @@
 """Test create_state_machine_for_mr creates new SM when no queue item."""
 
-from unittest.mock import AsyncMock
-
 import vedro
-from scenarios.contexts.state_machine_helpers import (
-    create_mock_notifier,
-    create_mock_queue_manager,
-)
+from scenarios.contexts.state_machine_helpers import create_mock_notifier
+from scenarios.fakes import FakeQueueManager
 
 from gitlab_queue.core.state_machine import create_state_machine_for_mr
 
@@ -16,8 +12,7 @@ class Scenario(vedro.Scenario):
 
     def given_queue_manager_with_no_item(self):
         self.notifier = create_mock_notifier()
-        self.queue_manager = create_mock_queue_manager()
-        self.queue_manager.get_queue_item = AsyncMock(return_value=None)
+        self.queue_manager = FakeQueueManager()
 
     async def when_factory_is_called(self):
         self.sm = await create_state_machine_for_mr(

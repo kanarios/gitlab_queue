@@ -25,17 +25,17 @@ class Scenario(vedro.Scenario):
     async def when_pipeline_failed_is_triggered(self):
         await self.sm.trigger_pipeline_failed(
             failed_jobs=["test", "lint", "typecheck"],
-            retried_jobs={"test": 1, "lint": 1},
+            retried_jobs={"test": 2, "lint": 1},
             error_message="Tests failed",
         )
 
     def then_notifier_should_be_called_with_pipeline_failed_template(self):
-        self.notifier.notify.assert_awaited_once()
-        call_args = self.notifier.notify.call_args
-        assert call_args[0][0] == 123  # mr_iid
-        assert call_args[0][1] == "pipeline_failed"  # template
+        assert len(self.notifier.notify_calls) == 1
+        call_args = self.notifier.notify_calls[0]
+        assert call_args["mr_iid"] == 123
+        assert call_args["status"] == "pipeline_failed"
 
-    def and_notify_should_include_failed_jobs_and_retry_summary(self):
-        call_kwargs = self.notifier.notify.call_args[1]
-        assert call_kwargs.get("failed_jobs") == ["test", "lint", "typecheck"]
-        assert call_kwargs.get("retried_jobs") == {"test": 1, "lint": 1}
+    def and_notify_should_include_failed_jobs_and_retried_jobs(self):
+        call_args = self.notifier.notify_calls[0]
+        assert call_args.get("failed_jobs") == ["test", "lint", "typecheck"]
+        assert call_args.get("retried_jobs") == {"test": 2, "lint": 1}

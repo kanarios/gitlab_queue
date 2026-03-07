@@ -1,7 +1,6 @@
 """Test: handle update does not reset MR in processing state."""
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock
 
 import vedro
 from scenarios.library import Labels
@@ -27,8 +26,8 @@ class Scenario(vedro.Scenario):
             labels=[Labels.MERGE_QUEUE],
         )
         self.queue_manager = create_mock_queue_manager()
-        self.queue_manager.get_queue_item = AsyncMock(
-            return_value=QueueItem(
+        self.queue_manager.add_item(
+            QueueItem(
                 mr_iid=123,
                 title="Test",
                 author_name="Test",
@@ -50,7 +49,7 @@ class Scenario(vedro.Scenario):
 
     def then_mr_state_should_not_be_changed(self):
         # MR updates don't reset state to avoid race conditions with bot-initiated rebases
-        self.queue_manager.update_mr_state.assert_not_awaited()
+        assert self.queue_manager.update_state_calls == []
 
     async def cleanup(self):
         await self.gitlab_client.close()

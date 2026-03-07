@@ -8,9 +8,9 @@ Covers retry_processor.py lines 80-87, 236-237, 259-260:
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
 import vedro
+
+from scenarios.fakes import FakeRetryManager
 
 from ._helpers import create_test_retry_processor
 
@@ -19,11 +19,10 @@ class Scenario(vedro.Scenario):
     subject = "run loop catches exception in _process_iteration and continues"
 
     def given_processor_with_failing_iteration(self):
-        self.processor = create_test_retry_processor()
-        self.processor.retry_manager.get_events_ready_for_retry = AsyncMock(
-            side_effect=RuntimeError("Database connection lost"),
+        self.retry_manager = FakeRetryManager(
+            get_events_error=RuntimeError("Database connection lost"),
         )
-        # Make the processor shut down after one iteration
+        self.processor = create_test_retry_processor(retry_manager=self.retry_manager)
         self._iteration_count = 0
 
         async def mock_sleep(_seconds):

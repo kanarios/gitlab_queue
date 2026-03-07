@@ -6,13 +6,14 @@ Second poll: pipeline=failed, jobs=failed   → real retry   (new_start_time set
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
-
 import vedro
+
+from scenarios.fakes import create_job
 
 from .._helpers import (
     create_mock_pipeline,
     create_mock_processor,
+    create_mock_settings,
     create_mock_state_machine,
     create_processing_context,
 )
@@ -22,28 +23,17 @@ class Scenario(vedro.Scenario):
     subject = "double retry protection then real retry increments counter correctly"
 
     def given_processor_and_pipeline(self):
-        self.processor = create_mock_processor()
-        self.processor.settings.job_retry_count = 1
-        self.processor.notifier.build_pipeline_url = AsyncMock(return_value="https://gitlab.com/pipeline/100")
+        self.processor = create_mock_processor(settings=create_mock_settings(job_retry_count=1))
         self.pipeline = create_mock_pipeline(pipeline_id=100, sha="abc123", status="failed")
 
-        running_job = MagicMock()
-        running_job.id = 10
-        running_job.name = "unit_tests"
-        running_job.status = "running"
+        self.running_job = create_job(id=10, name="unit_tests", status="running")
+        self.failed_job = create_job(id=10, name="unit_tests", status="failed")
 
-        failed_job = MagicMock()
-        failed_job.id = 10
-        failed_job.name = "unit_tests"
-        failed_job.status = "failed"
-
-        self.running_job = running_job
-        self.failed_job = failed_job
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
 
     async def when_first_poll_sees_running_jobs(self):
-        self.processor.gitlab_client.get_pipeline_jobs = AsyncMock(return_value=[self.running_job])
+        self.processor.gitlab_client.pipeline_jobs_response = [self.running_job]
         (
             self.first_should_continue,
             self.first_new_start_time,
@@ -53,10 +43,10 @@ class Scenario(vedro.Scenario):
             pipeline=self.pipeline,
             retried_jobs={},
         )
+        self.retry_calls_after_first_poll = list(self.processor.gitlab_client.retry_job_calls)
 
     async def and_second_poll_sees_failed_jobs(self):
-        self.processor.gitlab_client.get_pipeline_jobs = AsyncMock(return_value=[self.failed_job])
-        self.processor.gitlab_client.retry_pipeline_job = AsyncMock()
+        self.processor.gitlab_client.pipeline_jobs_response = [self.failed_job]
         # Pass a copy so self.first_retried_jobs is not mutated by the second poll
         (
             self.second_should_continue,
@@ -81,3 +71,9 @@ class Scenario(vedro.Scenario):
 
     def and_second_poll_increments_retried_jobs(self):
         assert self.second_retried_jobs.get("unit_tests") == 1
+
+    def and_first_poll_did_not_call_retry_api(self):
+        assert self.retry_calls_after_first_poll == []
+
+    def and_second_poll_called_retry_api_for_failed_job(self):
+        assert self.failed_job.id in self.processor.gitlab_client.retry_job_calls

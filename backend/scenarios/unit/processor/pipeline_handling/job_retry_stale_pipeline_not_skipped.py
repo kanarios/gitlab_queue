@@ -6,8 +6,6 @@ _should_skip_stale_pipeline should return False when pipeline_id matches.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
 import vedro
 
 from .._helpers import (
@@ -24,12 +22,12 @@ class Scenario(vedro.Scenario):
         self.processor = create_mock_processor()
 
         # Queue item has pipeline_id=100 (same as current pipeline)
-        self.queue_item = create_test_queue_item(
+        queue_item = create_test_queue_item(
             mr_iid=42,
             state="testing",
             pipeline_id=100,
         )
-        self.processor.queue_manager.get_queue_item = AsyncMock(return_value=self.queue_item)
+        self.processor.queue_manager.add_item(queue_item)
 
         # Current pipeline has same id=100
         self.pipeline = create_mock_pipeline(pipeline_id=100, sha="abc123", status="running")

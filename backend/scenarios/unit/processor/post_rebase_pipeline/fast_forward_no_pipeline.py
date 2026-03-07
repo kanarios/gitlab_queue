@@ -7,8 +7,9 @@ from __future__ import annotations
 
 import vedro
 
+from scenarios.fakes import create_mr
+
 from .._helpers import (
-    create_mock_mr,
     create_mock_processor,
     create_mock_settings,
 )
@@ -23,12 +24,10 @@ class Scenario(vedro.Scenario):
         same_sha = "abc123"
 
         # Fast-forward: SHA unchanged after rebase
-        mock_mr = create_mock_mr(iid=42, sha=same_sha)
-        mock_mr.rebase_in_progress = False
-        self.processor.gitlab_client.get_mr.return_value = mock_mr
+        self.processor.gitlab_client.mr_responses[42] = create_mr(iid=42, sha=same_sha, rebase_in_progress=False)
 
         # No pipeline found yet
-        self.processor.gitlab_client.get_latest_mr_pipeline.return_value = None
+        self.processor.gitlab_client.latest_pipeline_response = None
 
         self.old_sha = same_sha
 

@@ -28,7 +28,7 @@ class Scenario(vedro.Scenario):
             pipeline_id=100,
             expected_sha="abc123",
         )
-        self.processor.queue_manager.get_queue_item.return_value = self.queue_item
+        self.processor.queue_manager.add_item(self.queue_item)
 
         self.pipeline = create_mock_pipeline(pipeline_id=100, sha="def456", status="success")
 

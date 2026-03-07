@@ -2,14 +2,12 @@
 
 This module exports all context managers and factory functions used in test scenarios.
 Contexts follow the Vedro naming conventions:
-- Mocks use `mocked_` prefix (e.g., `mocked_gitlab_get_mr`)
 - Factories use past tense (e.g., `created_test_app`, `initialized_test_database`)
 
 Example:
     >>> from scenarios.contexts import (
     ...     initialized_test_database,
     ...     created_test_app,
-    ...     mocked_gitlab_get_mr,
     ... )
 """
 
@@ -50,6 +48,7 @@ from scenarios.contexts.api_helpers import (
     created_webhook_state,
 )
 from scenarios.contexts.gitlab_client_factory import (
+    MOCK_TRANSPORT_URL,
     TEST_PROJECT_ID,
     # Aliases for backward compatibility
     create_test_client,
@@ -57,23 +56,6 @@ from scenarios.contexts.gitlab_client_factory import (
     # New names (preferred)
     created_test_client,
     created_test_settings,
-)
-from scenarios.contexts.jj_gitlab_mock import (
-    JJ_MOCK_URL,
-    get_mock_url,
-    mocked_gitlab_add_comment,
-    mocked_gitlab_get_conflicts,
-    mocked_gitlab_get_mr,
-    mocked_gitlab_get_notes,
-    mocked_gitlab_list_mrs,
-    mocked_gitlab_merge,
-    mocked_gitlab_mr_pipelines,
-    mocked_gitlab_pipeline,
-    mocked_gitlab_pipeline_jobs,
-    mocked_gitlab_rate_limit,
-    mocked_gitlab_rebase,
-    mocked_gitlab_retry_job,
-    mocked_gitlab_update_comment,
 )
 from scenarios.contexts.sqlite_client import (
     # New names (preferred)
@@ -87,9 +69,8 @@ from scenarios.contexts.sqlite_client import (
 )
 
 __all__ = [
-    # JJ GitLab Mocks
-    "JJ_MOCK_URL",
     # GitLab Client Factory
+    "MOCK_TRANSPORT_URL",
     "TEST_PROJECT_ID",
     # API Helpers - backward compatibility aliases
     "create_expired_jwt",
@@ -129,22 +110,8 @@ __all__ = [
     "created_test_queue_item",
     "created_test_settings",
     "created_webhook_state",
-    "get_mock_url",
     # SQLite Client
     "initialized_test_database",
-    "mocked_gitlab_add_comment",
-    "mocked_gitlab_get_conflicts",
-    "mocked_gitlab_get_mr",
-    "mocked_gitlab_get_notes",
-    "mocked_gitlab_list_mrs",
-    "mocked_gitlab_merge",
-    "mocked_gitlab_mr_pipelines",
-    "mocked_gitlab_pipeline",
-    "mocked_gitlab_pipeline_jobs",
-    "mocked_gitlab_rate_limit",
-    "mocked_gitlab_rebase",
-    "mocked_gitlab_retry_job",
-    "mocked_gitlab_update_comment",
     "opened_test_session",
     "started_test_transaction",
     "test_database",

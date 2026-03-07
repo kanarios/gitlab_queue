@@ -6,8 +6,6 @@ should pass the existing retried_jobs (not hardcoded {}) to trigger_pipeline_fai
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
-
 import vedro
 
 from gitlab_queue.core.processor import ProcessingResult
@@ -16,6 +14,7 @@ from gitlab_queue.core.rebase_during_testing import (
     RebaseDuringTestingContext,
     RebaseRetryLimitExceeded,
 )
+from scenarios.fakes import FakeRebaseDuringTestingHandler
 
 from .._helpers import (
     create_mock_pipeline,
@@ -38,9 +37,8 @@ class Scenario(vedro.Scenario):
         self.rebase_ctx = RebaseDuringTestingContext(rebase_count=3, max_attempts=3)
         self.pipeline = create_mock_pipeline(pipeline_id=100, sha="abc123", status="running")
 
-        self.rebase_handler = MagicMock()
-        self.rebase_handler.handle_rebase_if_needed = AsyncMock(
-            side_effect=RebaseRetryLimitExceeded("MR !42: 3/3 rebase attempts exhausted")
+        self.rebase_handler = FakeRebaseDuringTestingHandler(
+            error=RebaseRetryLimitExceeded("MR !42: 3/3 rebase attempts exhausted")
         )
 
         self.existing_retried_jobs = {"flaky_test": 1}
@@ -62,6 +60,6 @@ class Scenario(vedro.Scenario):
         assert self.result == ProcessingResult.PIPELINE_FAILED
 
     def and_trigger_pipeline_failed_was_called_with_existing_retried_jobs(self):
-        self.mock_sm.trigger_pipeline_failed.assert_awaited_once()
-        call_kwargs = self.mock_sm.trigger_pipeline_failed.call_args.kwargs
-        assert call_kwargs["retried_jobs"] == {"flaky_test": 1}
+        assert len(self.mock_sm.pipeline_failed_calls) == 1
+        call = self.mock_sm.pipeline_failed_calls[0]
+        assert call["retried_jobs"] == {"flaky_test": 1}

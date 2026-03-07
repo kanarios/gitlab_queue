@@ -37,7 +37,7 @@ class Scenario(vedro.Scenario):
         self.processor = create_mock_processor()
 
         self.queue_item = create_test_queue_item(mr_iid=42, state="testing", expected_sha="abc123")
-        self.processor.queue_manager.get_queue_item.return_value = self.queue_item
+        self.processor.queue_manager.add_item(self.queue_item)
 
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
@@ -70,13 +70,10 @@ class Scenario(vedro.Scenario):
 
         This verifies the scenario invoked the state machine's `trigger_pipeline_success` coroutine one time.
         """
-        self.mock_sm.trigger_pipeline_success.assert_awaited_once()
+        assert len(self.mock_sm.pipeline_success_calls) == 1
 
     def and_pipeline_failed_is_not_triggered(self):
         """
-        Asserts that the state machine's trigger_pipeline_failed method was not awaited.
-
-        Raises:
-            AssertionError: If trigger_pipeline_failed was awaited one or more times.
+        Asserts that the state machine's trigger_pipeline_failed method was not called.
         """
-        self.mock_sm.trigger_pipeline_failed.assert_not_awaited()
+        assert self.mock_sm.pipeline_failed_calls == []

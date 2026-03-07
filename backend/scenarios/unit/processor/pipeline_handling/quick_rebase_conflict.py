@@ -7,8 +7,6 @@ rebase cannot proceed due to merge conflicts.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
 import vedro
 
 from gitlab_queue.clients.gitlab import GitLabConflictError
@@ -42,8 +40,8 @@ class Scenario(vedro.Scenario):
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
 
         # check_rebase_status returns (not_in_progress, has_conflicts)
-        self.processor.gitlab_client.check_rebase_status = AsyncMock(return_value=(False, True))
-        self.processor.gitlab_client.get_mr_conflicts = AsyncMock(return_value=[])
+        self.processor.gitlab_client.rebase_status = (False, True)
+        self.processor.gitlab_client.mr_conflicts = []
 
     async def when_wait_for_rebase_quick_is_called(self):
         """

@@ -6,9 +6,9 @@ When two jobs fail, both should be retried via asyncio.gather
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
-
 import vedro
+
+from scenarios.fakes import create_job
 
 from .._helpers import (
     create_mock_pipeline,
@@ -27,19 +27,10 @@ class Scenario(vedro.Scenario):
 
         self.pipeline = create_mock_pipeline(pipeline_id=100, sha="abc123", status="failed")
 
-        job_a = MagicMock()
-        job_a.id = 10
-        job_a.name = "test_a"
-        job_a.status = "failed"
+        job_a = create_job(id=10, name="test_a", status="failed")
+        job_b = create_job(id=11, name="test_b", status="failed")
 
-        job_b = MagicMock()
-        job_b.id = 11
-        job_b.name = "test_b"
-        job_b.status = "failed"
-
-        self.processor.gitlab_client.get_pipeline_jobs = AsyncMock(return_value=[job_a, job_b])
-        self.processor.gitlab_client.retry_pipeline_job = AsyncMock()
-        self.processor.notifier.build_pipeline_url = AsyncMock(return_value="https://gitlab.com/pipeline/100")
+        self.processor.gitlab_client.pipeline_jobs_response = [job_a, job_b]
 
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
@@ -61,9 +52,8 @@ class Scenario(vedro.Scenario):
         assert self.should_continue is True
 
     def and_both_jobs_were_retried(self):
-        assert self.processor.gitlab_client.retry_pipeline_job.await_count == 2
-        awaited_ids = {call.args[0] for call in self.processor.gitlab_client.retry_pipeline_job.await_args_list}
-        assert awaited_ids == {10, 11}
+        assert len(self.processor.gitlab_client.retry_job_calls) == 2
+        assert set(self.processor.gitlab_client.retry_job_calls) == {10, 11}
 
     def and_both_jobs_counted_in_retried_jobs(self):
         assert self.updated_retried.get("test_a") == 1

@@ -2,34 +2,34 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
-
 import vedro
 
-from ._helpers import create_test_retry_item, create_test_retry_processor
+from scenarios.fakes import FakeHandler, FakeHandlerFactory
+
+from ._helpers import create_fake_retry_manager, create_test_retry_item, create_test_retry_processor
 
 
 class Scenario(vedro.Scenario):
     subject = "_process_retry_item marks failure when handler raises exception"
 
     def given_processor_and_mr_item(self):
-        self.processor = create_test_retry_processor()
+        self.retry_manager = create_fake_retry_manager()
+        self.handler = FakeHandler(handle_error=RuntimeError("Handler failed"))
+        self.processor = create_test_retry_processor(
+            retry_manager=self.retry_manager,
+            mr_handler_factory=FakeHandlerFactory(handler=self.handler),
+        )
         self.item = create_test_retry_item(event_type="merge_request")
 
     async def when_process_retry_item_is_called_and_handler_fails(self):
-        with patch("gitlab_queue.webhooks.handlers.MRWebhookHandler") as mock_handler_cls:
-            mock_handler_instance = AsyncMock()
-            mock_handler_instance.handle.side_effect = RuntimeError("Handler failed")
-            mock_handler_cls.return_value = mock_handler_instance
-            await self.processor._process_retry_item(self.item)
+        await self.processor._process_retry_item(self.item)
 
     def then_mark_retry_failed_is_called(self):
-        self.processor.retry_manager.mark_retry_failed.assert_awaited_once()
+        assert len(self.retry_manager.failed_calls) == 1
 
     def and_error_message_contains_failure_reason(self):
-        call_args = self.processor.retry_manager.mark_retry_failed.call_args
-        error_msg = call_args.args[1]
+        error_msg = self.retry_manager.failed_calls[0]["error_message"]
         assert "Handler failed" in error_msg
 
     def and_mark_retry_success_is_not_called(self):
-        self.processor.retry_manager.mark_retry_success.assert_not_awaited()
+        assert self.retry_manager.success_calls == []

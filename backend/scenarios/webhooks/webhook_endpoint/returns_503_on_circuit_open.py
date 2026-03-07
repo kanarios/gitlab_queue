@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
-
 import vedro
 from scenarios.contexts.api_helpers import created_test_app
 from scenarios.schemas.status_code import ServiceUnavailableStatusSchema
@@ -19,6 +17,11 @@ class Scenario(vedro.Scenario):
 
     def given_app_with_circuit_open(self):
         self.app, self.state = created_test_app()
+
+        async def raise_circuit_open(state, event):
+            raise GitLabCircuitOpenError(retry_after=30.0)
+
+        self.state.event_router = raise_circuit_open
         self.webhook_secret = self.state.settings.webhook_secret.get_secret_value()
         self.client = TestClient(self.app, raise_server_exceptions=False)
         self.payload = create_mr_webhook_payload(
@@ -26,16 +29,11 @@ class Scenario(vedro.Scenario):
         )
 
     def when_webhook_is_called_and_circuit_is_open(self):
-        with patch(
-            "gitlab_queue.webhooks.router._route_webhook_event",
-            new_callable=AsyncMock,
-            side_effect=GitLabCircuitOpenError(retry_after=30.0),
-        ):
-            self.response = self.client.post(
-                "/webhooks/gitlab",
-                json=self.payload,
-                headers={"X-Gitlab-Token": self.webhook_secret},
-            )
+        self.response = self.client.post(
+            "/webhooks/gitlab",
+            json=self.payload,
+            headers={"X-Gitlab-Token": self.webhook_secret},
+        )
 
     def then_it_should_return_503(self):
         assert self.response.status_code == ServiceUnavailableStatusSchema

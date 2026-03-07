@@ -6,8 +6,6 @@ but no longer has the queue label, it should mark the MR as 'removed'.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
 import vedro
 
 from .._helpers import (
@@ -30,15 +28,12 @@ class Scenario(vedro.Scenario):
         - the GitLab client to return a mock MR (IID 42, state "opened") whose labels do not include the queue label.
         """
         self.processor = create_mock_processor()
-        self.processor.queue_manager.complete_mr = AsyncMock(return_value=True)
 
         self.queue_item = create_test_queue_item(mr_iid=42, state="queued")
-        self.processor.queue_manager.get_active_queue.return_value = [
-            self.queue_item,
-        ]
+        self.processor.queue_manager.add_item(self.queue_item)
 
         self.mock_mr = create_mock_mr(iid=42, state="opened", labels=["other_label"])
-        self.processor.gitlab_client.get_mr.return_value = self.mock_mr
+        self.processor.gitlab_client.mr_responses[42] = self.mock_mr
 
     async def when_recover_interrupted_state_is_called(self):
         """
@@ -53,8 +48,8 @@ class Scenario(vedro.Scenario):
         Verifies that queue_manager.complete_mr was awaited exactly once with status "removed"
         and failure_reason "label_removed".
         """
-        self.processor.queue_manager.complete_mr.assert_awaited_once_with(
-            42,
-            status="removed",
-            failure_reason="label_removed",
-        )
+        assert len(self.processor.queue_manager.complete_calls) == 1
+        call = self.processor.queue_manager.complete_calls[0]
+        assert call["mr_iid"] == 42
+        assert call["status"] == "removed"
+        assert call["failure_reason"] == "label_removed"

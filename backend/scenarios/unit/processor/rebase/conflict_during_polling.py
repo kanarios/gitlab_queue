@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import vedro
 
-from gitlab_queue.core.processor import ProcessingResult
+from gitlab_queue.core.types import ProcessingResult
 
 from .._helpers import (
     create_mock_processor,
@@ -24,8 +24,8 @@ class Scenario(vedro.Scenario):
         self.processor = create_mock_processor()
 
         # check_rebase_status → (False, True) = not in progress, has conflicts
-        self.processor.gitlab_client.check_rebase_status.return_value = (False, True)
-        self.processor.gitlab_client.get_mr_conflicts.return_value = ["README.md"]
+        self.processor.gitlab_client.rebase_status = (False, True)
+        self.processor.gitlab_client.mr_conflicts = ["README.md"]
 
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
@@ -38,7 +38,7 @@ class Scenario(vedro.Scenario):
         assert self.result == ProcessingResult.CONFLICT
 
     def and_trigger_rebase_failed_was_called(self):
-        self.mock_sm.trigger_rebase_failed.assert_awaited_once()
+        assert len(self.mock_sm.rebase_failed_calls) == 1
 
-    def and_get_mr_conflicts_was_called(self):
-        self.processor.gitlab_client.get_mr_conflicts.assert_awaited_once_with(42)
+    def and_conflicted_files_include_readme(self):
+        assert self.mock_sm.rebase_failed_calls[0]["conflicted_files"] == ["README.md"]

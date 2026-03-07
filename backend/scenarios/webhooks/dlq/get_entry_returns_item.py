@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
 import vedro
 from scenarios.contexts.api_helpers import created_test_app, created_test_jwt
 from scenarios.schemas.status_code import OkStatusSchema
@@ -18,7 +16,7 @@ class Scenario(vedro.Scenario):
     def given_app_with_dlq_entry(self):
         self.app, self.state = created_test_app()
         self.item = create_test_dlq_item(entry_id=1, event_type="merge_request")
-        self.state.retry_manager.get_dlq_entry = AsyncMock(return_value=self.item)
+        self.state.retry_manager.dlq_entry = self.item
         self.client = TestClient(self.app, raise_server_exceptions=False)
         self.token = created_test_jwt(self.state.settings)
         self.headers = {"Authorization": f"Bearer {self.token}"}

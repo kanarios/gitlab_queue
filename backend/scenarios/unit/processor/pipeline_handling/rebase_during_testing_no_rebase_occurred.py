@@ -6,12 +6,11 @@ Line 1087: when handle_rebase_if_needed returns (new_ctx, None) with same rebase
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
-
 import vedro
 
 from gitlab_queue.core.rebase_coordinator import check_and_handle_rebase_during_testing
 from gitlab_queue.core.rebase_during_testing import RebaseDuringTestingContext
+from scenarios.fakes import FakeRebaseDuringTestingHandler
 
 from .._helpers import (
     create_mock_pipeline,
@@ -35,19 +34,17 @@ class Scenario(vedro.Scenario):
         self.rebase_ctx = RebaseDuringTestingContext(rebase_count=1, max_attempts=3, current_pipeline_id=100)
 
         # Same rebase_count as rebase_ctx — no actual rebase occurred
-        self.same_count_ctx = RebaseDuringTestingContext(
+        same_count_ctx = RebaseDuringTestingContext(
             rebase_count=1,  # Same as rebase_ctx.rebase_count
             max_attempts=3,
             current_pipeline_id=100,
         )
 
-        # Mock rebase_handler: returns (same_count_ctx, None) — no new pipeline
-        self.mock_handler = MagicMock()
-        self.mock_handler.handle_rebase_if_needed = AsyncMock(return_value=(self.same_count_ctx, None))
+        self.rebase_handler = FakeRebaseDuringTestingHandler(result=(same_count_ctx, None))
 
     async def when_check_and_handle_rebase_during_testing_is_called(self):
         state = create_pipeline_wait_state(
-            rebase_handler=self.mock_handler,
+            rebase_handler=self.rebase_handler,
             rebase_ctx=self.rebase_ctx,
         )
         self.result = await check_and_handle_rebase_during_testing(
@@ -61,4 +58,4 @@ class Scenario(vedro.Scenario):
         assert self.result is None
 
     def and_notify_was_not_called(self):
-        self.mock_sm.notify_rebase_during_testing.assert_not_called()
+        assert len(self.mock_sm.rebase_during_testing_calls) == 0

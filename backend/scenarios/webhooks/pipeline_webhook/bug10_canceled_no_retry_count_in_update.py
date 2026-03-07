@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
-
 import vedro
+from scenarios.fakes import FakeStateMachineFactory
 
 from gitlab_queue.webhooks.handlers import PipelineWebhookHandler
 
@@ -32,12 +31,16 @@ class Scenario(vedro.Scenario):
             mr_iid=123,
             pipeline_id=456,
         )
-        self.queue_manager.get_queue_item = AsyncMock(return_value=self.queue_item)
+        self.queue_manager.add_item(self.queue_item)
+
+        self.sm_factory = FakeStateMachineFactory()
+
         self.handler = PipelineWebhookHandler(
             settings=self.settings,
             gitlab_client=self.gitlab_client,
             queue_manager=self.queue_manager,
             notifier=create_mock_notifier(),
+            state_machine_factory=self.sm_factory,
         )
         self.event = create_pipeline_event(
             pipeline_id=456,
@@ -47,17 +50,12 @@ class Scenario(vedro.Scenario):
         )
 
     async def when_event_is_handled(self):
-        with patch(
-            "gitlab_queue.webhooks.handlers.create_state_machine_for_mr",
-            new=AsyncMock(),
-        ):
-            await self.handler.handle(self.event)
+        await self.handler.handle(self.event)
 
     def then_update_should_not_contain_retry_count(self):
-        call_kwargs = self.queue_manager.update_mr_state.call_args
-        assert call_kwargs is not None, "update_mr_state was not called"
-        _, kwargs = call_kwargs
-        assert "retry_count" not in kwargs, f"update_mr_state should not pass retry_count, got kwargs: {kwargs}"
+        assert len(self.queue_manager.update_state_calls) >= 1, "update_mr_state was not called"
+        call = self.queue_manager.update_state_calls[0]
+        assert "retry_count" not in call, f"update_mr_state should not pass retry_count, got: {call}"
 
     async def cleanup(self):
         await self.gitlab_client.close()

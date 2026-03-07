@@ -15,8 +15,7 @@ from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
     from gitlab_queue.api.websocket import WebSocketManager
-    from gitlab_queue.core.notifier import MRNotifier
-    from gitlab_queue.core.queue import QueueManager
+    from gitlab_queue.core.protocols import NotifierProtocol, QueueManagerProtocol, StateMachineProtocol
     from gitlab_queue.core.queue_position_notifier import QueuePositionNotifier
     from gitlab_queue.models.queue_item import QueueItem
 
@@ -93,8 +92,8 @@ class MRStateMachine(StateMachine):
 
     def __init__(
         self,
-        notifier: MRNotifier,
-        queue_manager: QueueManager,
+        notifier: NotifierProtocol,
+        queue_manager: QueueManagerProtocol,
         mr_iid: int,
         *,
         target_branch: str = "master",
@@ -106,8 +105,8 @@ class MRStateMachine(StateMachine):
         """Initialize state machine for a specific MR.
 
         Args:
-            notifier: MRNotifier for sending notifications.
-            queue_manager: QueueManager for state persistence.
+            notifier: Notifier for sending notifications.
+            queue_manager: Queue manager for state persistence.
             mr_iid: Merge request IID to manage.
             target_branch: Target branch for rebasing/merging.
             start_value: Initial state (for resuming from DB). If None, starts at queued.
@@ -772,14 +771,14 @@ class MRStateMachine(StateMachine):
     # Helper Methods
     # =========================================================================
 
-    def _calculate_duration(self, queue_item: QueueItem | None) -> str:
+    def _calculate_duration(self, queue_item: QueueItem | None, *, now: datetime | None = None) -> str:
         """Calculate human-readable duration from queued_at to now.
 
         Delegates to module-level calculate_duration().
         """
         if not queue_item or not queue_item.queued_at:
             return "unknown"
-        return calculate_duration(queue_item.queued_at)
+        return calculate_duration(queue_item.queued_at, now=now)
 
 
 # =============================================================================
@@ -787,11 +786,12 @@ class MRStateMachine(StateMachine):
 # =============================================================================
 
 
-def calculate_duration(queued_at: datetime | None) -> str:
+def calculate_duration(queued_at: datetime | None, *, now: datetime | None = None) -> str:
     """Calculate human-readable duration from queued_at to now.
 
     Args:
         queued_at: Timestamp when MR was queued.
+        now: Current time (defaults to datetime.now(UTC)).
 
     Returns:
         Formatted duration string like "1h 23m" or "45s".
@@ -799,7 +799,8 @@ def calculate_duration(queued_at: datetime | None) -> str:
     if queued_at is None:
         return "unknown"
 
-    now = datetime.now(UTC)
+    if now is None:
+        now = datetime.now(UTC)
 
     if queued_at.tzinfo is None:
         log.debug("Normalizing naive datetime to UTC", queued_at=str(queued_at))
@@ -827,19 +828,19 @@ def calculate_duration(queued_at: datetime | None) -> str:
 
 async def create_state_machine_for_mr(
     mr_iid: int,
-    notifier: MRNotifier,
-    queue_manager: QueueManager,
+    notifier: NotifierProtocol,
+    queue_manager: QueueManagerProtocol,
     *,
     target_branch: str = "master",
     websocket_manager: WebSocketManager | None = None,
     position_notifier: QueuePositionNotifier | None = None,
-) -> MRStateMachine:
+) -> StateMachineProtocol:
     """Create state machine for an MR, resuming from DB state if exists.
 
     Args:
         mr_iid: Merge request IID.
-        notifier: MRNotifier for sending notifications.
-        queue_manager: QueueManager for state persistence.
+        notifier: Notifier for sending notifications.
+        queue_manager: Queue manager for state persistence.
         target_branch: Target branch for rebasing/merging.
         websocket_manager: Optional WebSocketManager for real-time updates.
         position_notifier: Optional QueuePositionNotifier for position change notifications.

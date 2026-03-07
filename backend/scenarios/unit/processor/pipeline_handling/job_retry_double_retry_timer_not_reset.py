@@ -6,13 +6,14 @@ new_start_time must be None so the polling timeout can still fire.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
-
 import vedro
+
+from scenarios.fakes import create_job
 
 from .._helpers import (
     create_mock_pipeline,
     create_mock_processor,
+    create_mock_settings,
     create_mock_state_machine,
     create_processing_context,
 )
@@ -22,16 +23,12 @@ class Scenario(vedro.Scenario):
     subject = "double retry protection returns None new_start_time to preserve timeout"
 
     def given_pipeline_failed_but_jobs_running(self):
-        self.processor = create_mock_processor()
-        self.processor.settings.job_retry_count = 1
+        self.processor = create_mock_processor(settings=create_mock_settings(job_retry_count=1))
         self.pipeline = create_mock_pipeline(pipeline_id=100, sha="abc123", status="failed")
 
-        running_job = MagicMock()
-        running_job.id = 10
-        running_job.name = "unit_tests"
-        running_job.status = "running"
+        running_job = create_job(id=10, name="unit_tests", status="running")
+        self.processor.gitlab_client.pipeline_jobs_response = [running_job]
 
-        self.processor.gitlab_client.get_pipeline_jobs = AsyncMock(return_value=[running_job])
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
         self.retried_jobs: dict[str, int] = {}
@@ -54,7 +51,7 @@ class Scenario(vedro.Scenario):
         assert self.new_start_time is None, f"Expected None (timer must not reset) but got {self.new_start_time}"
 
     def and_no_retry_api_call_was_made(self):
-        self.processor.gitlab_client.retry_pipeline_job.assert_not_called()
+        assert len(self.processor.gitlab_client.retry_job_calls) == 0
 
     def and_pipeline_failed_was_not_triggered(self):
-        self.mock_sm.trigger_pipeline_failed.assert_not_awaited()
+        assert len(self.mock_sm.pipeline_failed_calls) == 0

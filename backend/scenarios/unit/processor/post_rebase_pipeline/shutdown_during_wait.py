@@ -7,8 +7,9 @@ from __future__ import annotations
 
 import vedro
 
+from scenarios.fakes import create_mr
+
 from .._helpers import (
-    create_mock_mr,
     create_mock_processor,
     create_mock_settings,
 )
@@ -20,10 +21,8 @@ class Scenario(vedro.Scenario):
     def given_processor_with_shutdown_event_set(self):
         self.processor = create_mock_processor(settings=create_mock_settings(pipeline_poll_interval_seconds=60))
 
-        mock_mr = create_mock_mr(iid=42, sha="new_sha")
-        mock_mr.rebase_in_progress = True  # Would keep polling
-        self.processor.gitlab_client.get_mr.return_value = mock_mr
-        self.processor.gitlab_client.get_latest_mr_pipeline.return_value = None
+        self.processor.gitlab_client.mr_responses[42] = create_mr(iid=42, sha="new_sha", rebase_in_progress=True)
+        self.processor.gitlab_client.latest_pipeline_response = None
 
         # Set shutdown before calling
         self.processor._shutdown_event.set()

@@ -6,9 +6,9 @@ retrying both should increment the counter by 1 (per unique name), not 2.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
-
 import vedro
+
+from scenarios.fakes import create_job
 
 from .._helpers import (
     create_mock_pipeline,
@@ -23,20 +23,11 @@ class Scenario(vedro.Scenario):
 
     def given_two_matrix_jobs_with_same_name(self):
         self.processor = create_mock_processor()
-        self.processor.gitlab_client.retry_pipeline_job = AsyncMock()
-        self.processor.notifier.build_pipeline_url = AsyncMock(return_value="https://gitlab.com/pipeline/100")
 
         self.pipeline = create_mock_pipeline(pipeline_id=100, sha="abc123", status="failed")
 
-        job_a = MagicMock()
-        job_a.id = 10
-        job_a.name = "rspec"
-        job_a.status = "failed"
-
-        job_b = MagicMock()
-        job_b.id = 11
-        job_b.name = "rspec"
-        job_b.status = "failed"
+        job_a = create_job(id=10, name="rspec", status="failed")
+        job_b = create_job(id=11, name="rspec", status="failed")
 
         self.jobs_still_failed = [job_a, job_b]
         self.retried_jobs: dict[str, int] = {}
@@ -66,4 +57,4 @@ class Scenario(vedro.Scenario):
         )
 
     def and_both_jobs_were_actually_retried(self):
-        assert self.processor.gitlab_client.retry_pipeline_job.await_count == 2
+        assert len(self.processor.gitlab_client.retry_job_calls) == 2

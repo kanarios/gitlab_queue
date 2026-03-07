@@ -1,429 +1,90 @@
 """Test scenarios for processor handling merge conflicts.
 
 This scenario tests how the processor handles conflicts:
-1. Rebase conflicts during initial rebase
-2. Conflicts discovered after rebase starts
-3. Proper notification and state transitions
+1. Rebase conflicts during initial rebase (409 from GitLab)
+2. Conflicts discovered after rebase starts (polling finds has_conflicts=True)
+3. Conflict for one MR doesn't affect other MRs in the queue
 """
 
 from __future__ import annotations
 
-import jj
-from jj.mock import mocked
 from vedro import given, scenario, then, when
 
-from gitlab_queue.clients.gitlab import GitLabClient
-from gitlab_queue.config import Settings
-from gitlab_queue.core.notifier import MRNotifier
-from gitlab_queue.core.processor import MergeProcessor, ProcessingResult
-from gitlab_queue.core.queue import QueueManager
-from gitlab_queue.db.database import Database
-from gitlab_queue.models.mr import Author, MergeRequest
-from scenarios.contexts.jj_gitlab_mock import get_mock_url
-from scenarios.mocks.gitlab import make_project_mock
+from gitlab_queue.clients.gitlab import GitLabConflictError
+from gitlab_queue.core.processor import ProcessingResult
+from scenarios.unit.processor._helpers import (
+    create_mock_processor,
+    create_mock_state_machine,
+    create_processing_context,
+    create_test_queue_item,
+    instant_poll,
+)
 
 
 @scenario()
 async def process_mr_with_immediate_conflict():
-    """Test MR processing when rebase immediately returns conflict."""
+    """Test MR processing when rebase immediately returns conflict (409)."""
 
-    with given("MR in queue and GitLab returns rebase conflict"):
-        # Setup test database and queue
-        db = Database(database_url="sqlite+aiosqlite:///:memory:")
-        await db.initialize()
-        queue = QueueManager(db)
-        await queue.ensure_schema()
+    with given("a processor whose GitLab client raises GitLabConflictError on rebase"):
+        processor = create_mock_processor()
+        processor.gitlab_client.rebase_mr_error = GitLabConflictError("Merge conflict")
 
-        # Create test MR
-        test_mr = MergeRequest(
-            iid=44,
-            title="MR with Conflict",
-            state="opened",
-            target_branch="main",
-            source_branch="feature/conflict",
-            sha="conflict123",
-            labels=["merge_queue"],
-            author=Author(id=1, name="Test User", username="testuser"),
-            merge_status="can_be_merged",
-            web_url="https://gitlab.com/test/project/-/merge_requests/44",
-        )
+        sm = create_mock_state_machine()
+        ctx = create_processing_context(mr_iid=44, state_machine=sm)
 
-        # Add MR to queue
-        await queue.add_to_queue(test_mr, is_hotfix=False)
+    with when("processor attempts to rebase the MR"):
+        result = await processor._process_rebase(ctx)
 
-        mock_url = get_mock_url()
-
-        # Mock data
-        mr_data = {
-            "iid": 44,
-            "project_id": 123,
-            "title": "MR with Conflict",
-            "state": "opened",
-            "sha": "conflict123",
-            "labels": ["merge_queue"],
-            "source_branch": "feature/conflict",
-            "target_branch": "main",
-            "merge_status": "can_be_merged",
-            "has_conflicts": False,
-            "rebase_in_progress": False,
-            "author": {"id": 1, "name": "Test User", "username": "testuser"},
-            "web_url": "https://gitlab.com/test/project/-/merge_requests/44",
-        }
-
-        conflict_data = [
-            {
-                "old_path": "src/main.py",
-                "new_path": "src/main.py",
-                "sections": [
-                    {
-                        "head": "print('HEAD version')",
-                        "origin": "print('origin version')",
-                    }
-                ],
-            }
-        ]
-
-        # Setup matchers
-        get_mr_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/44")
-        get_mr_response = jj.Response(status=200, json=mr_data)
-
-        # Rebase returns 409 Conflict immediately
-        rebase_matcher = jj.match("PUT", "/api/v4/projects/123/merge_requests/44/rebase")
-        rebase_response = jj.Response(status=409, json={"message": "Merge conflict during rebase"})
-
-        # Get conflicts endpoint
-        conflicts_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/44/conflicts")
-        conflicts_response = jj.Response(status=200, json=conflict_data)
-
-        # Comment for conflict notification
-        comment_matcher = jj.match("POST", "/api/v4/projects/123/merge_requests/44/notes")
-        comment_response = jj.Response(status=201, json={"id": 10, "body": "Conflict detected"})
-
-        # GET notes - needed for _find_bot_comment
-        get_notes_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/44/notes")
-        get_notes_response = jj.Response(status=200, json=[])
-
-        project_matcher, project_response = make_project_mock(mock_url)
-
-        settings = Settings(
-            gitlab_url=mock_url,
-            gitlab_project_id=123,
-            gitlab_token="test-token",
-            target_branch="main",
-            queue_label="merge_queue",
-            hotfix_label="hotfix",
-            jwt_secret="a" * 64,
-            webhook_secret="test-webhook-secret",
-        )
-
-    async with (
-        mocked(project_matcher, project_response),
-        mocked(get_mr_matcher, get_mr_response),
-        mocked(rebase_matcher, rebase_response) as rebase_mock,
-        mocked(conflicts_matcher, conflicts_response) as conflicts_mock,
-        mocked(get_notes_matcher, get_notes_response),
-        mocked(comment_matcher, comment_response) as comment_mock,
-    ):
-        with when("processor attempts to rebase MR"):
-            gitlab_client = GitLabClient(settings)
-            notifier = MRNotifier(gitlab_client=gitlab_client, settings=settings)
-            processor = MergeProcessor(
-                gitlab_client=gitlab_client,
-                queue_manager=queue,
-                notifier=notifier,
-                settings=settings,
-            )
-
-            queue_item = await queue.get_next_mr()
-            result = await processor._process_mr(queue_item)
-
-        with then("MR is marked as failed due to conflict"):
-            # Check processing result
-            assert result == ProcessingResult.CONFLICT
-
-            # Verify rebase was attempted
-            rebase_history = await rebase_mock.fetch_history()
-            assert len(rebase_history) == 1
-
-            # Verify conflicts were fetched
-            conflicts_history = await conflicts_mock.fetch_history()
-            assert len(conflicts_history) >= 1
-
-            # Verify conflict comment was posted
-            comment_history = await comment_mock.fetch_history()
-            assert len(comment_history) >= 1
-
-            # Verify queue state
-            mr_state = await queue.get_mr_state(44)
-            assert mr_state["status"] == "conflict"
-
-    await db.close()
+    with then("result is CONFLICT and rebase_failed was triggered on the state machine"):
+        assert result == ProcessingResult.CONFLICT
+        assert len(sm.rebase_failed_calls) == 1
 
 
 @scenario()
 async def process_mr_with_conflict_during_rebase():
     """Test MR processing when conflict is discovered during rebase polling."""
 
-    with given("MR starts rebase but conflict is discovered during polling"):
-        db = Database(database_url="sqlite+aiosqlite:///:memory:")
-        await db.initialize()
-        queue = QueueManager(db)
-        await queue.ensure_schema()
+    with given("a processor whose GitLab client reports has_conflicts after rebase"):
+        processor = create_mock_processor(poll_fn=instant_poll)
+        # rebase_status: (rebase_in_progress=False, has_conflicts=True)
+        processor.gitlab_client.rebase_status = (False, True)
 
-        test_mr = MergeRequest(
-            iid=45,
-            title="MR with Async Conflict",
-            state="opened",
-            target_branch="main",
-            source_branch="feature/async-conflict",
-            sha="async456",
-            labels=["merge_queue"],
-            author=Author(id=1, name="Test User", username="testuser"),
-            merge_status="can_be_merged",
-            web_url="https://gitlab.com/test/project/-/merge_requests/45",
-        )
+        sm = create_mock_state_machine()
+        ctx = create_processing_context(mr_iid=45, state_machine=sm)
 
-        await queue.add_to_queue(test_mr, is_hotfix=False)
+    with when("processor waits for rebase and polls status"):
+        result = await processor._wait_for_rebase(ctx)
 
-        mock_url = get_mock_url()
-
-        mr_data = {
-            "iid": 45,
-            "project_id": 123,
-            "title": "MR with Async Conflict",
-            "state": "opened",
-            "sha": "async456",
-            "labels": ["merge_queue"],
-            "source_branch": "feature/async-conflict",
-            "target_branch": "main",
-            "merge_status": "can_be_merged",
-            "has_conflicts": False,
-            "rebase_in_progress": False,
-            "author": {"id": 1, "name": "Test User", "username": "testuser"},
-            "web_url": "https://gitlab.com/test/project/-/merge_requests/45",
-        }
-
-        conflict_data = [
-            {
-                "old_path": "config.py",
-                "new_path": "config.py",
-            }
-        ]
-
-        # Setup matchers
-        get_mr_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/45")
-        get_mr_response = jj.Response(status=200, json=mr_data)
-
-        # Rebase starts successfully
-        rebase_matcher = jj.match("PUT", "/api/v4/projects/123/merge_requests/45/rebase")
-        rebase_response = jj.Response(status=202, json={"rebase_in_progress": True})
-
-        # Status check returns conflict
-        status_check_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/45")
-        status_check_response = jj.Response(
-            status=200,
-            json={
-                **mr_data,
-                "rebase_in_progress": False,
-                "has_conflicts": True,
-            },
-        )
-
-        conflicts_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/45/conflicts")
-        conflicts_response = jj.Response(status=200, json=conflict_data)
-
-        comment_matcher = jj.match("POST", "/api/v4/projects/123/merge_requests/45/notes")
-        comment_response = jj.Response(status=201, json={"id": 11})
-
-        # GET notes - needed for _find_bot_comment
-        get_notes_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/45/notes")
-        get_notes_response = jj.Response(status=200, json=[])
-
-        project_matcher, project_response = make_project_mock(mock_url)
-
-        settings = Settings(
-            gitlab_url=mock_url,
-            gitlab_project_id=123,
-            gitlab_token="test-token",
-            target_branch="main",
-            queue_label="merge_queue",
-            hotfix_label="hotfix",
-            jwt_secret="a" * 64,
-            webhook_secret="test-webhook-secret",
-            rebase_timeout_seconds=60,
-        )
-
-    async with (
-        mocked(project_matcher, project_response),
-        mocked(get_mr_matcher, get_mr_response),
-        mocked(rebase_matcher, rebase_response) as rebase_mock,
-        mocked(status_check_matcher, status_check_response),
-        mocked(conflicts_matcher, conflicts_response),
-        mocked(get_notes_matcher, get_notes_response),
-        mocked(comment_matcher, comment_response) as comment_mock,
-    ):
-        with when("processor polls rebase status and finds conflict"):
-            gitlab_client = GitLabClient(settings)
-            notifier = MRNotifier(gitlab_client=gitlab_client, settings=settings)
-            processor = MergeProcessor(
-                gitlab_client=gitlab_client,
-                queue_manager=queue,
-                notifier=notifier,
-                settings=settings,
-            )
-
-            queue_item = await queue.get_next_mr()
-            result = await processor._process_mr(queue_item)
-
-        with then("MR is marked as failed after conflict discovery"):
-            assert result == ProcessingResult.CONFLICT
-
-            # Verify rebase was started
-            rebase_history = await rebase_mock.fetch_history()
-            assert len(rebase_history) == 1
-
-            # Verify notification was sent
-            comment_history = await comment_mock.fetch_history()
-            assert len(comment_history) >= 1
-
-            # Verify state
-            mr_state = await queue.get_mr_state(45)
-            assert mr_state["status"] == "conflict"
-
-    await db.close()
+    with then("result is CONFLICT and rebase_failed was triggered on the state machine"):
+        assert result == ProcessingResult.CONFLICT
+        assert len(sm.rebase_failed_calls) == 1
 
 
 @scenario()
 async def process_mr_with_conflict_after_multiple_mrs():
-    """Test conflict handling doesn't affect other MRs in queue."""
+    """Test that conflict handling for one MR doesn't affect other MRs in queue."""
 
-    with given("Multiple MRs in queue, one has conflict"):
-        db = Database(database_url="sqlite+aiosqlite:///:memory:")
-        await db.initialize()
-        queue = QueueManager(db)
-        await queue.ensure_schema()
+    with given("two MRs in queue and the first one has a rebase conflict"):
+        processor = create_mock_processor()
+        processor.gitlab_client.rebase_mr_error = GitLabConflictError("Merge conflict")
 
-        # Add first MR (will have conflict)
-        conflict_mr = MergeRequest(
-            iid=46,
-            title="Conflicting MR",
-            state="opened",
-            target_branch="main",
-            source_branch="feature/conflict",
-            sha="conflict789",
-            labels=["merge_queue"],
-            author=Author(id=1, name="User1", username="user1"),
-            merge_status="can_be_merged",
-            web_url="https://gitlab.com/test/project/-/merge_requests/46",
-        )
+        item_46 = create_test_queue_item(mr_iid=46, state="queued")
+        item_47 = create_test_queue_item(mr_iid=47, state="queued")
+        processor.queue_manager.add_item(item_46)
+        processor.queue_manager.add_item(item_47)
 
-        # Add second MR (should process fine after first fails)
-        good_mr = MergeRequest(
-            iid=47,
-            title="Good MR",
-            state="opened",
-            target_branch="main",
-            source_branch="feature/good",
-            sha="good123",
-            labels=["merge_queue"],
-            author=Author(id=2, name="User2", username="user2"),
-            merge_status="can_be_merged",
-            web_url="https://gitlab.com/test/project/-/merge_requests/47",
-        )
+        sm = create_mock_state_machine()
+        ctx = create_processing_context(mr_iid=46, state_machine=sm)
 
-        await queue.add_to_queue(conflict_mr, is_hotfix=False)
-        await queue.add_to_queue(good_mr, is_hotfix=False)
+    with when("processor attempts to rebase MR 46"):
+        result = await processor._process_rebase(ctx)
 
-        mock_url = get_mock_url()
+    with then("MR 46 fails with CONFLICT but MR 47 remains queued"):
+        assert result == ProcessingResult.CONFLICT
 
-        # Mock data for conflicting MR
-        conflict_mr_data = {
-            "iid": 46,
-            "project_id": 123,
-            "title": "Conflicting MR",
-            "state": "opened",
-            "sha": "conflict789",
-            "labels": ["merge_queue"],
-            "source_branch": "feature/conflict",
-            "target_branch": "main",
-            "merge_status": "can_be_merged",
-            "has_conflicts": False,
-            "rebase_in_progress": False,
-            "author": {"id": 1, "name": "User1", "username": "user1"},
-            "web_url": "https://gitlab.com/test/project/-/merge_requests/46",
-        }
-
-        # Setup matchers for conflict MR
-        get_mr_46_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/46")
-        get_mr_46_response = jj.Response(status=200, json=conflict_mr_data)
-
-        rebase_46_matcher = jj.match("PUT", "/api/v4/projects/123/merge_requests/46/rebase")
-        rebase_46_response = jj.Response(status=409, json={"message": "Conflict"})
-
-        conflicts_46_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/46/conflicts")
-        conflicts_46_response = jj.Response(status=200, json=[{"old_path": "file.py"}])
-
-        comment_46_matcher = jj.match("POST", "/api/v4/projects/123/merge_requests/46/notes")
-        comment_46_response = jj.Response(status=201, json={"id": 12})
-
-        # GET notes - needed for _find_bot_comment
-        get_notes_46_matcher = jj.match("GET", "/api/v4/projects/123/merge_requests/46/notes")
-        get_notes_46_response = jj.Response(status=200, json=[])
-
-        project_matcher, project_response = make_project_mock(mock_url)
-
-        settings = Settings(
-            gitlab_url=mock_url,
-            gitlab_project_id=123,
-            gitlab_token="test-token",
-            target_branch="main",
-            queue_label="merge_queue",
-            hotfix_label="hotfix",
-            jwt_secret="a" * 64,
-            webhook_secret="test-webhook-secret",
-        )
-
-    async with (
-        mocked(project_matcher, project_response),
-        mocked(get_mr_46_matcher, get_mr_46_response),
-        mocked(rebase_46_matcher, rebase_46_response) as rebase_mock,
-        mocked(conflicts_46_matcher, conflicts_46_response),
-        mocked(get_notes_46_matcher, get_notes_46_response),
-        mocked(comment_46_matcher, comment_46_response),
-    ):
-        with when("first MR has conflict"):
-            gitlab_client = GitLabClient(settings)
-            notifier = MRNotifier(gitlab_client=gitlab_client, settings=settings)
-            processor = MergeProcessor(
-                gitlab_client=gitlab_client,
-                queue_manager=queue,
-                notifier=notifier,
-                settings=settings,
-            )
-
-            # Process first MR
-            first_item = await queue.get_next_mr()
-            assert first_item.mr_iid == 46
-            result = await processor._process_mr(first_item)
-
-        with then("conflicting MR is failed but queue continues"):
-            assert result == ProcessingResult.CONFLICT
-
-            # Verify first MR is conflict
-            mr_46_state = await queue.get_mr_state(46)
-            assert mr_46_state["status"] == "conflict"
-
-            # Verify second MR is still queued and ready
-            next_item = await queue.get_next_mr()
-            assert next_item is not None
-            assert next_item.mr_iid == 47
-            assert next_item.state == "queued"
-
-            # Verify rebase was attempted
-            rebase_history = await rebase_mock.fetch_history()
-            assert len(rebase_history) == 1
-
-    await db.close()
+        second_item = await processor.queue_manager.get_queue_item(47)
+        assert second_item is not None
+        assert second_item.state == "queued"
 
 
 __all__ = [

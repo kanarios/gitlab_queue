@@ -7,9 +7,9 @@ explicitly mentions "canceled" — not the generic "no retryable jobs found".
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
-
 import vedro
+
+from scenarios.fakes import create_job
 
 from .._helpers import (
     create_mock_pipeline,
@@ -26,12 +26,8 @@ class Scenario(vedro.Scenario):
         self.processor = create_mock_processor()
         self.pipeline = create_mock_pipeline(pipeline_id=100, sha="abc123", status="failed")
 
-        canceled_job = MagicMock()
-        canceled_job.id = 10
-        canceled_job.name = "unit_tests"
-        canceled_job.status = "canceled"
-
-        self.processor.gitlab_client.get_pipeline_jobs = AsyncMock(return_value=[canceled_job])
+        canceled_job = create_job(id=10, name="unit_tests", status="canceled")
+        self.processor.gitlab_client.pipeline_jobs_response = [canceled_job]
 
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
@@ -55,11 +51,11 @@ class Scenario(vedro.Scenario):
         assert self.new_start_time is None
 
     def and_trigger_pipeline_failed_was_called(self):
-        self.mock_sm.trigger_pipeline_failed.assert_awaited_once()
+        assert len(self.mock_sm.pipeline_failed_calls) == 1
 
     def and_error_message_mentions_canceled(self):
-        call_kwargs = self.mock_sm.trigger_pipeline_failed.call_args.kwargs
-        assert "canceled" in call_kwargs["error_message"].lower()
+        call = self.mock_sm.pipeline_failed_calls[0]
+        assert "canceled" in call["error_message"].lower()
 
     def and_updated_retried_is_unchanged(self):
         assert self.updated_retried == self.retried_jobs

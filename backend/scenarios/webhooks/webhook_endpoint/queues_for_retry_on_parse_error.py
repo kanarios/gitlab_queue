@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
 import vedro
 from scenarios.contexts.api_helpers import created_test_app
 from scenarios.schemas.status_code import OkStatusSchema
@@ -16,7 +14,6 @@ class Scenario(vedro.Scenario):
     def given_app_with_valid_token(self):
         self.app, self.state = created_test_app()
         self.webhook_secret = self.state.settings.webhook_secret.get_secret_value()
-        self.state.retry_manager.add_to_retry_queue = AsyncMock(return_value=42)
         self.client = TestClient(self.app, raise_server_exceptions=False)
         # Payload has object_kind=merge_request but missing required fields
         # that will cause parse_webhook_event to raise ValueError/KeyError

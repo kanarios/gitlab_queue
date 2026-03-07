@@ -7,11 +7,15 @@ not both jobs.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from typing import TYPE_CHECKING
 
 import vedro
 
 from gitlab_queue.clients.gitlab import GitLabAPIError
+from scenarios.fakes import FakeGitLabClient, create_job
+
+if TYPE_CHECKING:
+    from gitlab_queue.models.pipeline import Job
 
 from .._helpers import (
     create_mock_pipeline,
@@ -21,31 +25,33 @@ from .._helpers import (
 )
 
 
+class _PartialErrorGitLabClient(FakeGitLabClient):
+    """FakeGitLabClient that fails only for specific job IDs."""
+
+    def __init__(self, *, fail_job_ids: set[int]) -> None:
+        super().__init__()
+        self.fail_job_ids = fail_job_ids
+
+    async def retry_pipeline_job(self, job_id: int) -> Job:
+        self.retry_job_calls.append(job_id)
+        if job_id in self.fail_job_ids:
+            raise GitLabAPIError("Retry failed for job")
+        return create_job(id=job_id, status="pending")
+
+
 class Scenario(vedro.Scenario):
     subject = "partial job retry API error reports only the failed jobs"
 
     def given_two_jobs_where_one_retry_fails(self):
-        self.processor = create_mock_processor()
+        client = _PartialErrorGitLabClient(fail_job_ids={20})
+        self.processor = create_mock_processor(gitlab_client=client)
 
         self.pipeline = create_mock_pipeline(pipeline_id=100, sha="abc123", status="failed")
 
-        job_a = MagicMock()
-        job_a.id = 10
-        job_a.name = "job_a"
-        job_a.status = "failed"
-
-        job_b = MagicMock()
-        job_b.id = 20
-        job_b.name = "job_b"
-        job_b.status = "failed"
+        job_a = create_job(id=10, name="job_a", status="failed")
+        job_b = create_job(id=20, name="job_b", status="failed")
 
         self.jobs_still_failed = [job_a, job_b]
-
-        async def retry_side_effect(job_id: int) -> None:
-            if job_id == 20:
-                raise GitLabAPIError("Retry failed for job_b")
-
-        self.processor.gitlab_client.retry_pipeline_job = AsyncMock(side_effect=retry_side_effect)
 
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
@@ -69,10 +75,10 @@ class Scenario(vedro.Scenario):
         assert self.should_continue is False
 
     def and_trigger_pipeline_failed_reports_only_job_b(self):
-        self.mock_sm.trigger_pipeline_failed.assert_awaited_once()
-        call_kwargs = self.mock_sm.trigger_pipeline_failed.call_args.kwargs
-        assert call_kwargs["failed_jobs"] == ["job_b"], f"Expected only ['job_b'] but got {call_kwargs['failed_jobs']}"
+        assert len(self.mock_sm.pipeline_failed_calls) == 1
+        call = self.mock_sm.pipeline_failed_calls[0]
+        assert call["failed_jobs"] == ["job_b"], f"Expected only ['job_b'] but got {call['failed_jobs']}"
 
     def and_job_a_is_not_reported_as_failed(self):
-        call_kwargs = self.mock_sm.trigger_pipeline_failed.call_args.kwargs
-        assert "job_a" not in call_kwargs["failed_jobs"]
+        call = self.mock_sm.pipeline_failed_calls[0]
+        assert "job_a" not in call["failed_jobs"]

@@ -7,23 +7,22 @@ import vedro
 from gitlab_queue.clients.gitlab import (
     GitLabServerError,
 )
-from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, create_test_client
-from scenarios.contexts.jj_gitlab_mock import mocked_gitlab_get_mr
+from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, created_test_client
 from scenarios.schemas.status_code import ServiceUnavailableStatusSchema
+from scenarios.transports import GitLabMockTransport
 
 
 class Scenario(vedro.Scenario):
     subject = "try to get mr when gitlab returns 503"
 
-    async def given_mock_gitlab_returns_503(self):
-        self._mock_ctx = mocked_gitlab_get_mr(
-            TEST_PROJECT_ID,
-            42,
-            {"error": "Service Unavailable"},
+    def given_mock_gitlab_returns_503(self):
+        self.transport = GitLabMockTransport()
+        self.transport.register_get(
+            f"/api/v4/projects/{TEST_PROJECT_ID}/merge_requests/42",
             status=503,
+            json_data={"error": "Service Unavailable"},
         )
-        await self._mock_ctx.__aenter__()
-        self.client = create_test_client()
+        self.client = created_test_client(transport=self.transport)
 
     async def when_get_mr_is_called(self):
         self.error = None
@@ -41,4 +40,3 @@ class Scenario(vedro.Scenario):
 
     async def do_cleanup(self):
         await self.client.close()
-        await self._mock_ctx.__aexit__(None, None, None)

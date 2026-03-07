@@ -32,16 +32,11 @@ class Scenario(vedro.Scenario):
         await self.sm.trigger_pipeline_success()
 
     def then_notifier_should_be_called_with_merging_template(self):
-        """
-        Assert the notifier was awaited and invoked with MR IID 123 and the "merging" template.
-
-        Verifies that `self.notifier.notify` was awaited and that its first positional argument equals 123 (the merge request IID) and its second positional argument equals "merging" (the template name).
-        """
-        self.notifier.notify.assert_awaited()
-        call_args = self.notifier.notify.call_args
-        assert call_args[0][0] == 123  # mr_iid
-        assert call_args[0][1] == "merging"  # template
+        assert len(self.notifier.notify_calls) == 1
+        call_args = self.notifier.notify_calls[-1]
+        assert call_args["mr_iid"] == 123
+        assert call_args["status"] == "merging"
 
     def and_notify_should_include_target_branch(self):
-        call_kwargs = self.notifier.notify.call_args[1]
-        assert call_kwargs.get("target_branch") == "develop"
+        call_args = self.notifier.notify_calls[-1]
+        assert call_args["target_branch"] == "develop"

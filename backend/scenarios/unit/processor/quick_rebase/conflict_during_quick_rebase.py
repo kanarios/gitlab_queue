@@ -24,8 +24,8 @@ class Scenario(vedro.Scenario):
         self.processor = create_mock_processor()
 
         # check_rebase_status returns (False, True) = not in progress, has conflicts
-        self.processor.gitlab_client.check_rebase_status.return_value = (False, True)
-        self.processor.gitlab_client.get_mr_conflicts.return_value = ["file.py"]
+        self.processor.gitlab_client.rebase_status = (False, True)
+        self.processor.gitlab_client.mr_conflicts = ["file.py"]
 
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)

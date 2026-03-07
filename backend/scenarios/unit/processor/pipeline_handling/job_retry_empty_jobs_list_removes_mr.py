@@ -6,8 +6,6 @@ any jobs and should trigger pipeline_failed.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
 import vedro
 
 from .._helpers import (
@@ -27,8 +25,8 @@ class Scenario(vedro.Scenario):
 
         self.pipeline = create_mock_pipeline(pipeline_id=100, sha="abc123", status="failed")
 
-        # get_pipeline_jobs returns empty list (API issue)
-        self.processor.gitlab_client.get_pipeline_jobs = AsyncMock(return_value=[])
+        # get_pipeline_jobs returns empty list (API issue) — default for FakeGitLabClient
+        self.processor.gitlab_client.pipeline_jobs_response = []
 
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
@@ -50,6 +48,6 @@ class Scenario(vedro.Scenario):
         assert self.should_continue is False
 
     def and_trigger_pipeline_failed_was_called(self):
-        self.mock_sm.trigger_pipeline_failed.assert_awaited_once()
-        call_kwargs = self.mock_sm.trigger_pipeline_failed.call_args.kwargs
-        assert call_kwargs["failed_jobs"] == []
+        assert len(self.mock_sm.pipeline_failed_calls) == 1
+        call = self.mock_sm.pipeline_failed_calls[0]
+        assert call["failed_jobs"] == []

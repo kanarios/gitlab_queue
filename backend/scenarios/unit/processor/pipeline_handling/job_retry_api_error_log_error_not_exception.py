@@ -7,11 +7,11 @@ result and log.exception outside an except-block loses the traceback anyway.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
-
+import structlog.testing
 import vedro
 
 from gitlab_queue.clients.gitlab import GitLabAPIError
+from scenarios.fakes import create_job
 
 from .._helpers import (
     create_mock_pipeline,
@@ -28,20 +28,16 @@ class Scenario(vedro.Scenario):
         self.processor = create_mock_processor()
         self.pipeline = create_mock_pipeline(pipeline_id=100, sha="abc123", status="failed")
 
-        self.failed_job = MagicMock()
-        self.failed_job.id = 10
-        self.failed_job.name = "unit_tests"
-        self.failed_job.status = "failed"
+        self.failed_job = create_job(id=10, name="unit_tests", status="failed")
 
-        self.processor.gitlab_client.retry_pipeline_job = AsyncMock(side_effect=GitLabAPIError("Retry failed"))
+        self.processor.gitlab_client.retry_job_error = GitLabAPIError("Retry failed")
 
         self.mock_sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.mock_sm)
         self.retried_jobs: dict[str, int] = {}
 
     async def when_dispatch_job_retries_is_called(self):
-        with patch("gitlab_queue.core.pipeline_handler.log") as self.log_mock:
-            # Pass arguments positionally so the test survives the jobs_still_failed → jobs_to_retry rename
+        with structlog.testing.capture_logs() as self.captured:
             await self.processor._pipeline_handler.dispatch_job_retries(
                 self.ctx,
                 self.pipeline,
@@ -51,7 +47,10 @@ class Scenario(vedro.Scenario):
             )
 
     def then_log_exception_was_not_called(self):
-        self.log_mock.exception.assert_not_called()
+        exception_entries = [e for e in self.captured if e.get("log_level") == "error"]
+        assert exception_entries == [], f"Expected no log.exception calls, got: {exception_entries}"
 
-    def and_log_warning_was_called(self):
-        self.log_mock.warning.assert_called_once()
+    def and_log_warning_about_retry_failure_was_emitted(self):
+        warning_entries = [e for e in self.captured if e.get("log_level") == "warning"]
+        retry_warnings = [e for e in warning_entries if "Failed to retry pipeline jobs" in e.get("event", "")]
+        assert len(retry_warnings) == 1

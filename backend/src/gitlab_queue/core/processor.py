@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, Any
 
 from gitlab_queue.clients.gitlab import (
     GitLabAPIError,
@@ -24,21 +24,26 @@ from gitlab_queue.clients.gitlab import (
     GitLabNotFoundError,
 )
 from gitlab_queue.core.handler_utils import interruptible_sleep, verify_mr_in_queue
+from gitlab_queue.core.polling import poll_until_done
 from gitlab_queue.core.state_machine import create_state_machine_for_mr
-from gitlab_queue.core.types import ProcessingContext, ProcessingResult
+from gitlab_queue.core.types import ProcessingContext, ProcessingResult, RetrySignal
 from gitlab_queue.metrics import MR_DURATION
 from gitlab_queue.utils.logging import LogContext, get_logger
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from gitlab_queue.api.websocket import WebSocketManager
     from gitlab_queue.clients.gitlab import GitLabClient
     from gitlab_queue.config import Settings
     from gitlab_queue.core.notifier import MRNotifier
     from gitlab_queue.core.pipeline_handler import PipelineHandler
+    from gitlab_queue.core.protocols import StateMachineFactoryProtocol, StateMachineProtocol
     from gitlab_queue.core.queue import QueueManager
     from gitlab_queue.core.queue_position_notifier import QueuePositionNotifier
     from gitlab_queue.core.rebase_handler import RebaseHandler
     from gitlab_queue.models.mr import MergeRequest
+    from gitlab_queue.models.pipeline import Pipeline
     from gitlab_queue.models.queue_item import QueueItem
 
 log = get_logger(__name__)
@@ -74,14 +79,18 @@ class MergeProcessor:
     notifier: MRNotifier
     settings: Settings
     position_notifier: QueuePositionNotifier | None = None
+    state_machine_factory: StateMachineFactoryProtocol = field(default=create_state_machine_for_mr)
+    poll_fn: Callable[..., Any] = field(default=poll_until_done)
+    wait_for_fn: Callable[..., Any] = field(default=asyncio.wait_for)
+    sleep_fn: Callable[[float], Awaitable[bool]] | None = field(default=None)
 
     # Internal state (not part of constructor)
     _shutdown_event: asyncio.Event = field(default_factory=asyncio.Event, init=False)
     _current_mr_iid: int | None = field(default=None, init=False)
     _processing_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False)
     _websocket_manager: WebSocketManager | None = field(default=None, init=False)
-    _ph: PipelineHandler | None = field(default=None, init=False, repr=False)
-    _rh: RebaseHandler | None = field(default=None, init=False, repr=False)
+    _ph: PipelineHandler | None = field(default=None, repr=False)
+    _rh: RebaseHandler | None = field(default=None, repr=False)
 
     @property
     def _pipeline_handler(self) -> PipelineHandler:
@@ -113,6 +122,7 @@ class MergeProcessor:
                 notifier=self.notifier,
                 settings=self.settings,
                 shutdown_event=self._shutdown_event,
+                poll_fn=self.poll_fn,
             )
         return self._rh
 
@@ -220,7 +230,7 @@ class MergeProcessor:
         with LogContext(mr_iid=mr_iid, operation="process_mr"):
             try:
                 # Create state machine for this MR
-                sm = await create_state_machine_for_mr(
+                sm = await self.state_machine_factory(
                     mr_iid=mr_iid,
                     notifier=self.notifier,
                     queue_manager=self.queue_manager,
@@ -314,6 +324,46 @@ class MergeProcessor:
     async def _wait_for_pipeline(self, ctx: ProcessingContext) -> ProcessingResult:
         return await self._pipeline_handler.wait_for_pipeline(ctx)
 
+    async def _wait_for_rebase_quick(self, ctx: ProcessingContext) -> None:
+        return await self._rebase_handler.wait_for_rebase_quick(ctx)
+
+    async def _should_skip_stale_pipeline(self, mr_iid: int, pipeline: Pipeline) -> bool:
+        return await self._pipeline_handler.should_skip_stale_pipeline(mr_iid, pipeline)
+
+    async def _check_pipeline_termination_conditions(
+        self,
+        ctx: ProcessingContext,
+        sm: StateMachineProtocol,
+        timeout: timedelta,
+        start_time: datetime,
+    ) -> ProcessingResult | None:
+        return await self._pipeline_handler.check_pipeline_termination_conditions(ctx, sm, timeout, start_time)
+
+    async def _handle_pipeline_failure_retry(
+        self,
+        ctx: ProcessingContext,
+        pipeline: Pipeline,
+        retried_jobs: dict[str, int],
+    ) -> tuple[bool, datetime | None, dict[str, int]]:
+        return await self._pipeline_handler.handle_pipeline_failure_retry(ctx, pipeline, retried_jobs)
+
+    async def _handle_pipeline_failure(
+        self,
+        ctx: ProcessingContext,
+        pipeline: Pipeline,
+        retried_jobs: dict[str, int],
+    ) -> ProcessingResult | RetrySignal:
+        return await self._pipeline_handler.handle_pipeline_failure(ctx, pipeline, retried_jobs)
+
+    async def _handle_pipeline_status(
+        self,
+        ctx: ProcessingContext,
+        sm: StateMachineProtocol,
+        pipeline: Pipeline,
+        retried_jobs: dict[str, int],
+    ) -> ProcessingResult | RetrySignal | None:
+        return await self._pipeline_handler.handle_pipeline_status(ctx, sm, pipeline, retried_jobs)
+
     # =========================================================================
     # Merge Step
     # =========================================================================
@@ -338,7 +388,7 @@ class MergeProcessor:
 
         try:
             # Add timeout for merge operation to prevent hanging
-            merged_mr = await asyncio.wait_for(
+            merged_mr = await self.wait_for_fn(
                 self.gitlab_client.merge_mr(mr_iid, expected_sha=expected_sha),
                 timeout=float(self.settings.merge_timeout_seconds),
             )
@@ -380,7 +430,7 @@ class MergeProcessor:
             # Only warn once (check is already done in SQL query, but double-check here)
             if not item.stale_warning_sent:
                 try:
-                    sm = await create_state_machine_for_mr(
+                    sm = await self.state_machine_factory(
                         mr_iid=item.mr_iid,
                         notifier=self.notifier,
                         queue_manager=self.queue_manager,
@@ -407,6 +457,8 @@ class MergeProcessor:
 
     async def _interruptible_sleep(self, seconds: float) -> bool:
         """Sleep that can be interrupted by shutdown event."""
+        if self.sleep_fn is not None:
+            return await self.sleep_fn(seconds)
         return await interruptible_sleep(self._shutdown_event, seconds)
 
     async def _verify_mr_in_queue(self, mr_iid: int) -> bool:
@@ -635,7 +687,7 @@ class MergeProcessor:
             True if shutdown completed, False if timeout.
         """
         try:
-            await asyncio.wait_for(
+            await self.wait_for_fn(
                 self._shutdown_event.wait(),
                 timeout=timeout,
             )

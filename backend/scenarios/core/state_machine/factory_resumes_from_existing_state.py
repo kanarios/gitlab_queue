@@ -1,13 +1,10 @@
 """Test create_state_machine_for_mr resumes from existing state."""
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock
 
 import vedro
-from scenarios.contexts.state_machine_helpers import (
-    create_mock_notifier,
-    create_mock_queue_manager,
-)
+from scenarios.contexts.state_machine_helpers import create_mock_notifier
+from scenarios.fakes import FakeQueueManager
 from scenarios.library import QueueState
 
 from gitlab_queue.core.state_machine import create_state_machine_for_mr
@@ -19,9 +16,9 @@ class Scenario(vedro.Scenario):
 
     def given_queue_manager_with_existing_item_in_testing(self):
         self.notifier = create_mock_notifier()
-        self.queue_manager = create_mock_queue_manager()
-        self.queue_manager.get_queue_item = AsyncMock(
-            return_value=QueueItem(
+        self.queue_manager = FakeQueueManager()
+        self.queue_manager.add_item(
+            QueueItem(
                 mr_iid=42,
                 title="Existing MR",
                 author_name="Test",

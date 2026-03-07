@@ -33,6 +33,6 @@ class Scenario(vedro.Scenario):
 
     def then_cancel_pipeline_was_called_with_current_id(self):
         """
-        Asserts that the mock GitLab client's cancel_pipeline coroutine was awaited exactly once with the current pipeline id (123).
+        Asserts that cancel_pipeline was called exactly once with the current pipeline id (123).
         """
-        self.client.cancel_pipeline.assert_awaited_once_with(123)
+        assert self.client.cancel_pipeline_calls == [123]

@@ -4,48 +4,46 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
 
 from gitlab_queue.models.retry import RetryQueueItem
 from gitlab_queue.webhooks.retry_processor import WebhookRetryProcessor
+from scenarios.fakes import (
+    FakeGitLabClient,
+    FakeHandlerFactory,
+    FakeNotifier,
+    FakeQueueManager,
+    FakeRetryManager,
+    FakeSettings,
+)
 
 
-def create_mock_retry_manager() -> MagicMock:
-    """Create a mock WebhookRetryManager with default return values."""
-    rm = MagicMock()
-    rm.get_events_ready_for_retry = AsyncMock(return_value=[])
-    rm.mark_retry_success = AsyncMock()
-    rm.mark_retry_failed = AsyncMock(return_value=False)
-    rm.ensure_schema = AsyncMock()
-    return rm
+def create_fake_retry_manager(**overrides: Any) -> FakeRetryManager:
+    """Create a FakeRetryManager with optional overrides."""
+    return FakeRetryManager(**overrides)
 
 
-def create_mock_settings() -> MagicMock:
-    """Create a mock Settings with default values."""
-    s = MagicMock()
-    s.webhook_retry_poll_interval_seconds = 1
-    s.queue_label = "merge_queue"
-    s.hotfix_label = "hotfix"
-    s.target_branch = "main"
-    s.gitlab_project_id = 1
-    return s
+def create_test_settings(**overrides: Any) -> FakeSettings:
+    """Create a FakeSettings with default values for retry processor tests."""
+    return FakeSettings(**overrides)
 
 
 def create_test_retry_processor(**overrides: Any) -> WebhookRetryProcessor:
-    """Create a WebhookRetryProcessor with mock dependencies.
+    """Create a WebhookRetryProcessor with fake dependencies.
 
     Args:
-        **overrides: Keyword arguments to override default mock dependencies.
+        **overrides: Keyword arguments to override default dependencies.
 
     Returns:
         Configured WebhookRetryProcessor instance.
     """
     defaults: dict[str, Any] = {
-        "retry_manager": create_mock_retry_manager(),
-        "settings": create_mock_settings(),
-        "gitlab_client": MagicMock(),
-        "queue_manager": MagicMock(),
-        "notifier": MagicMock(),
+        "retry_manager": create_fake_retry_manager(),
+        "settings": create_test_settings(),
+        "gitlab_client": FakeGitLabClient(),
+        "queue_manager": FakeQueueManager(),
+        "notifier": FakeNotifier(),
+        "mr_handler_factory": FakeHandlerFactory(),
+        "pipeline_handler_factory": FakeHandlerFactory(),
     }
     defaults.update(overrides)
     return WebhookRetryProcessor(**defaults)
@@ -92,17 +90,7 @@ def create_test_retry_item(
     payload: dict[str, Any] | None = None,
     attempt_count: int = 0,
 ) -> RetryQueueItem:
-    """Create a RetryQueueItem for testing.
-
-    Args:
-        item_id: Item ID.
-        event_type: Event type string.
-        payload: Webhook payload dict (auto-generated if None).
-        attempt_count: Number of attempts already made.
-
-    Returns:
-        RetryQueueItem instance.
-    """
+    """Create a RetryQueueItem for testing."""
     if payload is None:
         payload = create_mr_payload() if event_type == "merge_request" else create_pipeline_payload()
 
@@ -118,10 +106,10 @@ def create_test_retry_item(
 
 
 __all__ = [
-    "create_mock_retry_manager",
-    "create_mock_settings",
+    "create_fake_retry_manager",
     "create_mr_payload",
     "create_pipeline_payload",
     "create_test_retry_item",
     "create_test_retry_processor",
+    "create_test_settings",
 ]

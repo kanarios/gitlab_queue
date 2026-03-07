@@ -2,25 +2,23 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
-
 import vedro
 from scenarios.contexts.api_helpers import created_test_app
+from scenarios.fakes import FakeWebSocket
 
 
 class Scenario(vedro.Scenario):
     subject = "WebSocketManager removes disconnected clients during broadcast"
 
-    def given_websocket_manager_with_mock_connection(self):
+    def given_websocket_manager_with_failing_connection(self):
         self.app, self.state = created_test_app()
         self.manager = self.state.websocket_manager
 
-        # Create a mock WebSocket that will fail on send
-        self.mock_ws = MagicMock()
-        self.mock_ws.send_json = AsyncMock(side_effect=Exception("Connection closed"))
+        # Create a fake WebSocket that will fail on send
+        self.fake_ws = FakeWebSocket(send_error=Exception("Connection closed"))
 
         # Add directly to manager
-        self.manager._connections.add(self.mock_ws)
+        self.manager._connections.add(self.fake_ws)
         self.count_before = self.manager.connection_count
 
     async def when_broadcast_is_attempted(self):

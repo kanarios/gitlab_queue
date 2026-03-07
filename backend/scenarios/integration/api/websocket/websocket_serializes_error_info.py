@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
 import vedro
 from scenarios.contexts.api_helpers import (
     create_test_queue_item,
@@ -31,8 +29,8 @@ class Scenario(vedro.Scenario):
             retry_count=2,
         )
 
-        self.state.queue_manager.get_active_queue = AsyncMock(return_value=[self.test_item])
-        self.state.queue_manager.get_queue_stats = AsyncMock(return_value={QueueState.QUEUED: 1})
+        self.state.queue_manager.add_item(self.test_item)
+        self.state.queue_manager.queue_stats = {QueueState.QUEUED: 1}
 
     def when_websocket_receives_initial_state(self):
         with self.client.websocket_connect(f"/ws/queue?token={self.token}") as ws:
