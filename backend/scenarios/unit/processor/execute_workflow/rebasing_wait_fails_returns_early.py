@@ -21,11 +21,11 @@ from .._helpers import (
 @dataclass
 class FakeRebaseHandler:
     wait_for_rebase_result: ProcessingResult = ProcessingResult.SUCCESS
-    capture_pre_rebase_sha_calls: list[ProcessingContext] = field(default_factory=list)
+    capture_pre_rebase_state_calls: list[ProcessingContext] = field(default_factory=list)
     wait_for_rebase_calls: list[ProcessingContext] = field(default_factory=list)
 
-    async def capture_pre_rebase_sha(self, ctx: ProcessingContext) -> str:
-        self.capture_pre_rebase_sha_calls.append(ctx)
+    async def capture_pre_rebase_state(self, ctx: ProcessingContext) -> str:
+        self.capture_pre_rebase_state_calls.append(ctx)
         return "sha"
 
     async def wait_for_rebase(self, ctx: ProcessingContext) -> ProcessingResult:

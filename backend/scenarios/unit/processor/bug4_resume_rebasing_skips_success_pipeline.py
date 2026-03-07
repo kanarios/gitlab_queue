@@ -20,11 +20,11 @@ from ._helpers import create_processing_context, create_test_queue_item, instant
 
 
 class Scenario(vedro.Scenario):
-    subject = "resume from rebasing calls _capture_pre_rebase_sha"
+    subject = "resume from rebasing calls _capture_pre_rebase_state"
 
     def given_processor_resuming_from_rebasing(self):
         self.gitlab_client = FakeGitLabClient()
-        # First get_mr call (for _capture_pre_rebase_sha) returns pre-rebase SHA
+        # First get_mr call (for _capture_pre_rebase_state) returns pre-rebase SHA
         # Subsequent calls return post-rebase SHA
         self.gitlab_client.mr_response_sequence = [
             create_mr(iid=42, sha="pre_rebase_sha_123", labels=["merge_queue"]),

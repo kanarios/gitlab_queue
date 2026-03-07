@@ -132,6 +132,7 @@ async def check_and_handle_rebase_during_testing(
                 new_pipeline_id=new_pipeline.id,
                 rebase_count=new_ctx.rebase_count,
                 max_attempts=new_ctx.max_attempts,
+                expected_sha=new_pipeline.sha,
             )
             return new_ctx
 

@@ -107,6 +107,7 @@ class StateMachineProtocol(Protocol):
         new_pipeline_id: int,
         rebase_count: int,
         max_attempts: int,
+        expected_sha: str | None = None,
     ) -> None: ...
 
 

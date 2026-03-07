@@ -41,16 +41,20 @@ async def process_mr_successfully_from_queue_to_merge():
         sm = FakeStateMachine(current_state=FakeCurrentState(id="queued"))
         processor = create_mock_processor(poll_fn=instant_poll)
 
+        # Same SHA as post-rebase pipeline: simulates fast-forward rebase (no new commits)
+        pre_rebase_pipeline = create_pipeline(id=1000, sha="abc123", status="success")
+
         # MR responses consumed in order:
-        # 1. _capture_pre_rebase_sha (in _process_rebase)
+        # 1. _capture_pre_rebase_state (in _process_rebase)
         # 2. _wait_for_post_rebase_pipeline -> check_pipeline -> get_mr
         # 3. _verify_mr_in_queue (in _check_pipeline_termination_conditions)
         processor.gitlab_client.mr_response_sequence = [mr, mr, mr]
 
         # Pipeline responses consumed in order:
-        # 1. _wait_for_post_rebase_pipeline -> get_latest_mr_pipeline
-        # 2. _wait_for_pipeline loop -> get_latest_mr_pipeline
-        processor.gitlab_client.latest_pipeline_sequence = [pipeline, pipeline]
+        # 1. _capture_pre_rebase_state -> get_latest_mr_pipeline (old pipeline)
+        # 2. _wait_for_post_rebase_pipeline -> get_latest_mr_pipeline (new pipeline)
+        # 3. _wait_for_pipeline loop -> get_latest_mr_pipeline
+        processor.gitlab_client.latest_pipeline_sequence = [pre_rebase_pipeline, pipeline, pipeline]
 
         # Merge result
         processor.gitlab_client.merge_result = create_mr(iid=42, state="merged")

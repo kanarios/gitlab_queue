@@ -76,7 +76,7 @@ class RebaseHandler:
         log.info("Starting rebase", mr_iid=mr_iid)
 
         # Capture old SHA before rebase for race condition prevention
-        await self.capture_pre_rebase_sha(ctx)
+        await self.capture_pre_rebase_state(ctx)
 
         try:
             # Initiate rebase (async operation)
@@ -129,7 +129,10 @@ class RebaseHandler:
                 log.info("Rebase completed", mr_iid=mr_iid)
                 old_sha = ctx.rebase_ctx.old_sha
                 pipeline, new_sha = await self.wait_for_post_rebase_pipeline(
-                    mr_iid, old_sha, timeout_seconds=self.settings.post_rebase_pipeline_wait_seconds
+                    mr_iid,
+                    old_sha,
+                    old_pipeline_id=ctx.rebase_ctx.old_pipeline_id,
+                    timeout_seconds=self.settings.post_rebase_pipeline_wait_seconds,
                 )
 
                 if pipeline and pipeline.sha == new_sha:
@@ -180,6 +183,8 @@ class RebaseHandler:
         self,
         mr_iid: int,
         old_sha: str,
+        *,
+        old_pipeline_id: int | None = None,
         timeout_seconds: int | None = None,
     ) -> tuple[Pipeline | None, str]:
         """Wait for a new pipeline after rebase with the correct SHA.
@@ -192,6 +197,7 @@ class RebaseHandler:
         Args:
             mr_iid: MR IID to wait for.
             old_sha: SHA before rebase started.
+            old_pipeline_id: Pipeline ID before rebase (to detect stale responses).
             timeout_seconds: Maximum time to wait (default 60s).
 
         Returns:
@@ -208,10 +214,20 @@ class RebaseHandler:
                 return PollStatus.CONTINUE, None
 
             new_sha = mr.sha
+            pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
+
+            # Skip stale pipeline from before rebase (race condition protection)
+            if pipeline and old_pipeline_id is not None and pipeline.id == old_pipeline_id:
+                log.info(
+                    "Skipping stale pipeline from before rebase",
+                    mr_iid=mr_iid,
+                    pipeline_id=pipeline.id,
+                    old_pipeline_id=old_pipeline_id,
+                )
+                return PollStatus.CONTINUE, None
 
             # Fast-forward case: SHA unchanged (no commits ahead of target)
             if new_sha == old_sha:
-                pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
                 if pipeline and pipeline.sha == new_sha:
                     if pipeline.status in TERMINAL_FAILED_PIPELINE_STATUSES:
                         log.info(
@@ -225,7 +241,6 @@ class RebaseHandler:
                 return PollStatus.CONTINUE, None
 
             # SHA changed, need pipeline with new SHA
-            pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
             if pipeline and pipeline.sha == new_sha:
                 if pipeline.status in TERMINAL_PIPELINE_STATUSES:
                     log.info(
@@ -286,14 +301,15 @@ class RebaseHandler:
 
         return pipeline, new_sha
 
-    async def capture_pre_rebase_sha(self, ctx: ProcessingContext) -> str:
-        """Capture SHA before rebase for race condition prevention.
+    async def capture_pre_rebase_state(self, ctx: ProcessingContext) -> str:
+        """Capture SHA and pipeline ID before rebase for race condition prevention.
 
-        Stores the SHA in the processing context and returns it.
-        This is used to detect stale pipeline data after rebase.
+        Stores the SHA and current pipeline ID in the processing context
+        and returns the SHA. Both values are used to detect stale pipeline
+        data after rebase.
 
         Args:
-            ctx: Processing context to store SHA in.
+            ctx: Processing context to store SHA and pipeline ID in.
 
         Returns:
             The captured SHA.
@@ -301,7 +317,16 @@ class RebaseHandler:
         mr = await self.gitlab_client.get_mr(ctx.mr_iid)
         old_sha = mr.sha
         ctx.rebase_ctx.old_sha = old_sha
-        log.debug("Captured pre-rebase SHA", mr_iid=ctx.mr_iid, old_sha=old_sha[:8])
+
+        pipeline = await self.gitlab_client.get_latest_mr_pipeline(ctx.mr_iid)
+        ctx.rebase_ctx.old_pipeline_id = pipeline.id if pipeline else None
+
+        log.debug(
+            "Captured pre-rebase state",
+            mr_iid=ctx.mr_iid,
+            old_sha=old_sha[:8],
+            old_pipeline_id=ctx.rebase_ctx.old_pipeline_id,
+        )
         return old_sha
 
     async def wait_for_rebase_quick(self, ctx: ProcessingContext) -> None:

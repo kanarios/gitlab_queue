@@ -70,12 +70,14 @@ async def full_flow_with_failures_and_recovery():
 
             # MR 400: flaky pipeline (fail → job retry → success → merge)
             # Pipeline sequence consumed by:
-            #   1. post-rebase wait (fast-forward): sees "running" → returns it
-            #   2. wait_for_pipeline poll 1: sees "failed" → job retry
-            #   3. wait_for_pipeline poll 2: sees "success" → merge
+            #   1. capture_pre_rebase_state → old pipeline before rebase
+            #   2. post-rebase wait (fast-forward): sees "running" → returns it
+            #   3. wait_for_pipeline poll 1: sees "failed" → job retry
+            #   4. wait_for_pipeline poll 2: sees "success" → merge
             gitlab_400 = FakeGitLabClient(
                 mr_responses={400: mr_400},
                 latest_pipeline_sequence=[
+                    create_pipeline(id=7999, status="success", sha="flaky123"),
                     create_pipeline(id=8000, status="running", sha="flaky123"),
                     create_pipeline(id=8000, status="failed", sha="flaky123"),
                     create_pipeline(id=8000, status="success", sha="flaky123"),

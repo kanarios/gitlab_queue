@@ -38,6 +38,7 @@ class RebaseContext:
     """
 
     old_sha: str = ""
+    old_pipeline_id: int | None = None
 
 
 @dataclass

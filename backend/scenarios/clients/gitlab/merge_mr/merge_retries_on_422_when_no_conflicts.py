@@ -5,6 +5,7 @@ import vedro
 from scenarios.transports import GitLabMockTransport
 
 from ._helpers import (
+    PROJECT_ID,
     create_merge_mr_client,
     mr_get_path,
     mr_get_response,
@@ -49,6 +50,6 @@ class Scenario(vedro.Scenario):
         assert len(get_requests) == 2
 
     def and_put_merge_called_twice(self):
-        merge_path = f"/api/v4/projects/123/merge_requests/{self.iid}/merge"
+        merge_path = f"/api/v4/projects/{PROJECT_ID}/merge_requests/{self.iid}/merge"
         put_requests = self.transport.get_requests("PUT", merge_path)
         assert len(put_requests) == 2

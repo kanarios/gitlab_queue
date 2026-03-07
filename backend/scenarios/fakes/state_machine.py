@@ -154,6 +154,7 @@ class FakeStateMachine:
         new_pipeline_id: int,
         rebase_count: int,
         max_attempts: int,
+        expected_sha: str | None = None,
     ) -> None:
         self.rebase_during_testing_calls.append(
             {
@@ -161,6 +162,7 @@ class FakeStateMachine:
                 "new_pipeline_id": new_pipeline_id,
                 "rebase_count": rebase_count,
                 "max_attempts": max_attempts,
+                "expected_sha": expected_sha,
             }
         )
 
