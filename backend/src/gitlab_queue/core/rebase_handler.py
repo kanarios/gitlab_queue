@@ -194,6 +194,11 @@ class RebaseHandler:
         This method waits until we find a pipeline whose SHA matches
         the MR's current (post-rebase) SHA.
 
+        In the fast-forward case (SHA unchanged after rebase), GitLab does
+        not create a new pipeline automatically. If the existing pipeline is
+        terminal (canceled/failed) or absent, this method creates one via
+        create_pipeline(). A success pipeline is considered valid and reused.
+
         Args:
             mr_iid: MR IID to wait for.
             old_sha: SHA before rebase started.
@@ -201,7 +206,8 @@ class RebaseHandler:
             timeout_seconds: Maximum time to wait (default 60s).
 
         Returns:
-            Tuple of (pipeline, new_sha). Pipeline may be None if not found.
+            Tuple of (pipeline, new_sha). pipeline is None on shutdown or
+            when the timeout fallback detects a stale pipeline SHA mismatch.
         """
         if timeout_seconds is None:
             timeout_seconds = DEFAULT_POST_REBASE_PIPELINE_WAIT_SECONDS
@@ -221,20 +227,18 @@ class RebaseHandler:
                 if pipeline and pipeline.sha == new_sha:
                     if pipeline.status in TERMINAL_FAILED_PIPELINE_STATUSES:
                         log.info(
-                            "Skipping pre-existing terminal pipeline in fast-forward case",
+                            "Creating new pipeline: fast-forward rebase, pre-existing terminal pipeline",
                             mr_iid=mr_iid,
                             pipeline_id=pipeline.id,
                             pipeline_status=pipeline.status,
                         )
-                        return PollStatus.CONTINUE, None
-                    # Terminal success pipeline with old_pipeline_id may be stale
+                        new_pipeline = await self.gitlab_client.create_pipeline(mr.source_branch)
+                        return PollStatus.DONE, (new_pipeline, new_sha)
+                    # A success pipeline with matching old_pipeline_id may be stale
                     # (race condition: SHA not yet updated by GitLab API).
-                    # Non-terminal (running/pending) pipeline is always valid here.
-                    if (
-                        old_pipeline_id is not None
-                        and pipeline.id == old_pipeline_id
-                        and pipeline.status in TERMINAL_PIPELINE_STATUSES
-                    ):
+                    # canceled/failed are handled above; only success reaches here.
+                    # Non-terminal (running/pending) pipeline is always valid.
+                    if old_pipeline_id is not None and pipeline.id == old_pipeline_id and pipeline.status == "success":
                         log.info(
                             "Skipping possibly stale terminal pipeline in fast-forward case",
                             mr_iid=mr_iid,
@@ -244,7 +248,13 @@ class RebaseHandler:
                         )
                         return PollStatus.CONTINUE, None
                     return PollStatus.DONE, (pipeline, new_sha)
-                return PollStatus.CONTINUE, None
+                # No valid pipeline in fast-forward case: create one (GitLab won't create it automatically)
+                log.info(
+                    "Creating new pipeline: fast-forward rebase, no valid pipeline found",
+                    mr_iid=mr_iid,
+                )
+                new_pipeline = await self.gitlab_client.create_pipeline(mr.source_branch)
+                return PollStatus.DONE, (new_pipeline, new_sha)
 
             # SHA changed — skip stale pipeline from before rebase (race condition)
             if pipeline and old_pipeline_id is not None and pipeline.id == old_pipeline_id:

@@ -1,7 +1,8 @@
-"""Test wait_for_post_rebase_pipeline creates pipeline when fast-forward has canceled pipeline.
+"""Test wait_for_post_rebase_pipeline reuses existing pipeline when fast-forward has success pipeline.
 
-When SHA is unchanged (fast-forward) and the latest pipeline is canceled,
-GitLab won't create a new one automatically. The bot must create it via create_pipeline().
+When SHA is unchanged (fast-forward) and the latest pipeline is successful,
+the bot returns it as-is without creating a new pipeline — success means the
+code is already verified and can be merged.
 """
 
 from __future__ import annotations
@@ -17,15 +18,14 @@ from .._helpers import instant_poll
 
 
 class Scenario(vedro.Scenario):
-    subject = "wait_for_post_rebase_pipeline creates pipeline when fast-forward has canceled pipeline"
+    subject = "wait_for_post_rebase_pipeline reuses existing pipeline when fast-forward has success pipeline"
 
-    def given_mr_with_canceled_pipeline(self):
+    def given_mr_with_success_pipeline(self):
         self.sha = "abc123"
-        self.new_pipeline = create_pipeline(id=8888, sha=self.sha, status="running")
+        self.existing_pipeline = create_pipeline(id=555, sha=self.sha, status="success")
         self.gitlab_client = FakeGitLabClient(
             mr_responses={42: create_mr(iid=42, sha=self.sha, source_branch="my-feature")},
-            latest_pipeline_response=create_pipeline(id=100, sha=self.sha, status="canceled"),
-            created_pipeline=self.new_pipeline,
+            latest_pipeline_response=self.existing_pipeline,
         )
 
     def given_rebase_handler(self):
@@ -44,14 +44,14 @@ class Scenario(vedro.Scenario):
             old_pipeline_id=None,
         )
 
-    def then_create_pipeline_was_called(self):
-        assert self.gitlab_client.create_pipeline_calls == ["my-feature"]
+    def then_create_pipeline_was_not_called(self):
+        assert self.gitlab_client.create_pipeline_calls == []
 
-    def then_new_pipeline_is_returned(self):
+    def then_existing_pipeline_is_returned(self):
         assert self.pipeline is not None
 
     def then_returned_pipeline_id_matches(self):
-        assert self.pipeline.id == self.new_pipeline.id
+        assert self.pipeline.id == self.existing_pipeline.id
 
     def then_sha_matches(self):
         assert self.new_sha == self.sha
