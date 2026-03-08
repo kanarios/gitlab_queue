@@ -1,6 +1,6 @@
-"""Test wait_for_post_rebase_pipeline creates pipeline when fast-forward has canceled pipeline.
+"""Test wait_for_post_rebase_pipeline creates pipeline when fast-forward has failed pipeline.
 
-When SHA is unchanged (fast-forward) and the latest pipeline is canceled,
+When SHA is unchanged (fast-forward) and the latest pipeline is failed,
 GitLab won't create a new one automatically. The bot must create it via create_pipeline().
 """
 
@@ -17,14 +17,14 @@ from .._helpers import instant_poll
 
 
 class Scenario(vedro.Scenario):
-    subject = "wait_for_post_rebase_pipeline creates pipeline when fast-forward has canceled pipeline"
+    subject = "wait_for_post_rebase_pipeline creates pipeline when fast-forward has failed pipeline"
 
-    def given_mr_with_canceled_pipeline(self):
+    def given_mr_with_failed_pipeline(self):
         self.sha = "abc123"
         self.new_pipeline = create_pipeline(id=8888, sha=self.sha, status="running")
         self.gitlab_client = FakeGitLabClient(
             mr_responses={42: create_mr(iid=42, sha=self.sha, source_branch="my-feature")},
-            latest_pipeline_response=create_pipeline(id=100, sha=self.sha, status="canceled"),
+            latest_pipeline_response=create_pipeline(id=100, sha=self.sha, status="failed"),
             created_pipeline=self.new_pipeline,
         )
 
