@@ -206,7 +206,8 @@ class RebaseHandler:
             timeout_seconds: Maximum time to wait (default 60s).
 
         Returns:
-            Tuple of (pipeline, new_sha). Pipeline is None only on shutdown.
+            Tuple of (pipeline, new_sha). pipeline is None on shutdown or
+            when the timeout fallback detects a stale pipeline SHA mismatch.
         """
         if timeout_seconds is None:
             timeout_seconds = DEFAULT_POST_REBASE_PIPELINE_WAIT_SECONDS
