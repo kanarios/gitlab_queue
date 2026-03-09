@@ -1,7 +1,7 @@
-"""Test: create_pipeline error recovers on next poll with auto-created pipeline.
+"""Test: create_pipeline server error recovers on next poll with auto-created pipeline.
 
-In fast-forward case, if create_pipeline fails (e.g. 404), the polling should
-CONTINUE and succeed on the next iteration when a pipeline appears.
+In fast-forward case, if create_pipeline fails with a server error (5xx),
+the polling should CONTINUE and succeed on the next iteration when a pipeline appears.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ import asyncio
 
 import vedro
 
-from gitlab_queue.clients.gitlab import GitLabNotFoundError
+from gitlab_queue.clients.gitlab import GitLabServerError
 from gitlab_queue.core.rebase_handler import RebaseHandler
 from scenarios.fakes import FakeGitLabClient, FakeNotifier, FakeSettings, create_mr, create_pipeline
 
@@ -18,7 +18,7 @@ from .._helpers import exhaustive_poll
 
 
 class Scenario(vedro.Scenario):
-    subject = "create_pipeline error recovers on next poll with auto-created pipeline"
+    subject = "create_pipeline server error recovers on next poll with auto-created pipeline"
 
     def given_mr_with_failed_then_running_pipeline(self):
         self.sha = "abc123"
@@ -30,7 +30,7 @@ class Scenario(vedro.Scenario):
                 self.running_pipeline,
             ],
             create_pipeline_error_sequence=[
-                GitLabNotFoundError("Not found", status_code=404),
+                GitLabServerError("Internal Server Error", status_code=500),
             ],
         )
 

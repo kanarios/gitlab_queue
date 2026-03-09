@@ -1,7 +1,8 @@
-"""Test: create_pipeline error when no pipeline recovers on next poll.
+"""Test: create_pipeline server error when no pipeline recovers on next poll.
 
-In fast-forward case with no pipeline, if create_pipeline fails, the polling
-should CONTINUE and succeed on the next iteration when a pipeline appears.
+In fast-forward case with no pipeline, if create_pipeline fails with a server
+error (5xx), the polling should CONTINUE and succeed on the next iteration
+when a pipeline appears.
 """
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ import asyncio
 
 import vedro
 
-from gitlab_queue.clients.gitlab import GitLabNotFoundError
+from gitlab_queue.clients.gitlab import GitLabServerError
 from gitlab_queue.core.rebase_handler import RebaseHandler
 from scenarios.fakes import FakeGitLabClient, FakeNotifier, FakeSettings, create_mr, create_pipeline
 
@@ -18,7 +19,7 @@ from .._helpers import exhaustive_poll
 
 
 class Scenario(vedro.Scenario):
-    subject = "create_pipeline error when no pipeline recovers on next poll"
+    subject = "create_pipeline server error when no pipeline recovers on next poll"
 
     def given_mr_with_no_pipeline_then_running(self):
         self.sha = "abc123"
@@ -30,7 +31,7 @@ class Scenario(vedro.Scenario):
                 self.running_pipeline,
             ],
             create_pipeline_error_sequence=[
-                GitLabNotFoundError("Not found", status_code=404),
+                GitLabServerError("Internal Server Error", status_code=500),
             ],
         )
 

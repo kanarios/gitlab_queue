@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from gitlab_queue.clients.gitlab import GitLabAPIError, GitLabConflictError
+from gitlab_queue.clients.gitlab import GitLabConflictError, GitLabServerError
 from gitlab_queue.core.polling import PollingConfig, PollOutcome, PollStatus, poll_until_done
 from gitlab_queue.core.types import ProcessingContext, ProcessingResult
 from gitlab_queue.utils.logging import get_logger
@@ -328,8 +328,8 @@ class RebaseHandler:
         try:
             new_pipeline = await self.gitlab_client.create_pipeline(source_branch)
             return PollStatus.DONE, (new_pipeline, new_sha)
-        except GitLabAPIError as e:
-            log.warning("create_pipeline failed, will retry", mr_iid=mr_iid, error=str(e))
+        except GitLabServerError as e:
+            log.warning("create_pipeline failed (server error), will retry", mr_iid=mr_iid, error=str(e))
             return PollStatus.CONTINUE, None
 
     async def capture_pre_rebase_state(self, ctx: ProcessingContext) -> str:
