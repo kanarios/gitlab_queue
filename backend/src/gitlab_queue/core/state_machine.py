@@ -83,6 +83,9 @@ class MRStateMachine(StateMachine):
     merge_success = merging.to(merged)
     merge_failed = merging.to(failed)
 
+    # Error recovery: any non-final intermediate state can reset to queued
+    reset_to_queued = rebasing.to(queued) | testing.to(queued) | merging.to(queued)
+
     # Any non-final state can transition to removed
     mark_removed = queued.to(removed) | rebasing.to(removed) | testing.to(removed) | merging.to(removed)
 
@@ -155,6 +158,9 @@ class MRStateMachine(StateMachine):
     async def on_enter_queued(self) -> None:
         """Called when MR enters queued state."""
         if self._skip_on_enter_if_resumed("queued"):
+            return
+        if getattr(self, "_suppress_queued_notification", False):
+            self._suppress_queued_notification = False
             return
         log.debug("Entering queued state", mr_iid=self.mr_iid)
 
@@ -577,6 +583,14 @@ class MRStateMachine(StateMachine):
             "error_message": error_message,
         }
         await self.merge_failed()
+
+    async def trigger_reset_to_queued(self, *, error_message: str) -> None:
+        """Reset MR to queued after unexpected error for re-processing."""
+        log.info("Triggering reset_to_queued", mr_iid=self.mr_iid, error=error_message)
+        self._suppress_queued_notification = True
+        self._context = {}
+        await self.reset_to_queued()
+        await self.queue_manager.update_mr_state(self.mr_iid, "queued")
 
     async def trigger_mark_removed(self, *, reason: str = "label_removed") -> None:
         """Remove MR from queue.

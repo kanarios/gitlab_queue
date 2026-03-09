@@ -16,7 +16,7 @@ class Scenario(vedro.Scenario):
         self.ref = "feature-branch"
         self.transport = GitLabMockTransport()
         self.transport.register_post(
-            f"/api/v4/projects/{TEST_PROJECT_ID}/pipelines",
+            f"/api/v4/projects/{TEST_PROJECT_ID}/pipeline",
             status=400,
             json_data={"message": "No stages/jobs for this pipeline"},
         )

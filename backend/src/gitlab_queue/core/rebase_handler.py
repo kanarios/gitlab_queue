@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from gitlab_queue.clients.gitlab import GitLabConflictError
+from gitlab_queue.clients.gitlab import GitLabAPIError, GitLabConflictError
 from gitlab_queue.core.polling import PollingConfig, PollOutcome, PollStatus, poll_until_done
 from gitlab_queue.core.types import ProcessingContext, ProcessingResult
 from gitlab_queue.utils.logging import get_logger
@@ -232,8 +232,7 @@ class RebaseHandler:
                             pipeline_id=pipeline.id,
                             pipeline_status=pipeline.status,
                         )
-                        new_pipeline = await self.gitlab_client.create_pipeline(mr.source_branch)
-                        return PollStatus.DONE, (new_pipeline, new_sha)
+                        return await self._try_create_pipeline(mr.source_branch, mr_iid, new_sha)
                     # A success pipeline with matching old_pipeline_id may be stale
                     # (race condition: SHA not yet updated by GitLab API).
                     # canceled/failed are handled above; only success reaches here.
@@ -253,8 +252,7 @@ class RebaseHandler:
                     "Creating new pipeline: fast-forward rebase, no valid pipeline found",
                     mr_iid=mr_iid,
                 )
-                new_pipeline = await self.gitlab_client.create_pipeline(mr.source_branch)
-                return PollStatus.DONE, (new_pipeline, new_sha)
+                return await self._try_create_pipeline(mr.source_branch, mr_iid, new_sha)
 
             # SHA changed — skip stale pipeline from before rebase (race condition)
             if pipeline and old_pipeline_id is not None and pipeline.id == old_pipeline_id:
@@ -319,6 +317,20 @@ class RebaseHandler:
             return None, new_sha
 
         return pipeline, new_sha
+
+    async def _try_create_pipeline(
+        self,
+        source_branch: str,
+        mr_iid: int,
+        new_sha: str,
+    ) -> tuple[PollStatus, tuple[Pipeline, str] | None]:
+        """Try to create a pipeline, returning CONTINUE on failure for retry."""
+        try:
+            new_pipeline = await self.gitlab_client.create_pipeline(source_branch)
+            return PollStatus.DONE, (new_pipeline, new_sha)
+        except GitLabAPIError as e:
+            log.warning("create_pipeline failed, will retry", mr_iid=mr_iid, error=str(e))
+            return PollStatus.CONTINUE, None
 
     async def capture_pre_rebase_state(self, ctx: ProcessingContext) -> str:
         """Capture SHA and pipeline ID before rebase for race condition prevention.

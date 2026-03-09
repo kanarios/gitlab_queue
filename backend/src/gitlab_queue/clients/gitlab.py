@@ -1071,7 +1071,7 @@ class GitLabClient:
             GitLabNotFoundError: If branch/ref doesn't exist.
         """
         log.info("Creating pipeline", ref=ref)
-        data = await self.post("/pipelines", json={"ref": ref})
+        data = await self.post("/pipeline", json={"ref": ref})
         pipeline = parse_pipeline(data)
         log.info("Pipeline created", pipeline_id=pipeline.id, ref=ref)
         return pipeline

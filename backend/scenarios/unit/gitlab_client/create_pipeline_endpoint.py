@@ -1,4 +1,4 @@
-"""Test scenario: create_pipeline creates pipeline via API."""
+"""Test scenario: create_pipeline uses correct singular endpoint /pipeline."""
 
 from __future__ import annotations
 
@@ -7,11 +7,11 @@ import vedro
 from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, created_test_client
 from scenarios.transports import GitLabMockTransport
 
-from ._helpers import create_pipeline_response
+from .pipelines._helpers import create_pipeline_response
 
 
 class Scenario(vedro.Scenario):
-    subject = "create_pipeline creates pipeline via API"
+    subject = "create_pipeline uses correct singular endpoint /pipeline"
 
     def given_mock_gitlab(self):
         self.ref = "feature-branch"
@@ -35,15 +35,8 @@ class Scenario(vedro.Scenario):
         assert self.result is not None
         assert self.result.id == 789
 
-    def and_status_should_be_pending(self):
-        assert self.result.status == "pending"
-
-    def and_sha_should_match(self):
-        assert self.result.sha == "newsha123"
-
-    def and_request_should_have_correct_ref(self):
-        request_body = self.transport.get_request_json()
-        assert request_body["ref"] == self.ref
+    def then_request_used_singular_pipeline_endpoint(self):
+        self.transport.assert_called_with_path(f"/api/v4/projects/{TEST_PROJECT_ID}/pipeline")
 
     async def do_cleanup(self):
         await self.client.close()

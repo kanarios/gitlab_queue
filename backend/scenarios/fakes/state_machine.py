@@ -14,6 +14,7 @@ class FakeStateMachine:
     current_state: FakeCurrentState = field(default_factory=FakeCurrentState)
 
     # Call recording for triggers
+    reset_to_queued_calls: list[dict[str, Any]] = field(default_factory=list)
     start_processing_calls: list[dict[str, Any]] = field(default_factory=list)
     rebase_complete_calls: list[dict[str, Any]] = field(default_factory=list)
     rebase_failed_calls: list[dict[str, Any]] = field(default_factory=list)
@@ -34,6 +35,11 @@ class FakeStateMachine:
 
     # Error injection
     trigger_errors: dict[str, Exception] = field(default_factory=dict)
+
+    async def trigger_reset_to_queued(self, *, error_message: str) -> None:
+        self._check_error("reset_to_queued")
+        self.reset_to_queued_calls.append({"error_message": error_message})
+        self.current_state.id = "queued"
 
     async def trigger_start_processing(self) -> None:
         self._check_error("start_processing")
