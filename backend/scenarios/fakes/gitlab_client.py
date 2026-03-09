@@ -44,6 +44,7 @@ class FakeGitLabClient:
     list_mrs_error: Exception | None = None
     list_mrs_error_sequence: list[Exception | None] = field(default_factory=list)
     create_pipeline_error: Exception | None = None
+    create_pipeline_error_sequence: list[Exception | None] = field(default_factory=list)
     remove_label_error: Exception | None = None
 
     # Call recording
@@ -135,7 +136,11 @@ class FakeGitLabClient:
 
     async def create_pipeline(self, ref: str) -> Pipeline:
         self.create_pipeline_calls.append(ref)
-        if self.create_pipeline_error:
+        if self.create_pipeline_error_sequence:
+            error = self.create_pipeline_error_sequence.pop(0)
+            if error is not None:
+                raise error
+        elif self.create_pipeline_error:
             raise self.create_pipeline_error
         if self.created_pipeline is not None:
             return self.created_pipeline

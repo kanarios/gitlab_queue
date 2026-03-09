@@ -227,6 +227,8 @@ class MergeProcessor:
         start_time = datetime.now(UTC)
         result = ProcessingResult.ERROR  # Default for unexpected exits
 
+        sm: StateMachineProtocol | None = None
+
         with LogContext(mr_iid=mr_iid, operation="process_mr"):
             try:
                 # Create state machine for this MR
@@ -260,6 +262,15 @@ class MergeProcessor:
                 raise
             except Exception as e:
                 log.exception("Unexpected error processing MR", mr_iid=mr_iid, error=str(e))
+                try:
+                    if sm is not None:
+                        await sm.trigger_reset_to_queued(error_message=str(e))
+                        log.info("Reset MR to queued after error", mr_iid=mr_iid)
+                    else:
+                        await self.queue_manager.update_mr_state(mr_iid, "queued")
+                        log.info("Reset MR to queued after error (no state machine)", mr_iid=mr_iid)
+                except Exception as requeue_err:
+                    log.exception("Failed to reset MR state", mr_iid=mr_iid, error=str(requeue_err))
                 result = ProcessingResult.ERROR
                 return result
             finally:
