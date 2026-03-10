@@ -3,9 +3,10 @@ import { MergeRequest, MRStatus, WebSocketState } from '../types';
 import StatusBadge from '../components/StatusBadge';
 import ConnectionIndicator from '../components/ConnectionIndicator';
 import { DashboardSkeleton } from '../components/LoadingSkeleton';
-import { SkipForward, GitPullRequest, Flame, Check, MoreVertical, ExternalLink } from 'lucide-react';
+import { SkipForward, GitPullRequest, Flame, Check, MoreVertical } from 'lucide-react';
 import { SafeMotionDiv, AnimatePresence } from '../components/SafeMotion';
-import { getMrUrl } from '../config';
+import { GitLabMrLink } from '../components/GitLabLinks';
+import { useProjectConfig } from '../hooks/useProjectConfig';
 
 interface DashboardProps {
   queue: MergeRequest[];
@@ -30,6 +31,7 @@ const calculateDuration = (startedAt: string | null): string => {
 const DEFAULT_AVATAR = 'https://www.gravatar.com/avatar/?d=mp';
 
 const Dashboard: React.FC<DashboardProps> = ({ queue, wsState, onReconnect }) => {
+  const { projectWebUrl } = useProjectConfig();
   const activeMR = queue.find((mr) =>
     (['rebasing', 'testing', 'merging'] as MRStatus[]).includes(mr.status)
   );
@@ -116,16 +118,12 @@ const Dashboard: React.FC<DashboardProps> = ({ queue, wsState, onReconnect }) =>
                 />
                 <div className="w-full">
                   <div className="flex flex-wrap items-center gap-2 mb-1">
-                    <a
-                      href={getMrUrl(activeMR.mr_iid)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 dark:text-blue-400 font-mono text-lg font-bold hover:underline flex items-center group focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none rounded"
-                      aria-label={`Open merge request !${activeMR.mr_iid} in GitLab (opens in new tab)`}
-                    >
-                      !{activeMR.mr_iid}
-                      <ExternalLink className="w-3 h-3 ml-1 opacity-0 group-hover:opacity-100 transition-opacity" aria-hidden="true" />
-                    </a>
+                    <GitLabMrLink
+                      projectWebUrl={projectWebUrl}
+                      iid={activeMR.mr_iid}
+                      className="text-blue-600 dark:text-blue-400 font-mono text-lg font-bold"
+                      showIcon
+                    />
                     <StatusBadge status={activeMR.status} />
                     {activeMR.is_hotfix && (
                       <span className="text-orange-500 flex items-center text-xs font-bold uppercase tracking-wider border border-orange-200 dark:border-orange-500/30 px-2 py-0.5 rounded-full bg-orange-50 dark:bg-orange-500/10" role="status" aria-label="Hotfix priority">
@@ -249,15 +247,10 @@ const Dashboard: React.FC<DashboardProps> = ({ queue, wsState, onReconnect }) =>
                       )}
                     </div>
                     <div className="text-sm text-slate-500 flex flex-wrap items-center gap-x-2 gap-y-1 mt-0.5">
-                      <a
-                        href={getMrUrl(mr.mr_iid)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-mono text-blue-600 dark:text-blue-400 hover:underline focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none rounded"
-                        aria-label={`Open merge request !${mr.mr_iid} in GitLab (opens in new tab)`}
-                      >
-                        !{mr.mr_iid}
-                      </a>
+                      <GitLabMrLink
+                        projectWebUrl={projectWebUrl}
+                        iid={mr.mr_iid}
+                      />
                       <span className="hidden sm:inline">•</span>
                       <span>{mr.author.name}</span>
                     </div>

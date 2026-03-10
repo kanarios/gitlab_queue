@@ -63,6 +63,7 @@ class QueueItem:
     retried_jobs: dict[str, int] = field(default_factory=dict)
     last_error: str | None = None
     stale_warning_sent: bool = False
+    processing_attempts: int = 0
 
     def get_max_job_retry_count(self) -> int:
         """Return the highest retry count across all retried jobs.

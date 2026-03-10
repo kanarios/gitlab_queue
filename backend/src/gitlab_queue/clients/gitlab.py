@@ -744,6 +744,61 @@ class GitLabClient:
         result: list[dict[str, Any]] = response.json()
         return result
 
+    async def get_all_pages(
+        self,
+        path: str,
+        *,
+        project_scoped: bool = True,
+        params: dict[str, Any] | None = None,
+        per_page: int = 100,
+        max_pages: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Fetch all pages from a paginated GitLab API endpoint.
+
+        Uses the x-next-page response header to iterate through pages.
+
+        Args:
+            path: API path (e.g., /pipelines/123/jobs).
+            project_scoped: Whether to prefix with /projects/{id}/.
+            params: Additional query parameters.
+            per_page: Number of items per page (default: 100).
+            max_pages: Maximum number of pages to fetch (default: 50).
+
+        Returns:
+            Combined list of items from all pages.
+        """
+        all_items: list[dict[str, Any]] = []
+        page = 1
+
+        while page <= max_pages:
+            request_params = {**(params or {}), "per_page": per_page, "page": page}
+            response = await self._request(
+                "GET",
+                path,
+                project_scoped=project_scoped,
+                params=request_params,
+            )
+            items: list[dict[str, Any]] = response.json()
+            all_items.extend(items)
+
+            next_page = response.headers.get("x-next-page", "")
+            if not next_page:
+                break
+            try:
+                page = int(next_page)
+            except ValueError:
+                log.warning(
+                    "Non-numeric x-next-page header, stopping pagination",
+                    path=path,
+                    next_page=next_page,
+                )
+                break
+
+        if page > max_pages:
+            log.warning("Pagination safety cap reached", path=path, max_pages=max_pages)
+
+        return all_items
+
     async def post(
         self,
         path: str,
@@ -970,7 +1025,7 @@ class GitLabClient:
             GitLabAPIError: On other API errors.
         """
         log.debug("Fetching pipelines for MR", mr_iid=iid)
-        data = await self.get_list(f"/merge_requests/{iid}/pipelines")
+        data = await self.get_all_pages(f"/merge_requests/{iid}/pipelines")
         pipelines = [parse_pipeline(p) for p in data]
         log.debug(
             "Fetched pipelines for MR",
@@ -1076,6 +1131,28 @@ class GitLabClient:
         log.info("Pipeline created", pipeline_id=pipeline.id, ref=ref)
         return pipeline
 
+    async def retry_pipeline(self, pipeline_id: int) -> Pipeline:
+        """Retry all failed jobs in a pipeline.
+
+        GitLab API: POST /projects/:id/pipelines/:pipeline_id/retry
+
+        Fallback when create_pipeline fails (e.g. workflow:rules blocks source=api).
+
+        Args:
+            pipeline_id: Pipeline ID to retry.
+
+        Returns:
+            Pipeline model with the retried pipeline details.
+
+        Raises:
+            GitLabAPIError: On API errors.
+        """
+        log.info("Retrying pipeline", pipeline_id=pipeline_id)
+        data = await self.post(f"/pipelines/{pipeline_id}/retry")
+        pipeline = parse_pipeline(data)
+        log.info("Pipeline retried", pipeline_id=pipeline.id)
+        return pipeline
+
     async def cancel_pipeline(self, pipeline_id: int) -> Pipeline:
         """Cancel a running pipeline.
 
@@ -1111,7 +1188,7 @@ class GitLabClient:
             GitLabAPIError: On other API errors.
         """
         log.debug("Fetching jobs for pipeline", pipeline_id=pipeline_id)
-        data = await self.get_list(f"/pipelines/{pipeline_id}/jobs")
+        data = await self.get_all_pages(f"/pipelines/{pipeline_id}/jobs")
         jobs = [parse_job(job) for job in data]
         log.debug(
             "Fetched pipeline jobs",

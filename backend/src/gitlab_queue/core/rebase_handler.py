@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from gitlab_queue.clients.gitlab import GitLabConflictError, GitLabServerError
+from gitlab_queue.clients.gitlab import GitLabAPIError, GitLabConflictError, GitLabServerError
 from gitlab_queue.core.polling import PollingConfig, PollOutcome, PollStatus, poll_until_done
 from gitlab_queue.core.types import ProcessingContext, ProcessingResult
 from gitlab_queue.utils.logging import get_logger
@@ -232,7 +232,12 @@ class RebaseHandler:
                             pipeline_id=pipeline.id,
                             pipeline_status=pipeline.status,
                         )
-                        return await self._try_create_pipeline(mr.source_branch, mr_iid, new_sha)
+                        return await self._try_create_pipeline(
+                            mr.source_branch,
+                            mr_iid,
+                            new_sha,
+                            fallback_pipeline_id=pipeline.id,
+                        )
                     # A success pipeline with matching old_pipeline_id may be stale
                     # (race condition: SHA not yet updated by GitLab API).
                     # canceled/failed are handled above; only success reaches here.
@@ -252,7 +257,12 @@ class RebaseHandler:
                     "Creating new pipeline: fast-forward rebase, no valid pipeline found",
                     mr_iid=mr_iid,
                 )
-                return await self._try_create_pipeline(mr.source_branch, mr_iid, new_sha)
+                return await self._try_create_pipeline(
+                    mr.source_branch,
+                    mr_iid,
+                    new_sha,
+                    fallback_pipeline_id=old_pipeline_id,
+                )
 
             # SHA changed — skip stale pipeline from before rebase (race condition)
             if pipeline and old_pipeline_id is not None and pipeline.id == old_pipeline_id:
@@ -323,14 +333,31 @@ class RebaseHandler:
         source_branch: str,
         mr_iid: int,
         new_sha: str,
+        *,
+        fallback_pipeline_id: int | None = None,
     ) -> tuple[PollStatus, tuple[Pipeline, str] | None]:
-        """Try to create a pipeline, returning CONTINUE on failure for retry."""
+        """Try to create a pipeline, returning CONTINUE on server error.
+
+        On client error (4xx), falls back to retry_pipeline if fallback_pipeline_id
+        is available. This handles the case where workflow:rules blocks source=api.
+        """
         try:
             new_pipeline = await self.gitlab_client.create_pipeline(source_branch)
             return PollStatus.DONE, (new_pipeline, new_sha)
         except GitLabServerError as e:
             log.warning("create_pipeline failed (server error), will retry", mr_iid=mr_iid, error=str(e))
             return PollStatus.CONTINUE, None
+        except GitLabAPIError as e:
+            if fallback_pipeline_id is None:
+                raise
+            log.warning(
+                "create_pipeline client error, falling back to retry_pipeline",
+                mr_iid=mr_iid,
+                fallback_pipeline_id=fallback_pipeline_id,
+                error=str(e),
+            )
+            retried = await self.gitlab_client.retry_pipeline(fallback_pipeline_id)
+            return PollStatus.DONE, (retried, new_sha)
 
     async def capture_pre_rebase_state(self, ctx: ProcessingContext) -> str:
         """Capture SHA and pipeline ID before rebase for race condition prevention.

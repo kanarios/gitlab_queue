@@ -263,12 +263,7 @@ class MergeProcessor:
             except Exception as e:
                 log.exception("Unexpected error processing MR", mr_iid=mr_iid, error=str(e))
                 try:
-                    if sm is not None:
-                        await sm.trigger_reset_to_queued(error_message=str(e))
-                        log.info("Reset MR to queued after error", mr_iid=mr_iid)
-                    else:
-                        await self.queue_manager.update_mr_state(mr_iid, "queued")
-                        log.info("Reset MR to queued after error (no state machine)", mr_iid=mr_iid)
+                    await self._handle_processing_error(mr_iid, e, sm)
                 except Exception as requeue_err:
                     log.exception("Failed to reset MR state", mr_iid=mr_iid, error=str(requeue_err))
                 result = ProcessingResult.ERROR
@@ -277,6 +272,47 @@ class MergeProcessor:
                 # Record MR processing duration
                 duration = (datetime.now(UTC) - start_time).total_seconds()
                 MR_DURATION.labels(result=result.value).observe(duration)
+
+    async def _handle_processing_error(
+        self,
+        mr_iid: int,
+        error: Exception,
+        sm: StateMachineProtocol | None,
+    ) -> None:
+        """Handle error recovery: increment attempts, requeue or fail permanently."""
+        queue_item_now = await self.queue_manager.get_queue_item(mr_iid)
+        if queue_item_now is None:
+            log.warning("MR no longer in queue during error recovery", mr_iid=mr_iid)
+            return
+
+        attempts = queue_item_now.processing_attempts + 1
+
+        if attempts >= self.settings.max_processing_attempts:
+            log.warning(
+                "MR exceeded max processing attempts, failing permanently",
+                mr_iid=mr_iid,
+                attempts=attempts,
+                max_attempts=self.settings.max_processing_attempts,
+            )
+            error_msg = f"MR permanently failed after {attempts} attempts. Last error: {error}"
+            if sm is not None:
+                await self._fail_mr_permanently(sm, mr_iid, error_msg)
+            else:
+                await self.queue_manager.complete_mr(
+                    mr_iid,
+                    status="failed",
+                    failure_reason=error_msg,
+                )
+            return
+
+        if sm is not None:
+            await sm.trigger_reset_to_queued(error_message=str(error))
+        await self.queue_manager.update_mr_state(
+            mr_iid,
+            "queued",
+            processing_attempts=attempts,
+        )
+        log.info("Reset MR to queued after error", mr_iid=mr_iid, attempt=attempts)
 
     async def _execute_workflow(self, ctx: ProcessingContext) -> ProcessingResult:
         """Execute the full workflow for an MR based on its current state.
@@ -309,6 +345,13 @@ class MergeProcessor:
             current_state = "testing"
 
         if current_state == "testing":
+            # Unconditional reset: extra DB write when attempts=0 is acceptable
+            # for simplicity vs conditional check + extra read
+            await self.queue_manager.update_mr_state(
+                ctx.mr_iid,
+                "testing",
+                processing_attempts=0,
+            )
             # Wait for pipeline
             result = await self._wait_for_pipeline(ctx)
             if result != ProcessingResult.SUCCESS:
@@ -427,6 +470,53 @@ class MergeProcessor:
     # =========================================================================
     # Helper Methods
     # =========================================================================
+
+    async def _fail_mr_permanently(
+        self,
+        sm: StateMachineProtocol,
+        mr_iid: int,
+        error_message: str,
+    ) -> None:
+        """Transition MR to failed state using the appropriate trigger.
+
+        For rebasing/testing/merging states, the corresponding SM trigger is called.
+        These triggers handle notifications via on_enter_failed() callback —
+        no explicit notify() call is needed here.
+
+        The else branch handles unexpected states where the SM cannot transition,
+        so it calls notify() and complete_mr() directly as a fallback.
+        """
+        current = sm.current_state.id
+        if current == "rebasing":
+            await sm.trigger_rebase_failed(
+                conflicted_files=[],
+                error_message=error_message,
+            )
+        elif current == "testing":
+            await sm.trigger_pipeline_failed(
+                failed_jobs=[],
+                retried_jobs={},
+                error_message=error_message,
+            )
+        elif current == "merging":
+            await sm.trigger_merge_failed(error_message=error_message)
+        else:
+            log.error(
+                "Cannot fail MR permanently from unexpected state, using direct completion",
+                mr_iid=mr_iid,
+                state=current,
+            )
+            await self.queue_manager.complete_mr(
+                mr_iid,
+                status="failed",
+                failure_reason=error_message,
+            )
+            await self.notifier.notify(
+                mr_iid,
+                "generic_failure",
+                error_message=error_message,
+            )
+            await self.notifier.remove_queue_label(mr_iid)
 
     async def _check_stale_mrs(self) -> None:
         """Check for MRs that have been in queue too long and send warnings.
