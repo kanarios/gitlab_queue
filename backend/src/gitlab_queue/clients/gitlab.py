@@ -770,6 +770,7 @@ class GitLabClient:
         all_items: list[dict[str, Any]] = []
         page = 1
         fetched_pages = 0
+        next_page = ""
 
         while fetched_pages < max_pages:
             request_params = {**(params or {}), "per_page": per_page, "page": page}
@@ -805,7 +806,7 @@ class GitLabClient:
                 break
             page = parsed_next_page
 
-        if fetched_pages >= max_pages:
+        if fetched_pages >= max_pages and next_page:
             log.warning(
                 "Pagination safety cap reached",
                 path=path,
