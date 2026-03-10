@@ -52,8 +52,8 @@ class Scenario(vedro.Scenario):
                 max_pages=2,
             )
 
-    def then_all_items_are_returned(self):
-        assert len(self.result) == 2
+    def then_items_from_both_pages_are_returned_in_order(self):
+        assert [item["id"] for item in self.result] == [1, 2]
 
     def and_no_safety_cap_warning_is_emitted(self):
         cap_warnings = [e for e in self.captured if e.get("event") == "Pagination safety cap reached"]
