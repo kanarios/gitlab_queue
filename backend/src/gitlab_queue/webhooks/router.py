@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import Response
 
-from gitlab_queue.api.routes import analytics_router, history_router
+from gitlab_queue.api.routes import analytics_router, config_router, history_router
 from gitlab_queue.api.websocket import WebSocketManager, ws_router
 from gitlab_queue.auth.middleware import AuthenticationMiddleware
 from gitlab_queue.auth.routes import auth_router
@@ -947,6 +947,7 @@ def create_webhook_app(state: WebhookAppState) -> FastAPI:
     app.include_router(queue_router)
     app.include_router(history_router)
     app.include_router(analytics_router)
+    app.include_router(config_router)
     app.include_router(auth_router)
     app.include_router(ws_router)
 
@@ -964,6 +965,7 @@ __all__: list[str] = [
     "WebhookHandler",
     "analytics_router",
     "auth_router",
+    "config_router",
     "create_webhook_app",
     "dlq_router",
     "health_router",

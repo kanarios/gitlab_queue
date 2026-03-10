@@ -238,6 +238,9 @@ frontend/dist/
 .DS_Store
 Thumbs.db
 
+# Claude Code
+.claude/
+
 # Internal docs (keep locally, don't commit)
 CLAUDE.md
 todos/

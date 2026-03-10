@@ -9,19 +9,20 @@ import { HistoryTableSkeleton } from '../components/LoadingSkeleton';
 import {
   Search,
   Calendar,
-  ExternalLink,
   AlertTriangle,
   XCircle,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
 import { SafeMotionTr } from '../components/SafeMotion';
-import { getMrUrl, getPipelineUrl } from '../config';
+import { GitLabMrLink, GitLabPipelineLink } from '../components/GitLabLinks';
+import { useProjectConfig } from '../hooks/useProjectConfig';
 
 const DEFAULT_AVATAR = 'https://www.gravatar.com/avatar/?d=mp';
 const PER_PAGE = 20;
 
 const History: React.FC = () => {
+  const { projectWebUrl } = useProjectConfig();
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Data state
@@ -198,16 +199,13 @@ const History: React.FC = () => {
                       className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
                     >
                       <td className="px-6 py-4 align-top">
-                        <a
-                          href={getMrUrl(mr.mr_iid)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="font-mono text-blue-600 dark:text-blue-400 hover:underline flex items-center group w-fit mt-1 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none rounded"
-                          aria-label={`Open merge request !${mr.mr_iid} in GitLab (opens in new tab)`}
-                        >
-                          !{mr.mr_iid}
-                          <ExternalLink className="w-3 h-3 ml-1 opacity-0 group-hover:opacity-100 transition-opacity" aria-hidden="true" />
-                        </a>
+                        <div className="mt-1 w-fit">
+                          <GitLabMrLink
+                            projectWebUrl={projectWebUrl}
+                            iid={mr.mr_iid}
+                            showIcon
+                          />
+                        </div>
                       </td>
                       <td className="px-6 py-4 align-top">
                         <div className="mt-1">
@@ -274,16 +272,12 @@ const History: React.FC = () => {
                       </td>
                       <td className="px-6 py-4 align-top">
                         {mr.pipeline ? (
-                          <a
-                            href={getPipelineUrl(mr.pipeline.id)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors mt-1 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none rounded"
-                            aria-label={`View pipeline #${mr.pipeline.id} in GitLab (opens in new tab)`}
-                          >
-                            <span className="font-mono mr-1">#{mr.pipeline.id}</span>
-                            <ExternalLink className="w-3 h-3 opacity-50" aria-hidden="true" />
-                          </a>
+                          <div className="mt-1">
+                            <GitLabPipelineLink
+                              projectWebUrl={projectWebUrl}
+                              pipelineId={mr.pipeline.id}
+                            />
+                          </div>
                         ) : (
                           <span className="text-slate-400 dark:text-slate-600 mt-1 inline-block" aria-label="No pipeline">-</span>
                         )}

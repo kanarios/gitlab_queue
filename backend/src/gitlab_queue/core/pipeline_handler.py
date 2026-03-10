@@ -23,7 +23,7 @@ from gitlab_queue.core.types import ProcessingContext, ProcessingResult, RebaseC
 from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Sequence
 
     from gitlab_queue.clients.gitlab import GitLabClient
     from gitlab_queue.config import Settings
@@ -84,17 +84,50 @@ class PipelineHandler:
         Returns:
             Tuple of (should_continue, new_start_time, updated_retried_jobs).
         """
-        mr_iid = ctx.mr_iid
-        sm = ctx.state_machine
-
         results = await asyncio.gather(
             *[self.gitlab_client.retry_pipeline_job(j.id) for j in jobs_to_retry],
             return_exceptions=True,
         )
 
-        # Increment counters for successfully retried jobs BEFORE checking errors.
-        # This prevents double-retry on partial failure: if 2 of 3 jobs succeeded,
-        # their counters are persisted so the next iteration won't retry them again.
+        updated, succeeded_job_names, failed_jobs_with_errors = self._tally_retry_results(
+            results, jobs_to_retry, retried_jobs
+        )
+
+        if failed_jobs_with_errors:
+            return await self._handle_retry_api_failures(
+                ctx, pipeline, updated, succeeded_job_names, failed_jobs_with_errors, results
+            )
+
+        retried_job_names = list(dict.fromkeys(j.name for j in jobs_to_retry))
+
+        await self.queue_manager.update_mr_state(
+            ctx.mr_iid,
+            "testing",
+            retried_jobs=updated,
+        )
+
+        pipeline_url = await self.notifier.build_pipeline_url(pipeline.id)
+        await ctx.state_machine.notify_job_retry(
+            pipeline_id=pipeline.id,
+            pipeline_url=pipeline_url,
+            retried_jobs=retried_job_names,
+            retried_counts=updated,
+            max_retries=max_job_retries,
+        )
+
+        return True, datetime.now(UTC), updated
+
+    @staticmethod
+    def _tally_retry_results(
+        results: Sequence[BaseException | object],
+        jobs_to_retry: list[Job],
+        retried_jobs: dict[str, int],
+    ) -> tuple[dict[str, int], list[str], list[Job]]:
+        """Count successes/failures from parallel retry results.
+
+        Returns:
+            Tuple of (updated_retried_jobs, succeeded_job_names, failed_jobs).
+        """
         updated = dict(retried_jobs)
         seen: set[str] = set()
         succeeded_job_names: list[str] = []
@@ -106,44 +139,60 @@ class PipelineHandler:
                     succeeded_job_names.append(name)
                     updated[name] = updated.get(name, 0) + 1
 
-        failed_jobs_with_errors = [jobs_to_retry[i] for i, r in enumerate(results) if isinstance(r, BaseException)]
-        if failed_jobs_with_errors:
-            first_error = next(r for r in results if isinstance(r, BaseException))
-            log.warning("Failed to retry pipeline jobs", mr_iid=mr_iid, error=str(first_error))
+        failed_jobs = [jobs_to_retry[i] for i, r in enumerate(results) if isinstance(r, BaseException)]
+        return updated, succeeded_job_names, failed_jobs
 
-            # Persist partial progress so successfully retried jobs are not retried again
-            if succeeded_job_names:
-                await self.queue_manager.update_mr_state(
-                    mr_iid,
-                    "testing",
-                    retried_jobs=updated,
+    async def _handle_retry_api_failures(
+        self,
+        ctx: ProcessingContext,
+        pipeline: Pipeline,
+        updated: dict[str, int],
+        succeeded_job_names: list[str],
+        failed_jobs_with_errors: list[Job],
+        results: Sequence[BaseException | object],
+    ) -> tuple[bool, datetime | None, dict[str, int]]:
+        """Handle the case when some job retries failed via API.
+
+        Returns:
+            Tuple of (should_continue, new_start_time, updated_retried_jobs).
+        """
+        mr_iid = ctx.mr_iid
+        first_error = next(r for r in results if isinstance(r, BaseException))
+        log.warning("Failed to retry pipeline jobs", mr_iid=mr_iid, error=str(first_error))
+
+        # Check if ALL failed retries are 403 "not retryable" — someone may have
+        # already retried these jobs externally (e.g. via GitLab UI)
+        all_not_retryable = all(
+            isinstance(r, GitLabAPIError) and r.status_code == 403 for r in results if isinstance(r, BaseException)
+        )
+
+        if all_not_retryable:
+            not_retryable_names = {j.name for j in failed_jobs_with_errors}
+            all_jobs = await self.gitlab_client.get_pipeline_jobs(pipeline.id)
+            active_statuses = ("running", "pending", "created")
+            already_retried = [j for j in all_jobs if j.name in not_retryable_names and j.status in active_statuses]
+            if already_retried:
+                log.info(
+                    "Jobs already retried externally, continuing poll",
+                    mr_iid=mr_iid,
+                    jobs=[j.name for j in already_retried],
                 )
+                return True, datetime.now(UTC), updated
 
-            await sm.trigger_pipeline_failed(
-                failed_jobs=[j.name for j in failed_jobs_with_errors],
+        # Persist partial progress so successfully retried jobs are not retried again
+        if succeeded_job_names:
+            await self.queue_manager.update_mr_state(
+                mr_iid,
+                "testing",
                 retried_jobs=updated,
-                error_message=f"Failed to retry jobs via API: {first_error}",
             )
-            return False, None, updated
 
-        retried_job_names = list(dict.fromkeys(j.name for j in jobs_to_retry))
-
-        await self.queue_manager.update_mr_state(
-            mr_iid,
-            "testing",
+        await ctx.state_machine.trigger_pipeline_failed(
+            failed_jobs=[j.name for j in failed_jobs_with_errors],
             retried_jobs=updated,
+            error_message=f"Failed to retry jobs via API: {first_error}",
         )
-
-        pipeline_url = await self.notifier.build_pipeline_url(pipeline.id)
-        await sm.notify_job_retry(
-            pipeline_id=pipeline.id,
-            pipeline_url=pipeline_url,
-            retried_jobs=retried_job_names,
-            retried_counts=updated,
-            max_retries=max_job_retries,
-        )
-
-        return True, datetime.now(UTC), updated
+        return False, None, updated
 
     async def _fetch_pipeline_jobs(
         self,
@@ -340,19 +389,16 @@ class PipelineHandler:
         rebase_check = self.rebase_check_fn or maybe_rebase_during_testing
         outcome = await rebase_check(self.settings, ctx, state, pipeline)
         state.last_rebase_check = outcome.last_check
-        if outcome.result is not None:
-            return outcome.result
-        if outcome.should_reset and outcome.context is not None:
-            state.rebase_ctx = outcome.context
-            await self.queue_manager.update_mr_state(mr_iid, "testing", retried_jobs={})
-            state.retried_jobs = {}
-            state.start_time = datetime.now(UTC)
-            return None  # Skip current pipeline, wait for new one after rebase
-        if outcome.context is not None:
-            state.rebase_ctx = outcome.context
+        rebase_result = await self._apply_rebase_outcome(state, mr_iid, outcome)
+        if rebase_result is not None:
+            return rebase_result
 
         # Skip stale pipelines
         if await self.should_skip_stale_pipeline(mr_iid, pipeline):
+            return None
+
+        # Grace period for transient canceled status (e.g. after retry_pipeline)
+        if self._apply_canceled_grace_period(state, mr_iid, pipeline):
             return None
 
         # Handle pipeline status
@@ -367,6 +413,53 @@ class PipelineHandler:
             return None
 
         return status_result
+
+    async def _apply_rebase_outcome(
+        self,
+        state: PipelineWaitState,
+        mr_iid: int,
+        outcome: RebaseCheckOutcome,
+    ) -> ProcessingResult | None:
+        """Apply rebase check outcome to pipeline wait state.
+
+        Returns:
+            ProcessingResult if loop should exit, None to continue.
+        """
+        if outcome.result is not None:
+            return outcome.result
+        if outcome.should_reset and outcome.context is not None:
+            state.rebase_ctx = outcome.context
+            await self.queue_manager.update_mr_state(mr_iid, "testing", retried_jobs={})
+            state.retried_jobs = {}
+            state.start_time = datetime.now(UTC)
+            return None  # Skip current pipeline, wait for new one after rebase
+        if outcome.context is not None:
+            state.rebase_ctx = outcome.context
+        return None
+
+    @staticmethod
+    def _apply_canceled_grace_period(
+        state: PipelineWaitState,
+        mr_iid: int,
+        pipeline: Pipeline,
+    ) -> bool:
+        """Apply grace period for transient canceled/canceling status.
+
+        Returns:
+            True if current iteration should be skipped (grace period active).
+        """
+        if pipeline.status in ("canceled", "canceling"):
+            state.canceled_seen_count += 1
+            if state.canceled_seen_count <= 3:
+                log.info(
+                    "Pipeline canceled/canceling, grace poll",
+                    mr_iid=mr_iid,
+                    poll=state.canceled_seen_count,
+                )
+                return True
+            return False
+        state.canceled_seen_count = 0
+        return False
 
     async def check_pipeline_termination_conditions(
         self,

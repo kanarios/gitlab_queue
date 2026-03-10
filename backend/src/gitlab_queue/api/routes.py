@@ -24,6 +24,7 @@ from gitlab_queue.api.schemas import (
     dump_outcomes,
     dump_paginated_history,
 )
+from gitlab_queue.clients.gitlab import GitLabAPIError, GitLabCircuitOpenError
 from gitlab_queue.db.repositories import ModelConverter, UnitOfWork
 from gitlab_queue.utils.logging import get_logger
 
@@ -322,10 +323,47 @@ async def get_failure_reasons(
 
 
 # =============================================================================
+# Config API Router
+# =============================================================================
+
+config_router = APIRouter(prefix="/api/config", tags=["config"])
+
+
+@config_router.get("")
+async def get_config(request: Request) -> dict[str, str]:
+    """Get project configuration.
+
+    Returns:
+        Dict with project_web_url from GitLab API.
+
+    Raises:
+        HTTPException: 503 if GitLab API is unavailable.
+    """
+    state: WebhookAppState = request.app.state.webhook_state
+    try:
+        project_web_url = await state.gitlab_client.get_project_web_url()
+    except GitLabCircuitOpenError as e:
+        retry_after = int(e.retry_after or 30)
+        raise HTTPException(
+            status_code=503,
+            detail="GitLab API temporarily unavailable",
+            headers={"Retry-After": str(retry_after)},
+        )
+    except GitLabAPIError as e:
+        log.warning("Failed to fetch project config from GitLab", error=str(e))
+        raise HTTPException(
+            status_code=503,
+            detail="Failed to fetch project configuration from GitLab",
+        )
+    return {"project_web_url": project_web_url}
+
+
+# =============================================================================
 # Exports
 # =============================================================================
 
 __all__: list[str] = [
     "analytics_router",
+    "config_router",
     "history_router",
 ]

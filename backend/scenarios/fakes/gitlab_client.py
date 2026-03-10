@@ -22,6 +22,7 @@ class FakeGitLabClient:
     mr_pipelines_response: list[Pipeline] = field(default_factory=list)
     latest_pipeline_response: Pipeline | None = None
     pipeline_jobs_response: list[Job] | Exception = field(default_factory=list)
+    pipeline_jobs_response_sequence: list[list[Job]] = field(default_factory=list)
     rebase_result: bool = True
     rebase_status: tuple[bool, bool] = (False, False)
     rebase_status_sequence: list[tuple[bool, bool]] = field(default_factory=list)
@@ -46,6 +47,9 @@ class FakeGitLabClient:
     create_pipeline_error: Exception | None = None
     create_pipeline_error_sequence: list[Exception | None] = field(default_factory=list)
     remove_label_error: Exception | None = None
+    get_project_web_url_error: Exception | None = None
+    retry_pipeline_error: Exception | None = None
+    retry_pipeline_response: Pipeline | None = None
 
     # Call recording
     retry_job_calls: list[int] = field(default_factory=list)
@@ -55,6 +59,7 @@ class FakeGitLabClient:
     remove_label_calls: list[tuple[int, str]] = field(default_factory=list)
     add_comment_calls: list[tuple[int, str]] = field(default_factory=list)
     create_pipeline_calls: list[str] = field(default_factory=list)
+    retry_pipeline_calls: list[int] = field(default_factory=list)
     get_mr_calls: list[int] = field(default_factory=list)
     get_latest_pipeline_calls: list[int] = field(default_factory=list)
     list_mrs_calls: list[str] = field(default_factory=list)
@@ -146,6 +151,14 @@ class FakeGitLabClient:
             return self.created_pipeline
         return create_pipeline(ref=ref)
 
+    async def retry_pipeline(self, pipeline_id: int) -> Pipeline:
+        self.retry_pipeline_calls.append(pipeline_id)
+        if self.retry_pipeline_error:
+            raise self.retry_pipeline_error
+        if self.retry_pipeline_response is not None:
+            return self.retry_pipeline_response
+        return create_pipeline(id=pipeline_id, status="pending")
+
     async def cancel_pipeline(self, pipeline_id: int) -> Pipeline:
         self.cancel_pipeline_calls.append(pipeline_id)
         if self.cancel_pipeline_error:
@@ -153,6 +166,8 @@ class FakeGitLabClient:
         return create_pipeline(id=pipeline_id, status="canceled")
 
     async def get_pipeline_jobs(self, pipeline_id: int) -> list[Job]:
+        if self.pipeline_jobs_response_sequence:
+            return self.pipeline_jobs_response_sequence.pop(0)
         if isinstance(self.pipeline_jobs_response, Exception):
             raise self.pipeline_jobs_response
         return self.pipeline_jobs_response
@@ -169,6 +184,8 @@ class FakeGitLabClient:
         return create_note(body=body)
 
     async def get_project_web_url(self) -> str:
+        if self.get_project_web_url_error:
+            raise self.get_project_web_url_error
         return self.project_web_url
 
     async def close(self) -> None:

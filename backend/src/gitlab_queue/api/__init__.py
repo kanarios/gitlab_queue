@@ -3,7 +3,7 @@
 Provides History, Analytics, and WebSocket API endpoints for the dashboard.
 """
 
-from gitlab_queue.api.routes import analytics_router, history_router
+from gitlab_queue.api.routes import analytics_router, config_router, history_router
 from gitlab_queue.api.schemas import (
     AnalyticsSummarySchema,
     AuthorSchema,
@@ -43,6 +43,7 @@ __all__: list[str] = [
     "WebSocketManager",
     "analytics_router",
     "api_retort",
+    "config_router",
     "dump_analytics_summary",
     "dump_failure_reasons",
     "dump_history_item",
