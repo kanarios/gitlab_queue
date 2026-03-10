@@ -116,7 +116,10 @@ export class WebSocketManager {
    * Requires authentication token to be present.
    */
   connect(): void {
-    if (this.socket?.readyState === WebSocket.OPEN) {
+    if (
+      this.socket?.readyState === WebSocket.OPEN ||
+      this.socket?.readyState === WebSocket.CONNECTING
+    ) {
       return;
     }
 
@@ -147,6 +150,10 @@ export class WebSocketManager {
     this.clearReconnectTimeout();
 
     if (this.socket) {
+      this.socket.onopen = null;
+      this.socket.onclose = null;
+      this.socket.onerror = null;
+      this.socket.onmessage = null;
       this.socket.close();
       this.socket = null;
     }

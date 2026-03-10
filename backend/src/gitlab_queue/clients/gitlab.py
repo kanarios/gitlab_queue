@@ -769,8 +769,9 @@ class GitLabClient:
         """
         all_items: list[dict[str, Any]] = []
         page = 1
+        fetched_pages = 0
 
-        while page <= max_pages:
+        while fetched_pages < max_pages:
             request_params = {**(params or {}), "per_page": per_page, "page": page}
             response = await self._request(
                 "GET",
@@ -780,12 +781,13 @@ class GitLabClient:
             )
             items: list[dict[str, Any]] = response.json()
             all_items.extend(items)
+            fetched_pages += 1
 
             next_page = response.headers.get("x-next-page", "")
             if not next_page:
                 break
             try:
-                page = int(next_page)
+                parsed_next_page = int(next_page)
             except ValueError:
                 log.warning(
                     "Non-numeric x-next-page header, stopping pagination",
@@ -793,9 +795,23 @@ class GitLabClient:
                     next_page=next_page,
                 )
                 break
+            if parsed_next_page <= page:
+                log.warning(
+                    "Non-advancing x-next-page, stopping pagination",
+                    path=path,
+                    current_page=page,
+                    next_page=parsed_next_page,
+                )
+                break
+            page = parsed_next_page
 
-        if page > max_pages:
-            log.warning("Pagination safety cap reached", path=path, max_pages=max_pages)
+        if fetched_pages >= max_pages:
+            log.warning(
+                "Pagination safety cap reached",
+                path=path,
+                max_pages=max_pages,
+                fetched_pages=fetched_pages,
+            )
 
         return all_items
 
