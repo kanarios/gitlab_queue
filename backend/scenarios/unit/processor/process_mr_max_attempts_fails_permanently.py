@@ -34,7 +34,7 @@ class Scenario(vedro.Scenario):
         )
 
     def given_mr_at_max_attempts(self):
-        self.queue_item = create_test_queue_item(mr_iid=42, state="queued", processing_attempts=2)
+        self.queue_item = create_test_queue_item(mr_iid=42, state="queued", processing_attempts=4)
         self.processor.queue_manager.add_item(self.queue_item)
 
     async def when_process_mr_is_called(self):

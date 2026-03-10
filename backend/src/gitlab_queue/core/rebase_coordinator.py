@@ -39,6 +39,7 @@ class PipelineWaitState:
     rebase_ctx: RebaseDuringTestingContext
     last_rebase_check: datetime
     rebase_handler: RebaseDuringTestingHandler
+    canceled_seen_count: int = 0
 
 
 def create_pipeline_wait_state(

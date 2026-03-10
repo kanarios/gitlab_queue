@@ -1268,6 +1268,11 @@ class GitLabClient:
 
         for attempt in range(max_retries):
             mr = await self.get_mr(iid)
+
+            if mr.state == "merged":
+                log.info("MR already merged externally", mr_iid=iid, state=mr.state)
+                return mr
+
             self._validate_sha_unchanged(iid, expected_sha, mr.sha, attempt + 1)
 
             if mr.merge_status == "checking":

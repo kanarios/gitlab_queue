@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS merge_requests (
     retried_jobs TEXT NOT NULL DEFAULT '{}',
     last_error TEXT,
     stale_warning_sent INTEGER DEFAULT 0,
-    processing_attempts INTEGER DEFAULT 0,
+    processing_attempts INTEGER NOT NULL DEFAULT 0,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 )
 """

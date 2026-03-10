@@ -356,8 +356,12 @@ class RebaseHandler:
                 fallback_pipeline_id=fallback_pipeline_id,
                 error=str(e),
             )
-            retried = await self.gitlab_client.retry_pipeline(fallback_pipeline_id)
-            return PollStatus.DONE, (retried, new_sha)
+            try:
+                retried = await self.gitlab_client.retry_pipeline(fallback_pipeline_id)
+                return PollStatus.DONE, (retried, new_sha)
+            except GitLabServerError as retry_err:
+                log.warning("retry_pipeline failed (server error), will retry", mr_iid=mr_iid, error=str(retry_err))
+                return PollStatus.CONTINUE, None
 
     async def capture_pre_rebase_state(self, ctx: ProcessingContext) -> str:
         """Capture SHA and pipeline ID before rebase for race condition prevention.

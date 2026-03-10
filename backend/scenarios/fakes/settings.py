@@ -27,4 +27,4 @@ class FakeSettings:
     rate_limit_critical_threshold: float = 0.95
     webhook_retry_poll_interval_seconds: int = 1
     gitlab_project_id: int = 1
-    max_processing_attempts: int = 3
+    max_processing_attempts: int = 5

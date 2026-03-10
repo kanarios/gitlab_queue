@@ -22,6 +22,7 @@ class FakeGitLabClient:
     mr_pipelines_response: list[Pipeline] = field(default_factory=list)
     latest_pipeline_response: Pipeline | None = None
     pipeline_jobs_response: list[Job] | Exception = field(default_factory=list)
+    pipeline_jobs_response_sequence: list[list[Job]] = field(default_factory=list)
     rebase_result: bool = True
     rebase_status: tuple[bool, bool] = (False, False)
     rebase_status_sequence: list[tuple[bool, bool]] = field(default_factory=list)
@@ -165,6 +166,8 @@ class FakeGitLabClient:
         return create_pipeline(id=pipeline_id, status="canceled")
 
     async def get_pipeline_jobs(self, pipeline_id: int) -> list[Job]:
+        if self.pipeline_jobs_response_sequence:
+            return self.pipeline_jobs_response_sequence.pop(0)
         if isinstance(self.pipeline_jobs_response, Exception):
             raise self.pipeline_jobs_response
         return self.pipeline_jobs_response

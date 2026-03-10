@@ -353,7 +353,7 @@ async def get_config(request: Request) -> dict[str, str]:
         log.warning("Failed to fetch project config from GitLab", error=str(e))
         raise HTTPException(
             status_code=503,
-            detail=f"GitLab API error: {e}",
+            detail="Failed to fetch project configuration from GitLab",
         )
     return {"project_web_url": project_web_url}
 

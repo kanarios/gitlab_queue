@@ -303,6 +303,12 @@ class MergeProcessor:
                     status="failed",
                     failure_reason=error_msg,
                 )
+                await self.notifier.notify(
+                    mr_iid,
+                    "generic_failure",
+                    error_message=error_msg,
+                )
+                await self.notifier.remove_queue_label(mr_iid)
             return
 
         if sm is not None:
@@ -345,14 +351,13 @@ class MergeProcessor:
             current_state = "testing"
 
         if current_state == "testing":
-            # Unconditional reset: extra DB write when attempts=0 is acceptable
-            # for simplicity vs conditional check + extra read
+            # Reset attempts on entering testing — MR made progress (rebase succeeded).
+            # Zycling protection during pipeline wait is handled by pipeline_timeout_seconds.
             await self.queue_manager.update_mr_state(
                 ctx.mr_iid,
                 "testing",
                 processing_attempts=0,
             )
-            # Wait for pipeline
             result = await self._wait_for_pipeline(ctx)
             if result != ProcessingResult.SUCCESS:
                 return result
