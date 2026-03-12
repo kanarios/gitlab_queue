@@ -509,6 +509,29 @@ class PipelineHandler:
         # Note: with job-level retry, pipeline_id should NOT change (jobs are retried in-place).
         # If pipeline_id doesn't match during job retry, that's unexpected.
         if queue_item.pipeline_id is not None and queue_item.pipeline_id != pipeline.id:
+            # If the new pipeline has the correct expected SHA and a higher ID,
+            # it's a valid replacement (e.g., GitLab created a new pipeline after rebase).
+            # Switch to tracking it instead of skipping.
+            if (
+                queue_item.expected_sha is not None
+                and pipeline.sha is not None
+                and pipeline.sha == queue_item.expected_sha
+                and pipeline.id > queue_item.pipeline_id
+            ):
+                log.info(
+                    "Switching to newer pipeline with matching SHA",
+                    mr_iid=mr_iid,
+                    old_pipeline_id=queue_item.pipeline_id,
+                    new_pipeline_id=pipeline.id,
+                    sha=pipeline.sha[:8],
+                )
+                await self.queue_manager.update_mr_state(
+                    mr_iid,
+                    "testing",
+                    pipeline_id=pipeline.id,
+                )
+                return False
+
             log.debug(
                 "Skipping old pipeline (pipeline_id mismatch)",
                 mr_iid=mr_iid,
