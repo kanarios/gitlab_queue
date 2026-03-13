@@ -64,6 +64,14 @@ class RebaseCheckOutcome:
     should_reset: bool
 
 
+class StaleCheckResult(Enum):
+    """Result of checking if a pipeline is stale."""
+
+    OK = "ok"  # Pipeline is current, proceed normally
+    SKIP = "skip"  # Pipeline is stale, skip this iteration
+    SWITCHED = "switched"  # Switched to a newer valid pipeline
+
+
 @dataclass
 class RetrySignal:
     """Signal to retry pipeline with updated per-job retry state.
@@ -81,4 +89,5 @@ __all__: list[str] = [
     "RebaseCheckOutcome",
     "RebaseContext",
     "RetrySignal",
+    "StaleCheckResult",
 ]

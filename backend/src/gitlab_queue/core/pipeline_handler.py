@@ -19,7 +19,13 @@ from gitlab_queue.core.rebase_coordinator import (
     create_pipeline_wait_state,
     maybe_rebase_during_testing,
 )
-from gitlab_queue.core.types import ProcessingContext, ProcessingResult, RebaseCheckOutcome, RetrySignal
+from gitlab_queue.core.types import (
+    ProcessingContext,
+    ProcessingResult,
+    RebaseCheckOutcome,
+    RetrySignal,
+    StaleCheckResult,
+)
 from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -394,7 +400,18 @@ class PipelineHandler:
             return rebase_result
 
         # Skip stale pipelines
-        if await self.should_skip_stale_pipeline(mr_iid, pipeline):
+        stale_check = await self.check_stale_pipeline(mr_iid, pipeline)
+        if stale_check == StaleCheckResult.SKIP:
+            return None
+        if stale_check == StaleCheckResult.SWITCHED:
+            await self.queue_manager.update_mr_state(
+                mr_iid,
+                "testing",
+                pipeline_id=pipeline.id,
+            )
+            state.start_time = datetime.now(UTC)
+            state.retried_jobs = {}
+            state.canceled_seen_count = 0
             return None
 
         # Grace period for transient canceled status (e.g. after retry_pipeline)
@@ -488,30 +505,24 @@ class PipelineHandler:
 
         return None
 
-    async def should_skip_stale_pipeline(self, mr_iid: int, pipeline: Pipeline) -> bool:
-        """Check if pipeline should be skipped as stale.
+    async def check_stale_pipeline(self, mr_iid: int, pipeline: Pipeline) -> StaleCheckResult:
+        """Check if pipeline is stale, current, or a valid replacement.
 
-        Uses pipeline_id/SHA validation to detect old pipelines from before
-        rebase/retry. This matches the approach in PipelineWebhookHandler.
+        Decision function with no write side effects. Reads queue state
+        but does not mutate it — the caller applies state changes based on the result.
 
         Args:
             mr_iid: MR IID to check.
             pipeline: Current pipeline from GitLab API.
 
         Returns:
-            True if pipeline should be skipped, False otherwise.
+            StaleCheckResult indicating what to do with this pipeline.
         """
         queue_item = await self.queue_manager.get_queue_item(mr_iid)
         if queue_item is None:
-            return False
+            return StaleCheckResult.OK
 
-        # Skip if pipeline_id doesn't match (old pipeline from before rebase/retry)
-        # Note: with job-level retry, pipeline_id should NOT change (jobs are retried in-place).
-        # If pipeline_id doesn't match during job retry, that's unexpected.
         if queue_item.pipeline_id is not None and queue_item.pipeline_id != pipeline.id:
-            # If the new pipeline has the correct expected SHA and a higher ID,
-            # it's a valid replacement (e.g., GitLab created a new pipeline after rebase).
-            # Switch to tracking it instead of skipping.
             if (
                 queue_item.expected_sha is not None
                 and pipeline.sha is not None
@@ -525,12 +536,7 @@ class PipelineHandler:
                     new_pipeline_id=pipeline.id,
                     sha=pipeline.sha[:8],
                 )
-                await self.queue_manager.update_mr_state(
-                    mr_iid,
-                    "testing",
-                    pipeline_id=pipeline.id,
-                )
-                return False
+                return StaleCheckResult.SWITCHED
 
             log.debug(
                 "Skipping old pipeline (pipeline_id mismatch)",
@@ -538,9 +544,8 @@ class PipelineHandler:
                 current_pipeline_id=pipeline.id,
                 expected_pipeline_id=queue_item.pipeline_id,
             )
-            return True
+            return StaleCheckResult.SKIP
 
-        # Skip if SHA doesn't match (pipeline for wrong commit after rebase)
         if queue_item.expected_sha is not None and pipeline.sha is not None and pipeline.sha != queue_item.expected_sha:
             log.debug(
                 "Skipping pipeline with wrong SHA",
@@ -549,9 +554,9 @@ class PipelineHandler:
                 pipeline_sha=pipeline.sha[:8] if pipeline.sha else "unknown",
                 expected_sha=queue_item.expected_sha[:8],
             )
-            return True
+            return StaleCheckResult.SKIP
 
-        return False
+        return StaleCheckResult.OK
 
     async def handle_pipeline_status(
         self,

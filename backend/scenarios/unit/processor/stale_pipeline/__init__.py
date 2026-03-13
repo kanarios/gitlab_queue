@@ -1,1 +1,1 @@
-"""Unit tests for MergeProcessor._should_skip_stale_pipeline."""
+"""Unit tests for PipelineHandler.check_stale_pipeline."""
