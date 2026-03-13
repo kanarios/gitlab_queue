@@ -968,16 +968,17 @@ class GitLabClient:
             log.warning("Rebase failed due to conflicts", mr_iid=iid)
             raise
 
-    async def check_rebase_status(self, iid: int) -> tuple[bool, bool]:
+    async def check_rebase_status(self, iid: int) -> tuple[bool, bool, str | None]:
         """Check the status of a rebase operation.
 
         Args:
             iid: Internal ID of the merge request.
 
         Returns:
-            Tuple of (rebase_in_progress, has_conflicts).
+            Tuple of (rebase_in_progress, has_conflicts, merge_error).
             - rebase_in_progress: True if rebase is still running.
             - has_conflicts: True if merge conflicts were detected.
+            - merge_error: The merge_error string from GitLab, if any.
 
         Raises:
             GitLabNotFoundError: If MR does not exist.
@@ -985,13 +986,25 @@ class GitLabClient:
         """
         log.debug("Checking rebase status", mr_iid=iid)
         mr = await self.get_mr(iid)
+
+        # GitLab may report rebase failure via merge_error while has_conflicts stays False
+        has_conflicts = mr.has_conflicts
+        if not has_conflicts and mr.merge_error and mr.merge_error.startswith("Rebase failed"):
+            log.warning(
+                "Rebase failure detected via merge_error",
+                mr_iid=iid,
+                merge_error=mr.merge_error,
+            )
+            has_conflicts = True
+
         log.debug(
             "Rebase status",
             mr_iid=iid,
             rebase_in_progress=mr.rebase_in_progress,
-            has_conflicts=mr.has_conflicts,
+            has_conflicts=has_conflicts,
+            merge_error=mr.merge_error,
         )
-        return mr.rebase_in_progress, mr.has_conflicts
+        return mr.rebase_in_progress, has_conflicts, mr.merge_error
 
     async def get_mr_conflicts(self, iid: int) -> list[str]:
         """Get list of conflicted files for a merge request.

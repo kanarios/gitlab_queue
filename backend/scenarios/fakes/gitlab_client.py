@@ -24,8 +24,8 @@ class FakeGitLabClient:
     pipeline_jobs_response: list[Job] | Exception = field(default_factory=list)
     pipeline_jobs_response_sequence: list[list[Job]] = field(default_factory=list)
     rebase_result: bool = True
-    rebase_status: tuple[bool, bool] = (False, False)
-    rebase_status_sequence: list[tuple[bool, bool]] = field(default_factory=list)
+    rebase_status: tuple[bool, bool] | tuple[bool, bool, str | None] = (False, False, None)
+    rebase_status_sequence: list[tuple[bool, bool] | tuple[bool, bool, str | None]] = field(default_factory=list)
     mr_conflicts: list[str] = field(default_factory=list)
     merge_result: MergeRequest | Exception | None = None
     listed_mrs: list[MergeRequest] = field(default_factory=list)
@@ -93,12 +93,24 @@ class FakeGitLabClient:
             raise self.rebase_mr_error
         return self.rebase_result
 
-    async def check_rebase_status(self, iid: int) -> tuple[bool, bool]:
+    async def check_rebase_status(self, iid: int) -> tuple[bool, bool, str | None]:
         self.check_rebase_status_calls.append(iid)
         if self.rebase_status_sequence:
             idx = min(len(self.check_rebase_status_calls) - 1, len(self.rebase_status_sequence) - 1)
-            return self.rebase_status_sequence[idx]
-        return self.rebase_status
+            entry = self.rebase_status_sequence[idx]
+            rebase_in_progress, has_conflicts = entry[0], entry[1]
+            merge_error: str | None = entry[2] if len(entry) == 3 else None
+        else:
+            entry = self.rebase_status
+            rebase_in_progress, has_conflicts = entry[0], entry[1]
+            merge_error = entry[2] if len(entry) == 3 else None
+        # Mirror real GitLabClient: detect rebase failure via merge_error
+        if not has_conflicts and iid in self.mr_responses:
+            mr = self.mr_responses[iid]
+            if mr.merge_error and mr.merge_error.startswith("Rebase failed"):
+                has_conflicts = True
+                merge_error = mr.merge_error
+        return rebase_in_progress, has_conflicts, merge_error
 
     async def get_mr_conflicts(self, iid: int) -> list[str]:
         return self.mr_conflicts

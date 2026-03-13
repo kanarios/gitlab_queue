@@ -35,3 +35,7 @@ class Scenario(vedro.Scenario):
     def and_notify_should_include_position(self):
         call_args = self.notifier.notify_calls[0]
         assert "position" in call_args
+
+    def and_notify_should_include_previous_state(self):
+        call_args = self.notifier.notify_calls[0]
+        assert call_args["previous_state"] == "queued"

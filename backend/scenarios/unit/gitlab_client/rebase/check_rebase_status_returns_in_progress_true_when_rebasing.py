@@ -23,7 +23,7 @@ class Scenario(vedro.Scenario):
         self.client = created_test_client(transport=self.transport)
 
     async def when_check_rebase_status_is_called(self):
-        self.in_progress, self.has_conflicts = await self.client.check_rebase_status(42)
+        self.in_progress, self.has_conflicts, self.merge_error = await self.client.check_rebase_status(42)
 
     def then_in_progress_should_be_true(self):
         assert self.in_progress is True

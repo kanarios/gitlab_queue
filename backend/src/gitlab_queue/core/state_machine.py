@@ -273,9 +273,6 @@ class MRStateMachine(StateMachine):
                 finished_at=now,
             )
 
-        # Remove queue label (MR is merged, label no longer needed)
-        await self.notifier.remove_queue_label(self.mr_iid)
-
         positions_before, old_total = await self._capture_queue_positions_if_enabled()
 
         # Move MR to history table
@@ -287,6 +284,10 @@ class MRStateMachine(StateMachine):
         )
 
         await self._notify_position_changes_if_any(positions_before, old_total)
+
+        # Remove queue label AFTER complete_mr to prevent race condition:
+        # webhook from label removal could arrive before MR is completed
+        await self.notifier.remove_queue_label(self.mr_iid)
 
     async def on_enter_failed(self) -> None:
         """Called when MR fails (conflict, pipeline, timeout)."""
@@ -305,6 +306,7 @@ class MRStateMachine(StateMachine):
                 failed_at=datetime.now(UTC),
                 target_branch=self.target_branch,
                 conflicted_files=self._context.get("conflicted_files", []),
+                error_message=self._context.get("error_message", ""),
             )
         elif failure_reason == "pipeline_failed":
             await self.notifier.notify(
@@ -350,9 +352,6 @@ class MRStateMachine(StateMachine):
                 failure_reason=error_message,
             )
 
-        # Remove queue label to prevent re-queueing
-        await self.notifier.remove_queue_label(self.mr_iid)
-
         positions_before, old_total = await self._capture_queue_positions_if_enabled()
 
         # Move MR to history table
@@ -374,6 +373,10 @@ class MRStateMachine(StateMachine):
         )
 
         await self._notify_position_changes_if_any(positions_before, old_total)
+
+        # Remove queue label AFTER complete_mr to prevent race condition:
+        # webhook from label removal could arrive before MR is completed
+        await self.notifier.remove_queue_label(self.mr_iid)
 
     async def on_enter_removed(self) -> None:
         """Called when MR is removed from queue."""
@@ -401,11 +404,13 @@ class MRStateMachine(StateMachine):
                 removed_at=datetime.now(UTC),
             )
         else:
+            previous_state = self._context.get("previous_state", "queued")
             await self.notifier.notify(
                 self.mr_iid,
                 "removed_label",
                 removed_at=datetime.now(UTC),
                 position=position or 0,
+                previous_state=previous_state,
             )
 
         # Broadcast WebSocket completion
@@ -415,10 +420,6 @@ class MRStateMachine(StateMachine):
                 "removed",
                 finished_at=datetime.now(UTC),
             )
-
-        # Remove queue label if still present (e.g., MR was closed but label not removed)
-        if removal_reason in ("closed", "timeout"):
-            await self.notifier.remove_queue_label(self.mr_iid)
 
         positions_before, old_total = await self._capture_queue_positions_if_enabled()
 
@@ -431,6 +432,11 @@ class MRStateMachine(StateMachine):
         )
 
         await self._notify_position_changes_if_any(positions_before, old_total)
+
+        # Remove queue label AFTER complete_mr to prevent race condition:
+        # webhook from label removal could arrive before MR is completed
+        if removal_reason in ("closed", "timeout"):
+            await self.notifier.remove_queue_label(self.mr_iid)
 
     async def _capture_queue_positions_if_enabled(self) -> tuple[dict[int, int], int]:
         """Capture current queue positions before MR completion for later notification."""
@@ -599,7 +605,10 @@ class MRStateMachine(StateMachine):
             reason: Reason for removal - "label_removed" or "closed".
         """
         log.info("Triggering mark_removed", mr_iid=self.mr_iid, reason=reason)
-        self._context = {"removal_reason": reason}
+        self._context = {
+            "removal_reason": reason,
+            "previous_state": self.current_state.id,
+        }
         await self.mark_removed()
 
     async def trigger_timeout(self, *, max_wait_hours: int = 2) -> None:
