@@ -29,8 +29,11 @@ COMMENT_TEMPLATES: dict[str, str] = {
     "queued": """## 🤖 Merge Queue Bot
 
 **Status:** ⏳ Added to queue
+
 **Position:** {position} of {total}
+
 **Estimated wait:** ~{estimated_minutes} min
+
 **Queued at:** {queued_at}
 
 ---
@@ -40,7 +43,9 @@ _Remove `{queue_label}` label to exit queue._
     "position_changed": """## 🤖 Merge Queue Bot
 
 **Status:** ⏳ Waiting in queue
+
 **Position:** {position} of {total} _(was {old_position})_
+
 **Estimated wait:** ~{estimated_minutes} min
 
 ---
@@ -49,7 +54,9 @@ _Your position changed because MRs ahead were processed._
     "position_changed_hotfix": """## 🤖 Merge Queue Bot
 
 **Status:** ⏳ Waiting in queue
+
 **Position:** {position} of {total} _(was {old_position})_
+
 **Estimated wait:** ~{estimated_minutes} min
 
 ---
@@ -58,7 +65,9 @@ _Your position changed because a hotfix MR was inserted ahead._
     "total_changed": """## 🤖 Merge Queue Bot
 
 **Status:** ⏳ Waiting in queue
+
 **Position:** {position} of {total} _(queue size changed from {old_total})_
+
 **Estimated wait:** ~{estimated_minutes} min
 
 ---
@@ -67,7 +76,9 @@ _A new MR was added to the queue._
     "total_changed_hotfix": """## 🤖 Merge Queue Bot
 
 **Status:** ⏳ Waiting in queue
+
 **Position:** {position} of {total} _(queue size changed from {old_total})_
+
 **Estimated wait:** ~{estimated_minutes} min
 
 ---
@@ -77,6 +88,7 @@ _A hotfix MR was added to the queue._
     "rebasing": """## 🤖 Merge Queue Bot
 
 **Status:** 🔄 Rebasing
+
 **Started at:** {started_at}
 
 Your turn! Rebasing onto `{target_branch}`...
@@ -87,6 +99,7 @@ _This usually takes 1-2 minutes._
     "rebase_complete": """## 🤖 Merge Queue Bot
 
 **Status:** ✅ Rebase complete
+
 **Rebased at:** {rebased_at}
 
 Waiting for pipeline to start...
@@ -97,7 +110,9 @@ _Pipeline should start automatically._
     "testing": """## 🤖 Merge Queue Bot
 
 **Status:** 🧪 Pipeline running
+
 **Pipeline:** [{pipeline_id}]({pipeline_url})
+
 **Started at:** {started_at}
 
 Waiting for pipeline to complete...
@@ -108,6 +123,7 @@ _If pipeline fails, bot will retry failed jobs before removing from queue._
     "job_retry": """## 🤖 Merge Queue Bot
 
 **Status:** 🔁 Retrying failed jobs
+
 **Pipeline:** [{pipeline_id}]({pipeline_url})
 
 **Jobs being retried:**
@@ -134,6 +150,7 @@ _Monitoring new pipeline..._
     "merging": """## 🤖 Merge Queue Bot
 
 **Status:** 🚀 Merging
+
 **Pipeline:** [{pipeline_id}]({pipeline_url}) - Passed
 
 Pipeline passed! Merging into `{target_branch}`...
@@ -141,7 +158,9 @@ Pipeline passed! Merging into `{target_branch}`...
     "merged": """## 🤖 Merge Queue Bot
 
 **Status:** ✅ Successfully merged!
+
 **Merged at:** {merged_at}
+
 **Time in queue:** {duration}
 
 🎉 Your changes are now in `{target_branch}`.
@@ -153,6 +172,7 @@ _Thank you for using Merge Queue Bot!_
     "conflict": """## 🤖 Merge Queue Bot
 
 **Status:** ❌ Rebase conflict
+
 **Failed at:** {failed_at}
 
 Cannot rebase onto `{target_branch}` due to conflicts in:
@@ -169,7 +189,9 @@ _MR has been removed from queue._
     "pipeline_failed": """## 🤖 Merge Queue Bot
 
 **Status:** ❌ Pipeline failed
+
 **Pipeline:** [{pipeline_id}]({pipeline_url})
+
 **Failed at:** {failed_at}
 
 Pipeline failed. Retry attempts: {retry_summary}.
@@ -188,7 +210,9 @@ _MR has been removed from queue._
     "timeout": """## 🤖 Merge Queue Bot
 
 **Status:** ⏰ Timeout
+
 **Failed at:** {failed_at}
+
 **Time in queue:** {duration}
 
 MR exceeded maximum wait time ({max_wait} hours).
@@ -206,6 +230,7 @@ _MR has been removed from queue._
     "merge_failed": """## 🤖 Merge Queue Bot
 
 **Status:** ❌ Merge failed
+
 **Failed at:** {failed_at}
 
 Merge operation failed: {error_message}
@@ -221,6 +246,7 @@ _MR has been removed from queue._
     "generic_failure": """## 🤖 Merge Queue Bot
 
 **Status:** ❌ Processing failed
+
 **Failed at:** {failed_at}
 
 {error_message}
@@ -237,7 +263,9 @@ _MR has been removed from queue._
     "stale_warning": """## 🤖 Merge Queue Bot
 
 **Status:** ⚠️ Warning: Long wait time
+
 **In queue since:** {queued_at}
+
 **Time in queue:** {duration}
 
 This MR has been waiting for more than {warning_hours} hours.
@@ -257,10 +285,13 @@ _This is a warning notification. MR is still in queue._
     "removed_label": """## 🤖 Merge Queue Bot
 
 **Status:** 🚪 Removed from queue
+
 **Removed at:** {removed_at}
 **Was at position:** {position}
 
-Label `{queue_label}` was removed.
+**Reason:** Label `{queue_label}` was removed while MR was {stage}.
+
+No errors detected — this was a manual label removal, not a failure.
 
 ---
 _Add label back to rejoin queue._
@@ -268,9 +299,15 @@ _Add label back to rejoin queue._
     "removed_closed": """## 🤖 Merge Queue Bot
 
 **Status:** 🚪 Removed from queue
+
 **Removed at:** {removed_at}
 
-MR was closed.
+**Reason:** MR was closed while in the merge queue.
+
+**What to do:**
+1. Reopen the MR if it was closed by mistake
+2. Verify your changes are up to date with target branch
+3. Add `{queue_label}` label to rejoin queue
 """,
 }
 
@@ -373,7 +410,8 @@ class MRNotifier:
             if isinstance(value, datetime):
                 full_context[key] = self._format_timestamp(value)
             elif key == "conflicted_files" and isinstance(value, list):
-                full_context[key] = self._format_file_list(value)
+                error_msg = full_context.get("error_message", "")
+                full_context[key] = self._format_file_list(value, error_message=error_msg)
             elif key == "failed_jobs" and isinstance(value, list):
                 full_context[key] = self._format_job_list(value)
 
@@ -384,6 +422,17 @@ class MRNotifier:
                 full_context["retry_summary"] = ", ".join(f"{j}: {c}" for j, c in retried_jobs.items()) or "0"
             else:
                 full_context["retry_summary"] = "0"
+
+        # Map previous_state to human-readable stage description
+        if status == "removed_label":
+            state_descriptions = {
+                "queued": "waiting in queue",
+                "rebasing": "being rebased",
+                "testing": "running pipeline",
+                "merging": "being merged",
+            }
+            raw_state = full_context.get("previous_state", "queued")
+            full_context["stage"] = state_descriptions.get(raw_state, raw_state)
 
         # Format job_retry specific fields
         if status == "job_retry":
@@ -414,16 +463,19 @@ class MRNotifier:
         """
         return dt.strftime("%Y-%m-%d %H:%M UTC")
 
-    def _format_file_list(self, files: list[str]) -> str:
+    def _format_file_list(self, files: list[str], *, error_message: str = "") -> str:
         """Format file list as markdown bullets.
 
         Args:
             files: List of file paths.
+            error_message: Fallback error message when files are unavailable.
 
         Returns:
             Markdown formatted file list, limited to 10 items.
         """
         if not files:
+            if error_message:
+                return f"_{error_message}_"
             return "_(unknown files)_"
         formatted = [f"- `{f}`" for f in files[:10]]
         if len(files) > 10:

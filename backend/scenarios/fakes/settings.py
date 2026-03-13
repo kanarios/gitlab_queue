@@ -28,3 +28,5 @@ class FakeSettings:
     webhook_retry_poll_interval_seconds: int = 1
     gitlab_project_id: int = 1
     max_processing_attempts: int = 5
+    merge_status_retry_max: int = 24
+    merge_status_retry_delay_seconds: float = 5.0

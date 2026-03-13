@@ -30,6 +30,7 @@ def create_mr(
     has_conflicts: bool = False,
     rebase_in_progress: bool = False,
     web_url: str | None = None,
+    merge_error: str | None = None,
 ) -> MergeRequest:
     return MergeRequest(
         iid=iid,
@@ -44,6 +45,7 @@ def create_mr(
         has_conflicts=has_conflicts,
         rebase_in_progress=rebase_in_progress,
         web_url=web_url,
+        merge_error=merge_error,
     )
 
 

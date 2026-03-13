@@ -52,6 +52,7 @@ class MergeRequest:
     has_conflicts: bool = False
     rebase_in_progress: bool = False
     web_url: str | None = None
+    merge_error: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

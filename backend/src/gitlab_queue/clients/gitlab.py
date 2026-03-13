@@ -985,13 +985,25 @@ class GitLabClient:
         """
         log.debug("Checking rebase status", mr_iid=iid)
         mr = await self.get_mr(iid)
+
+        # GitLab may report rebase failure via merge_error while has_conflicts stays False
+        has_conflicts = mr.has_conflicts
+        if not has_conflicts and mr.merge_error and mr.merge_error.startswith("Rebase failed"):
+            log.warning(
+                "Rebase failure detected via merge_error",
+                mr_iid=iid,
+                merge_error=mr.merge_error,
+            )
+            has_conflicts = True
+
         log.debug(
             "Rebase status",
             mr_iid=iid,
             rebase_in_progress=mr.rebase_in_progress,
-            has_conflicts=mr.has_conflicts,
+            has_conflicts=has_conflicts,
+            merge_error=mr.merge_error,
         )
-        return mr.rebase_in_progress, mr.has_conflicts
+        return mr.rebase_in_progress, has_conflicts
 
     async def get_mr_conflicts(self, iid: int) -> list[str]:
         """Get list of conflicted files for a merge request.

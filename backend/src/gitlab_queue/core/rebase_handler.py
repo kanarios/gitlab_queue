@@ -119,9 +119,11 @@ class RebaseHandler:
             if has_conflicts:
                 log.warning("Rebase has conflicts", mr_iid=mr_iid)
                 conflicted_files = await self.gitlab_client.get_mr_conflicts(mr_iid)
+                mr = await self.gitlab_client.get_mr(mr_iid)
+                error_message = mr.merge_error or "Rebase failed due to merge conflicts"
                 await sm.trigger_rebase_failed(
                     conflicted_files=conflicted_files,
-                    error_message="Rebase failed due to merge conflicts",
+                    error_message=error_message,
                 )
                 return PollStatus.DONE, ProcessingResult.CONFLICT
 
@@ -212,8 +214,11 @@ class RebaseHandler:
         if timeout_seconds is None:
             timeout_seconds = DEFAULT_POST_REBASE_PIPELINE_WAIT_SECONDS
 
+        stale_skip_count = 0
+
         async def check_pipeline() -> tuple[PollStatus, tuple[Pipeline | None, str] | None]:
             """Poll for new pipeline on updated SHA after rebase."""
+            nonlocal stale_skip_count
             mr = await self.gitlab_client.get_mr(mr_iid)
 
             if mr.rebase_in_progress:
@@ -243,14 +248,25 @@ class RebaseHandler:
                     # canceled/failed are handled above; only success reaches here.
                     # Non-terminal (running/pending) pipeline is always valid.
                     if old_pipeline_id is not None and pipeline.id == old_pipeline_id and pipeline.status == "success":
+                        stale_skip_count += 1
+                        if stale_skip_count < 2:
+                            log.info(
+                                "Skipping possibly stale pipeline, waiting for SHA update",
+                                mr_iid=mr_iid,
+                                pipeline_id=pipeline.id,
+                                old_pipeline_id=old_pipeline_id,
+                                pipeline_status=pipeline.status,
+                                skip_count=stale_skip_count,
+                            )
+                            return PollStatus.CONTINUE, None
                         log.info(
-                            "Skipping possibly stale terminal pipeline in fast-forward case",
+                            "Accepting pipeline after grace period in fast-forward case",
                             mr_iid=mr_iid,
                             pipeline_id=pipeline.id,
-                            old_pipeline_id=old_pipeline_id,
                             pipeline_status=pipeline.status,
+                            skip_count=stale_skip_count,
                         )
-                        return PollStatus.CONTINUE, None
+                        return PollStatus.DONE, (pipeline, new_sha)
                     return PollStatus.DONE, (pipeline, new_sha)
                 # No valid pipeline in fast-forward case: create one (GitLab won't create it automatically)
                 log.info(
