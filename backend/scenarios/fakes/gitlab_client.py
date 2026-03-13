@@ -98,14 +98,14 @@ class FakeGitLabClient:
         if self.rebase_status_sequence:
             idx = min(len(self.check_rebase_status_calls) - 1, len(self.rebase_status_sequence) - 1)
             entry = self.rebase_status_sequence[idx]
-            if len(entry) == 2:
-                return entry[0], entry[1], None
-            return entry[0], entry[1], entry[2]
-        entry = self.rebase_status
-        rebase_in_progress, has_conflicts = entry[0], entry[1]
-        merge_error: str | None = entry[2] if len(entry) == 3 else None
+            rebase_in_progress, has_conflicts = entry[0], entry[1]
+            merge_error: str | None = entry[2] if len(entry) == 3 else None
+        else:
+            entry = self.rebase_status
+            rebase_in_progress, has_conflicts = entry[0], entry[1]
+            merge_error = entry[2] if len(entry) == 3 else None
         # Mirror real GitLabClient: detect rebase failure via merge_error
-        if not has_conflicts and not rebase_in_progress and iid in self.mr_responses:
+        if not has_conflicts and iid in self.mr_responses:
             mr = self.mr_responses[iid]
             if mr.merge_error and mr.merge_error.startswith("Rebase failed"):
                 has_conflicts = True

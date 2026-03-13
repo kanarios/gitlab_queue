@@ -13,6 +13,7 @@ from vedro import params
 class Scenario(vedro.Scenario):
     subject = "on_enter_removed from {start_state} includes previous_state={start_state}"
 
+    @params(QueueState.QUEUED)
     @params(QueueState.REBASING)
     @params(QueueState.TESTING)
     @params(QueueState.MERGING)

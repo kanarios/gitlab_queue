@@ -106,14 +106,18 @@ async def wait_for_rebase_completion(
     """
 
     async def check_rebase() -> tuple[PollStatus, bool | None]:
-        rebase_in_progress, has_conflicts, _ = await gitlab_client.check_rebase_status(mr_iid)
+        rebase_in_progress, has_conflicts, merge_error = await gitlab_client.check_rebase_status(mr_iid)
 
         if has_conflicts:
             if fetch_conflict_details:
                 conflicted_files = await gitlab_client.get_mr_conflicts(mr_iid)
                 files_info = f": {conflicted_files}" if conflicted_files else ""
-                raise GitLabConflictError(f"{conflict_error_prefix}{files_info}")
-            raise GitLabConflictError(conflict_error_prefix)
+                error_msg = f"{conflict_error_prefix}{files_info}"
+            else:
+                error_msg = conflict_error_prefix
+            if merge_error:
+                error_msg = f"{error_msg} ({merge_error})"
+            raise GitLabConflictError(error_msg)
 
         if not rebase_in_progress:
             return PollStatus.DONE, True
