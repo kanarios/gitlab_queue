@@ -1,8 +1,7 @@
-"""Test check_stale_pipeline returns SKIP for SHA mismatch.
+"""Test check_stale_pipeline returns SWITCHED for newer pipeline with matching SHA.
 
-When the queue item tracks an expected SHA and the current pipeline
-has a different SHA, the pipeline is for a different commit (e.g.,
-from before a rebase) and should be skipped.
+When GitLab creates a new pipeline on the same commit after rebase,
+the method should signal that the caller must switch to tracking it.
 """
 
 from __future__ import annotations
@@ -20,23 +19,30 @@ from .._helpers import (
 
 
 class Scenario(vedro.Scenario):
-    subject = "check stale pipeline returns SKIP for wrong SHA"
+    subject = "check stale pipeline returns SWITCHED for newer pipeline with matching SHA"
 
-    def given_handler_with_sha_mismatch(self):
+    def given_handler_with_newer_pipeline_matching_sha(self):
         self.queue_manager = FakeQueueManager()
         queue_item = create_test_queue_item(
             mr_iid=42,
             state="testing",
             pipeline_id=100,
-            expected_sha="abc123",
+            expected_sha="abc12345",
         )
         self.queue_manager.add_item(queue_item)
         self.handler = create_test_pipeline_handler(queue_manager=self.queue_manager)
 
-        self.pipeline = create_mock_pipeline(pipeline_id=100, sha="def456", status="success")
+        self.pipeline = create_mock_pipeline(
+            pipeline_id=200,
+            sha="abc12345",
+            status="running",
+        )
 
     async def when_check_stale_pipeline_is_called(self):
         self.result = await self.handler.check_stale_pipeline(42, self.pipeline)
 
-    def then_result_is_skip(self):
-        assert self.result == StaleCheckResult.SKIP
+    def then_result_is_switched(self):
+        assert self.result == StaleCheckResult.SWITCHED
+
+    def then_no_side_effects_on_queue(self):
+        assert self.queue_manager.update_state_calls == []

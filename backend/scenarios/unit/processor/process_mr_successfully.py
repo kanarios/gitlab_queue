@@ -59,7 +59,7 @@ async def process_mr_successfully_from_queue_to_merge():
         # Merge result
         processor.gitlab_client.merge_result = create_mr(iid=42, state="merged")
 
-        # Queue item needed by _should_skip_stale_pipeline and _handle_pipeline_status
+        # Queue item needed by check_stale_pipeline and _handle_pipeline_status
         queue_item = create_test_queue_item(mr_iid=42, state="queued")
         processor.queue_manager.add_item(queue_item)
 

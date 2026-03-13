@@ -386,9 +386,6 @@ class MergeProcessor:
     async def _wait_for_rebase_quick(self, ctx: ProcessingContext) -> None:
         return await self._rebase_handler.wait_for_rebase_quick(ctx)
 
-    async def _should_skip_stale_pipeline(self, mr_iid: int, pipeline: Pipeline) -> bool:
-        return await self._pipeline_handler.should_skip_stale_pipeline(mr_iid, pipeline)
-
     async def _check_pipeline_termination_conditions(
         self,
         ctx: ProcessingContext,
