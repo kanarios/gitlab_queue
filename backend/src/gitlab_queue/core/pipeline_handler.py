@@ -408,6 +408,7 @@ class PipelineHandler:
                 mr_iid,
                 "testing",
                 pipeline_id=pipeline.id,
+                retried_jobs={},
             )
             state.start_time = datetime.now(UTC)
             state.retried_jobs = {}

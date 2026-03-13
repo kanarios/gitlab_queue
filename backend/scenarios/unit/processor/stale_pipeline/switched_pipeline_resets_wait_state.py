@@ -101,3 +101,7 @@ class Scenario(vedro.Scenario):
     def then_state_is_testing(self):
         calls = self.queue_manager.update_state_calls
         assert calls[0]["state"] == "testing"
+
+    def then_retried_jobs_are_cleared_in_database(self):
+        calls = self.queue_manager.update_state_calls
+        assert calls[0]["retried_jobs"] == {}
