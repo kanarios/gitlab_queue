@@ -33,6 +33,9 @@ QUICK_REBASE_POLL_INTERVAL_SECONDS = 3
 # Timeouts (seconds)
 QUICK_REBASE_TIMEOUT_SECONDS = 60
 DEFAULT_POST_REBASE_PIPELINE_WAIT_SECONDS = 60
+# How many poll cycles to skip a stale (same-ID, success) pipeline before accepting it.
+# In fast-forward rebases GitLab may not update the pipeline ID immediately.
+STALE_PIPELINE_GRACE_POLLS = 2
 
 # Failed/canceled pipeline statuses to skip in the fast-forward case
 # (SHA unchanged after rebase — success pipeline is still valid).
@@ -114,13 +117,12 @@ class RebaseHandler:
 
         async def check_rebase() -> tuple[PollStatus, ProcessingResult | None]:
             """Poll rebase status until complete or conflict detected."""
-            rebase_in_progress, has_conflicts = await self.gitlab_client.check_rebase_status(mr_iid)
+            rebase_in_progress, has_conflicts, merge_error = await self.gitlab_client.check_rebase_status(mr_iid)
 
             if has_conflicts:
                 log.warning("Rebase has conflicts", mr_iid=mr_iid)
                 conflicted_files = await self.gitlab_client.get_mr_conflicts(mr_iid)
-                mr = await self.gitlab_client.get_mr(mr_iid)
-                error_message = mr.merge_error or "Rebase failed due to merge conflicts"
+                error_message = merge_error or "Rebase failed due to merge conflicts"
                 await sm.trigger_rebase_failed(
                     conflicted_files=conflicted_files,
                     error_message=error_message,
@@ -249,7 +251,7 @@ class RebaseHandler:
                     # Non-terminal (running/pending) pipeline is always valid.
                     if old_pipeline_id is not None and pipeline.id == old_pipeline_id and pipeline.status == "success":
                         stale_skip_count += 1
-                        if stale_skip_count < 2:
+                        if stale_skip_count < STALE_PIPELINE_GRACE_POLLS:
                             log.info(
                                 "Skipping possibly stale pipeline, waiting for SHA update",
                                 mr_iid=mr_iid,

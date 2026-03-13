@@ -204,7 +204,7 @@ class Settings:
     # Renamed from PIPELINE_RETRY_COUNT → JOB_RETRY_COUNT (env: GITLAB_QUEUE_JOB_RETRY_COUNT)
     job_retry_count: int = var(default=1, converter=int)
     api_max_retries: int = var(default=5, converter=int)
-    merge_status_retry_max: int = var(default=24, converter=int)
+    merge_status_retry_max: int = var(default=24, converter=int)  # 24 * 5s = 120s total wait
     merge_status_retry_delay_seconds: float = var(default=5.0, converter=float)
     merge_timeout_seconds: int = var(default=90, converter=int)  # Merge operation timeout
 

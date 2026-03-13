@@ -17,6 +17,9 @@ class FakeNotifier:
     notify_calls: list[dict[str, Any]] = field(default_factory=list)
     remove_label_calls: list[int] = field(default_factory=list)
 
+    # Cross-fake call order tracking
+    call_order_log: list[str] | None = None
+
     # Error injection
     notify_error: Exception | None = None
 
@@ -37,3 +40,5 @@ class FakeNotifier:
 
     async def remove_queue_label(self, mr_iid: int) -> None:
         self.remove_label_calls.append(mr_iid)
+        if self.call_order_log is not None:
+            self.call_order_log.append("remove_queue_label")

@@ -62,5 +62,4 @@ class Scenario(vedro.Scenario):
 
     def then_poll_completed_via_done_not_timeout(self):
         # With DONE on 2nd iteration: 2 get_mr calls (no timeout handler)
-        # With timeout: 10 get_mr calls + 1 from timeout handler = 11
-        assert len(self.gitlab_client.get_mr_calls) <= 3
+        assert len(self.gitlab_client.get_mr_calls) == 2

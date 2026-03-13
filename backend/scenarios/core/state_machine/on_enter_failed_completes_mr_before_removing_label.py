@@ -4,13 +4,16 @@ This prevents a race condition where the webhook from label removal
 could arrive before the MR is completed in the queue.
 """
 
+from datetime import UTC, datetime
+
 import vedro
 from scenarios.contexts.state_machine_helpers import (
-    create_mock_notifier,
-    create_mock_queue_manager,
     create_state_machine,
 )
+from scenarios.fakes import FakeNotifier, FakeQueueManager
 from scenarios.library import QueueState
+
+from gitlab_queue.models.queue_item import QueueItem
 
 
 class Scenario(vedro.Scenario):
@@ -18,23 +21,19 @@ class Scenario(vedro.Scenario):
 
     async def given_state_machine_in_rebasing(self):
         self.call_order: list[str] = []
-        self.notifier = create_mock_notifier()
-        self.queue_manager = create_mock_queue_manager()
-
-        # Patch to record call order
-        original_complete = self.queue_manager.complete_mr
-        original_remove = self.notifier.remove_queue_label
-
-        async def recording_complete(*args, **kwargs):
-            self.call_order.append("complete_mr")
-            return await original_complete(*args, **kwargs)
-
-        async def recording_remove(*args, **kwargs):
-            self.call_order.append("remove_queue_label")
-            return await original_remove(*args, **kwargs)
-
-        self.queue_manager.complete_mr = recording_complete
-        self.notifier.remove_queue_label = recording_remove
+        self.notifier = FakeNotifier(call_order_log=self.call_order)
+        self.queue_manager = FakeQueueManager(call_order_log=self.call_order)
+        self.queue_manager.add_item(
+            QueueItem(
+                mr_iid=123,
+                title="Test MR",
+                author_name="Test",
+                author_username="test",
+                target_branch="master",
+                state=QueueState.QUEUED,
+                queued_at=datetime.now(UTC),
+            )
+        )
 
         self.sm = await create_state_machine(
             self.notifier,

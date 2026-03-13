@@ -29,6 +29,9 @@ class FakeQueueManager:
     add_error: Exception | None = None
     get_active_queue_error: Exception | None = None
 
+    # Cross-fake call order tracking
+    call_order_log: list[str] | None = None
+
     # Call recording
     complete_calls: list[dict[str, Any]] = field(default_factory=list)
     remove_calls: list[int] = field(default_factory=list)
@@ -146,6 +149,8 @@ class FakeQueueManager:
                 "pipeline_failed_jobs": pipeline_failed_jobs,
             }
         )
+        if self.call_order_log is not None:
+            self.call_order_log.append("complete_mr")
         item = self._items.get(mr_iid)
         if item is None:
             return False

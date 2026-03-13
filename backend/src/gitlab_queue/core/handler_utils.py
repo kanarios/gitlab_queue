@@ -106,7 +106,7 @@ async def wait_for_rebase_completion(
     """
 
     async def check_rebase() -> tuple[PollStatus, bool | None]:
-        rebase_in_progress, has_conflicts = await gitlab_client.check_rebase_status(mr_iid)
+        rebase_in_progress, has_conflicts, _ = await gitlab_client.check_rebase_status(mr_iid)
 
         if has_conflicts:
             if fetch_conflict_details:

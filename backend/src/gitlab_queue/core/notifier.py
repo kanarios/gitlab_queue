@@ -311,6 +311,13 @@ _Add label back to rejoin queue._
 """,
 }
 
+STATE_DESCRIPTIONS: dict[str, str] = {
+    "queued": "waiting in queue",
+    "rebasing": "being rebased",
+    "testing": "running pipeline",
+    "merging": "being merged",
+}
+
 
 # =============================================================================
 # MRNotifier Class
@@ -425,14 +432,8 @@ class MRNotifier:
 
         # Map previous_state to human-readable stage description
         if status == "removed_label":
-            state_descriptions = {
-                "queued": "waiting in queue",
-                "rebasing": "being rebased",
-                "testing": "running pipeline",
-                "merging": "being merged",
-            }
             raw_state = full_context.get("previous_state", "queued")
-            full_context["stage"] = state_descriptions.get(raw_state, raw_state)
+            full_context["stage"] = STATE_DESCRIPTIONS.get(raw_state, raw_state)
 
         # Format job_retry specific fields
         if status == "job_retry":
