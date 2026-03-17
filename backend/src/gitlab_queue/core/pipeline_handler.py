@@ -379,7 +379,7 @@ class PipelineHandler:
         sm = ctx.state_machine
 
         # Check termination conditions
-        result = await self.check_pipeline_termination_conditions(ctx, sm, timeout, state.start_time)
+        result = await self.check_pipeline_termination_conditions(ctx, sm, timeout, state.start_time, state)
         if result is not None:
             return result
 
@@ -485,8 +485,16 @@ class PipelineHandler:
         sm: StateMachineProtocol,
         timeout: timedelta,
         start_time: datetime,
+        state: PipelineWaitState | None = None,
     ) -> ProcessingResult | None:
-        """Check if pipeline wait should terminate early."""
+        """Check if pipeline wait should terminate early.
+
+        Args:
+            state: Pipeline wait state. Optional for backward compatibility
+                with callers that only need shutdown/label-removed checks.
+                When provided, enables last-chance timeout rescue for
+                pipelines that already have a terminal status.
+        """
         mr_iid = ctx.mr_iid
 
         if self.shutdown_event.is_set():
@@ -495,6 +503,19 @@ class PipelineHandler:
 
         elapsed = datetime.now(UTC) - start_time
         if elapsed > timeout:
+            if state is not None and not state.timeout_last_chance_used:
+                # Extra API call here; _process_pipeline_iteration will call
+                # get_latest_mr_pipeline again on the next loop iteration.
+                # Acceptable: this path runs at most once per pipeline wait.
+                pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
+                if pipeline and pipeline.status in ("failed", "canceled", "canceling"):
+                    log.info(
+                        "Timeout reached but pipeline has terminal status, giving last chance",
+                        mr_iid=mr_iid,
+                        pipeline_status=pipeline.status,
+                    )
+                    state.timeout_last_chance_used = True
+                    return None
             log.warning("Pipeline timeout", mr_iid=mr_iid, elapsed_seconds=elapsed.total_seconds())
             hours = max(1, int(timeout.total_seconds() / 3600))
             await sm.trigger_timeout(max_wait_hours=hours)
@@ -559,6 +580,22 @@ class PipelineHandler:
 
         return StaleCheckResult.OK
 
+    async def _get_canceled_pipeline_failed_jobs(
+        self,
+        mr_iid: int,
+        pipeline: Pipeline,
+    ) -> list[str]:
+        """Fetch job names that caused pipeline cancellation.
+
+        Returns list of failed/canceled job names, or empty list on API error.
+        """
+        try:
+            all_jobs = await self.gitlab_client.get_pipeline_jobs(pipeline.id)
+        except GitLabAPIError:
+            log.warning("Failed to fetch jobs for canceled pipeline", mr_iid=mr_iid, exc_info=True)
+            return []
+        return [j.name for j in all_jobs if j.status in ("failed", "canceled")]
+
     async def handle_pipeline_status(
         self,
         ctx: ProcessingContext,
@@ -598,11 +635,20 @@ class PipelineHandler:
             return ProcessingResult.SUCCESS
 
         if pipeline.status == "canceled":
-            log.warning("Pipeline canceled, removing MR from queue", mr_iid=mr_iid)
+            failed_job_names = await self._get_canceled_pipeline_failed_jobs(mr_iid, pipeline)
+            if failed_job_names:
+                error_message = f"Pipeline canceled due to failed jobs: {', '.join(failed_job_names)}"
+            else:
+                error_message = "Pipeline was canceled"
+            log.warning(
+                "Pipeline canceled",
+                mr_iid=mr_iid,
+                failed_jobs=failed_job_names,
+            )
             await sm.trigger_pipeline_failed(
-                failed_jobs=[],
+                failed_jobs=failed_job_names,
                 retried_jobs=retried_jobs,
-                error_message="Pipeline was canceled",
+                error_message=error_message,
             )
             return ProcessingResult.PIPELINE_FAILED
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 
 from d42 import fake
@@ -49,6 +50,11 @@ def create_gitlab_client_with_transport(
         >>> await client.close()
     """
     transport = GitLabMockTransport()
+    # Register default empty response for get_mr_pipelines (used by _handle_canceled)
+    transport.register_get(
+        re.compile(r"/merge_requests/\d+/pipelines"),
+        json_data=[],
+    )
     settings = created_test_settings(project_id=project_id)
     client = GitLabClient(settings, transport=transport)
     return client, transport
@@ -117,6 +123,7 @@ def create_queue_item_in_state(
     retry_count: int = 0,
     mr_iid: int | None = None,
     pipeline_id: int | None = None,
+    expected_sha: str | None = None,
 ) -> QueueItem:
     """Create a QueueItem in the specified state.
 
@@ -127,6 +134,7 @@ def create_queue_item_in_state(
         retry_count: Number of retry attempts.
         mr_iid: MR IID (generated if not provided).
         pipeline_id: Pipeline ID associated with the queue item.
+        expected_sha: Expected SHA for pipeline validation.
     """
     item_data = fake(QueueItemSchema % {"state": state})
     actual_mr_iid = mr_iid if mr_iid is not None else item_data["mr_iid"]
@@ -141,4 +149,5 @@ def create_queue_item_in_state(
         queued_at=datetime.now(UTC),
         retry_count=retry_count,
         pipeline_id=pipeline_id,
+        expected_sha=expected_sha,
     )

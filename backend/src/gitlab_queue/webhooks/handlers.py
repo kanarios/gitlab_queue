@@ -673,6 +673,30 @@ class PipelineWebhookHandler:
             return None
 
         if queue_item.pipeline_id is not None and queue_item.pipeline_id != pipeline_id:
+            # Check if incoming pipeline is a valid newer replacement
+            pipeline_sha = event.object_attributes.sha
+            if (
+                queue_item.expected_sha is not None
+                and pipeline_sha is not None
+                and pipeline_sha == queue_item.expected_sha
+                and pipeline_id > queue_item.pipeline_id
+            ):
+                log.info(
+                    f"Switching to newer pipeline via {event_type} webhook",
+                    mr_iid=mr_iid,
+                    old_pipeline_id=queue_item.pipeline_id,
+                    new_pipeline_id=pipeline_id,
+                )
+                await self.queue_manager.update_mr_state(
+                    mr_iid,
+                    queue_item.state,
+                    pipeline_id=pipeline_id,
+                    retried_jobs={},
+                )
+                # Re-fetch updated queue item
+                queue_item = await self.queue_manager.get_queue_item(mr_iid)
+                return queue_item
+
             log.debug(
                 f"Ignoring pipeline {event_type} for old pipeline",
                 mr_iid=mr_iid,
@@ -830,20 +854,43 @@ class PipelineWebhookHandler:
             )
             return
 
-        current_retry_count = fresh_item.get_max_job_retry_count()
+        # Check if a newer pipeline exists before marking as failed
+        newer_pipelines = []
+        if fresh_item.expected_sha is not None:
+            all_pipelines = await self.gitlab_client.get_mr_pipelines(mr_iid)
+            newer_pipelines = [
+                p
+                for p in all_pipelines
+                if p.id > pipeline_id and p.sha is not None and p.sha == fresh_item.expected_sha
+            ]
 
-        # Mark pipeline as failed; processor handles retry logic
-        log.info(
-            "Pipeline canceled, marking as failed",
-            mr_iid=mr_iid,
-            pipeline_id=pipeline_id,
-            retry_count=current_retry_count,
-        )
-        await self.queue_manager.update_mr_state(
-            mr_iid,
-            "testing",
-            pipeline_status="failed",
-        )
+        if newer_pipelines:
+            best = max(newer_pipelines, key=lambda p: p.id)
+            log.info(
+                "Canceled pipeline has newer replacement, switching",
+                mr_iid=mr_iid,
+                old_pipeline_id=pipeline_id,
+                new_pipeline_id=best.id,
+            )
+            await self.queue_manager.update_mr_state(
+                mr_iid,
+                "testing",
+                pipeline_id=best.id,
+                retried_jobs={},
+            )
+        else:
+            current_retry_count = fresh_item.get_max_job_retry_count()
+            log.info(
+                "Pipeline canceled, no replacement found, marking as failed",
+                mr_iid=mr_iid,
+                pipeline_id=pipeline_id,
+                retry_count=current_retry_count,
+            )
+            await self.queue_manager.update_mr_state(
+                mr_iid,
+                "testing",
+                pipeline_status="failed",
+            )
 
 
 @dataclass

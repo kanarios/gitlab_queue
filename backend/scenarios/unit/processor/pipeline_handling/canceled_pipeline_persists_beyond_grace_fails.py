@@ -1,7 +1,8 @@
 """Test canceled pipeline beyond grace period triggers failure.
 
 If the pipeline stays canceled for more than 3 consecutive polls,
-the grace period expires and pipeline_failed is triggered as usual.
+the grace period expires and pipeline_failed is triggered with
+failed/canceled job names.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ import vedro
 
 from gitlab_queue.core.processor import ProcessingResult
 from gitlab_queue.core.types import RebaseCheckOutcome
-from scenarios.fakes import FakeGitLabClient, FakeQueueManager
+from scenarios.fakes import FakeGitLabClient, FakeQueueManager, create_job
 
 from .._helpers import (
     create_mock_pipeline,
@@ -24,37 +25,46 @@ from .._helpers import (
 )
 
 
+async def _no_rebase(*args, **kwargs):
+    return RebaseCheckOutcome(
+        context=None,
+        result=None,
+        last_check=datetime.now(UTC),
+        should_reset=False,
+    )
+
+
+async def _instant_sleep(seconds):
+    return True
+
+
 class Scenario(vedro.Scenario):
     subject = "canceled pipeline persists beyond grace period and triggers failure"
 
-    def given_handler_with_persistent_canceled_pipeline(self):
-        canceled_pipelines = [create_mock_pipeline(pipeline_id=100, sha="abc123", status="canceled") for _ in range(4)]
+    def given_gitlab_client_with_persistent_canceled_pipeline(self):
+        self.gitlab_client = FakeGitLabClient()
+        self.gitlab_client.latest_pipeline_sequence = [
+            create_mock_pipeline(pipeline_id=100, sha="abc123", status="canceled") for _ in range(4)
+        ]
+        self.gitlab_client.pipeline_jobs_response = [
+            create_job(id=1, name="e2e-tests 1/12", status="failed"),
+            create_job(id=2, name="lint", status="success"),
+        ]
 
-        gitlab_client = FakeGitLabClient()
-        gitlab_client.latest_pipeline_sequence = canceled_pipelines
+    def given_queue_with_testing_mr(self):
+        self.queue_manager = FakeQueueManager()
+        self.queue_manager.add_item(create_test_queue_item(mr_iid=42, state="testing"))
 
-        queue_manager = FakeQueueManager()
-        queue_manager.add_item(create_test_queue_item(mr_iid=42, state="testing"))
-
-        async def fake_rebase(*args, **kwargs):
-            return RebaseCheckOutcome(
-                context=None,
-                result=None,
-                last_check=datetime.now(UTC),
-                should_reset=False,
-            )
-
-        async def fake_sleep(seconds):
-            return True
-
+    def given_pipeline_handler(self):
         self.handler = create_test_pipeline_handler(
-            gitlab_client=gitlab_client,
-            queue_manager=queue_manager,
+            gitlab_client=self.gitlab_client,
+            queue_manager=self.queue_manager,
             settings=create_mock_settings(),
-            rebase_check_fn=fake_rebase,
-            sleep_fn=fake_sleep,
+            rebase_check_fn=_no_rebase,
+            sleep_fn=_instant_sleep,
         )
 
+    def given_processing_context(self):
         self.sm = create_mock_state_machine()
         self.ctx = create_processing_context(mr_iid=42, state_machine=self.sm)
 
@@ -64,7 +74,10 @@ class Scenario(vedro.Scenario):
     def then_result_is_pipeline_failed(self):
         assert self.result == ProcessingResult.PIPELINE_FAILED
 
-    def and_pipeline_failed_was_called_with_canceled_message(self):
-        assert len(self.sm.pipeline_failed_calls) == 1
+    def and_error_message_mentions_canceled(self):
         call = self.sm.pipeline_failed_calls[0]
         assert "canceled" in call["error_message"].lower()
+
+    def and_error_message_contains_job_name(self):
+        call = self.sm.pipeline_failed_calls[0]
+        assert "e2e-tests 1/12" in call["error_message"]
