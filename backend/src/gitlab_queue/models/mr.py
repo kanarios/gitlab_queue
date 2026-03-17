@@ -53,6 +53,7 @@ class MergeRequest:
     rebase_in_progress: bool = False
     web_url: str | None = None
     merge_error: str | None = None
+    detailed_merge_status: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -195,7 +195,9 @@ class Settings:
     # Timing
     poll_interval_seconds: int = var(default=30, converter=int)
     pipeline_poll_interval_seconds: int = var(default=5, converter=int)  # 5 seconds for responsive pipeline checks
-    pipeline_timeout_seconds: int = var(default=7200, converter=int)  # 2 hours
+    pipeline_timeout_seconds: int = var(
+        default=9000, converter=int
+    )  # 2.5 hours (30min buffer over typical 2h job timeout)
     rebase_timeout_seconds: int = var(default=300, converter=int)  # 5 minutes
     post_rebase_pipeline_wait_seconds: int = var(default=90, converter=int)  # 90 seconds
     stale_mr_warning_hours: int = var(default=24, converter=int)  # 24 hours

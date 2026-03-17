@@ -129,6 +129,7 @@ def parse_merge_request(data: dict[str, Any]) -> MergeRequest:
         rebase_in_progress=data.get("rebase_in_progress", False),
         web_url=data.get("web_url"),
         merge_error=data.get("merge_error"),
+        detailed_merge_status=data.get("detailed_merge_status"),
     )
 
 

@@ -40,6 +40,7 @@ class PipelineWaitState:
     last_rebase_check: datetime
     rebase_handler: RebaseDuringTestingHandler
     canceled_seen_count: int = 0
+    timeout_last_chance_used: bool = False
 
 
 def create_pipeline_wait_state(

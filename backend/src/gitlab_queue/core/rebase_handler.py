@@ -269,6 +269,23 @@ class RebaseHandler:
                             skip_count=stale_skip_count,
                         )
                         return PollStatus.DONE, (pipeline, new_sha)
+                    # When pipeline matches old_pipeline_id and is non-terminal,
+                    # check if GitLab created a newer pipeline (re-processing case)
+                    if old_pipeline_id is not None and pipeline.id == old_pipeline_id:
+                        all_pipelines = await self.gitlab_client.get_mr_pipelines(mr_iid)
+                        newer = [p for p in all_pipelines if p.sha == new_sha and p.id > old_pipeline_id]
+                        if newer:
+                            best = max(newer, key=lambda p: p.id)
+                            log.info(
+                                "Found newer pipeline in fast-forward re-processing",
+                                mr_iid=mr_iid,
+                                old_pipeline_id=old_pipeline_id,
+                                new_pipeline_id=best.id,
+                                new_status=best.status,
+                            )
+                            return PollStatus.DONE, (best, new_sha)
+                        # No newer pipeline: first-processing case, accept as-is
+
                     return PollStatus.DONE, (pipeline, new_sha)
                 # No valid pipeline in fast-forward case: create one (GitLab won't create it automatically)
                 log.info(

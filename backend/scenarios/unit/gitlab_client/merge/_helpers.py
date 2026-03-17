@@ -8,9 +8,10 @@ def create_mr_response(
     state: str = "opened",
     merge_status: str = "can_be_merged",
     has_conflicts: bool = False,
+    detailed_merge_status: str | None = None,
 ) -> dict:
     """Create a GitLab MR API response for merge testing."""
-    return {
+    result = {
         "iid": iid,
         "title": "Test MR",
         "state": state,
@@ -27,3 +28,6 @@ def create_mr_response(
             "username": "testuser",
         },
     }
+    if detailed_merge_status is not None:
+        result["detailed_merge_status"] = detailed_merge_status
+    return result

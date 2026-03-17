@@ -76,6 +76,27 @@ _SENSITIVE_KEYS = frozenset(
 )
 
 
+# GitLab detailed_merge_status values that indicate a non-retryable merge block.
+# When merge API returns 405/422 and the MR has one of these statuses,
+# retrying is pointless — the user must resolve the issue first.
+_NON_RETRYABLE_MERGE_STATUSES: dict[str, str] = {
+    "discussions_not_resolved": "unresolved discussions prevent merge",
+    "not_approved": "missing required approvals",
+    "draft_status": "MR is in Draft status",
+    "blocked_status": "MR is blocked by another MR",
+    "jira_association_missing": "missing Jira association",
+    "conflict": "merge conflicts detected",
+    "need_rebase": "rebase required",
+}
+
+
+def _get_merge_block_reason(detailed_merge_status: str | None) -> str | None:
+    """Return a human-readable block reason if status is non-retryable, else None."""
+    if detailed_merge_status is None:
+        return None
+    return _NON_RETRYABLE_MERGE_STATUSES.get(detailed_merge_status)
+
+
 def _sanitize_response_body(body: dict[str, Any] | str | None) -> dict[str, Any] | str | None:
     """Sanitize response body by redacting sensitive keys.
 
@@ -1270,6 +1291,49 @@ class GitLabClient:
         log.info("MR merged successfully", mr_iid=merged_mr.iid, state=merged_mr.state)
         return merged_mr
 
+    async def _handle_merge_api_error(
+        self,
+        error: GitLabAPIError,
+        iid: int,
+        mr: MergeRequest,
+        attempt: int,
+        retry_delay: float,
+    ) -> bool:
+        """Handle merge API error, deciding whether to retry.
+
+        Returns:
+            True if the caller should retry, False if it should re-raise.
+
+        Raises:
+            GitLabConflictError: If the merge is blocked by a non-retryable condition.
+        """
+        if error.status_code not in (405, 422) or mr.has_conflicts:
+            log.exception("Failed to merge MR", mr_iid=iid)
+            return False
+
+        block_reason = _get_merge_block_reason(mr.detailed_merge_status)
+        if block_reason is not None:
+            log.warning(
+                "Merge blocked by non-retryable condition",
+                mr_iid=iid,
+                detailed_merge_status=mr.detailed_merge_status,
+                reason=block_reason,
+            )
+            raise GitLabConflictError(
+                f"MR !{iid} cannot be merged: {block_reason}",
+                status_code=error.status_code,
+            ) from error
+
+        log.info(
+            "Merge API returned error, retrying",
+            mr_iid=iid,
+            status_code=error.status_code,
+            attempt=attempt,
+            error=str(error),
+        )
+        await self._sleep_fn(retry_delay)
+        return True
+
     async def merge_mr(self, iid: int, *, expected_sha: str | None = None) -> MergeRequest:
         """Merge a merge request using fast-forward strategy.
 
@@ -1319,17 +1383,9 @@ class GitLabClient:
             try:
                 return await self._execute_merge(iid)
             except GitLabAPIError as e:
-                if e.status_code in (405, 422) and not mr.has_conflicts:
-                    log.info(
-                        "Merge API returned error, retrying",
-                        mr_iid=iid,
-                        status_code=e.status_code,
-                        attempt=attempt + 1,
-                        error=str(e),
-                    )
-                    await self._sleep_fn(retry_delay)
+                should_retry = await self._handle_merge_api_error(e, iid, mr, attempt + 1, retry_delay)
+                if should_retry:
                     continue
-                log.exception("Failed to merge MR", mr_iid=iid)
                 raise
 
         log.warning("Merge status check timeout", mr_iid=iid, merge_status="checking", attempts=max_retries)

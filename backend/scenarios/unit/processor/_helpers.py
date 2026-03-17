@@ -176,6 +176,7 @@ def create_pipeline_wait_state(
     retried_jobs: dict[str, int] | None = None,
     last_rebase_check: datetime | None = None,
     start_time: datetime | None = None,
+    timeout_last_chance_used: bool = False,
 ) -> PipelineWaitState:
     """Create a PipelineWaitState for tests with sensible defaults."""
     return PipelineWaitState(
@@ -184,6 +185,7 @@ def create_pipeline_wait_state(
         rebase_ctx=rebase_ctx or RebaseDuringTestingContext(max_attempts=3),
         last_rebase_check=last_rebase_check or datetime.now(UTC),
         rebase_handler=rebase_handler or FakeRebaseDuringTestingHandler(),
+        timeout_last_chance_used=timeout_last_chance_used,
     )
 
 
