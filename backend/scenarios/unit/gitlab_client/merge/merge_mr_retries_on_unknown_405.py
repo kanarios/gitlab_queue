@@ -25,7 +25,7 @@ class Scenario(vedro.Scenario):
         mr_data = create_mr_response(
             iid=42,
             merge_status="can_be_merged",
-            # No detailed_merge_status → retryable
+            detailed_merge_status="some_unknown_status",
         )
         self.transport = GitLabMockTransport()
         self.transport.register_get(
