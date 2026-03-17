@@ -83,7 +83,7 @@ _NON_RETRYABLE_MERGE_STATUSES: dict[str, str] = {
     "discussions_not_resolved": "unresolved discussions prevent merge",
     "not_approved": "missing required approvals",
     "draft_status": "MR is in Draft status",
-    "blocked_status": "MR is blocked by another MR",
+    "merge_request_blocked": "MR is blocked by another MR",
     "jira_association_missing": "missing Jira association",
     "conflict": "merge conflicts detected",
     "need_rebase": "rebase required",

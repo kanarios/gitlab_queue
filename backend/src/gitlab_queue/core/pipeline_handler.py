@@ -591,7 +591,7 @@ class PipelineHandler:
         """
         try:
             all_jobs = await self.gitlab_client.get_pipeline_jobs(pipeline.id)
-        except Exception:
+        except GitLabAPIError:
             log.warning("Failed to fetch jobs for canceled pipeline", mr_iid=mr_iid, exc_info=True)
             return []
         return [j.name for j in all_jobs if j.status in ("failed", "canceled")]

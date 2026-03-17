@@ -7,6 +7,7 @@ the client should retry as before (regression test for existing behavior).
 from __future__ import annotations
 
 import vedro
+from vedro import catched
 
 from gitlab_queue.clients.gitlab import GitLabClient, GitLabConflictError
 from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, created_test_settings
@@ -36,20 +37,18 @@ class Scenario(vedro.Scenario):
             status=405,
             json_data={"message": "405 Method Not Allowed"},
         )
-        settings = created_test_settings()
-        settings.merge_status_retry_max = MERGE_STATUS_RETRY_MAX
-        settings.merge_status_retry_delay_seconds = 0.01
+        settings = created_test_settings(
+            merge_status_retry_max=MERGE_STATUS_RETRY_MAX,
+            merge_status_retry_delay_seconds=0.01,
+        )
         self.client = GitLabClient(settings, transport=self.transport)
 
     async def when_merge_mr_is_called(self):
-        self.error = None
-        try:
+        with catched(GitLabConflictError) as self.exc_info:
             await self.client.merge_mr(42)
-        except GitLabConflictError as e:
-            self.error = e
 
     def then_error_should_be_raised(self):
-        assert self.error is not None
+        assert self.exc_info.type is GitLabConflictError
 
     def then_multiple_merge_attempts_were_made(self):
         put_requests = [r for r in self.transport.history if r.method == "PUT"]

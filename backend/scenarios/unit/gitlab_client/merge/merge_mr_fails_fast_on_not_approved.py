@@ -7,6 +7,7 @@ the client should raise GitLabConflictError immediately instead of retrying.
 from __future__ import annotations
 
 import vedro
+from vedro import catched
 
 from gitlab_queue.clients.gitlab import GitLabConflictError
 from scenarios.contexts.gitlab_client_factory import TEST_PROJECT_ID, created_test_client
@@ -37,17 +38,14 @@ class Scenario(vedro.Scenario):
         self.client = created_test_client(transport=self.transport)
 
     async def when_merge_mr_is_called(self):
-        self.error = None
-        try:
+        with catched(GitLabConflictError) as self.exc_info:
             await self.client.merge_mr(42)
-        except GitLabConflictError as e:
-            self.error = e
 
     def then_error_should_be_raised(self):
-        assert self.error is not None
+        assert self.exc_info.type is GitLabConflictError
 
     def then_error_message_should_mention_approvals(self):
-        assert "missing required approvals" in str(self.error)
+        assert "missing required approvals" in str(self.exc_info.value)
 
     def then_only_one_merge_attempt_was_made(self):
         put_requests = [r for r in self.transport.history if r.method == "PUT"]

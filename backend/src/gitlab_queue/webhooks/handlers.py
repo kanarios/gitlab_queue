@@ -855,15 +855,14 @@ class PipelineWebhookHandler:
             return
 
         # Check if a newer pipeline exists before marking as failed
-        all_pipelines = await self.gitlab_client.get_mr_pipelines(mr_iid)
-        newer_pipelines = [
-            p
-            for p in all_pipelines
-            if p.id > pipeline_id
-            and fresh_item.expected_sha is not None
-            and p.sha is not None
-            and p.sha == fresh_item.expected_sha
-        ]
+        newer_pipelines = []
+        if fresh_item.expected_sha is not None:
+            all_pipelines = await self.gitlab_client.get_mr_pipelines(mr_iid)
+            newer_pipelines = [
+                p
+                for p in all_pipelines
+                if p.id > pipeline_id and p.sha is not None and p.sha == fresh_item.expected_sha
+            ]
 
         if newer_pipelines:
             best = max(newer_pipelines, key=lambda p: p.id)

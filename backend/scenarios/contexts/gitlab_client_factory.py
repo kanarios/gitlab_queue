@@ -61,6 +61,8 @@ def created_test_settings(
     webhook_port: int = 8080,
     cors_origins: list[str] | None = None,
     dashboard_enabled: bool = True,
+    merge_status_retry_max: int = 24,
+    merge_status_retry_delay_seconds: float = 5.0,
 ) -> Settings:
     """Create test settings for GitLab client.
 
@@ -87,6 +89,8 @@ def created_test_settings(
         webhook_port: Webhook server port (default: 8080).
         cors_origins: CORS origins list (default: ["http://localhost:5173"]).
         dashboard_enabled: Enable dashboard (default: True).
+        merge_status_retry_max: Max merge status retries (default: 24).
+        merge_status_retry_delay_seconds: Delay between merge retries (default: 5.0).
 
     Returns:
         Settings instance configured for testing with all required fields.
@@ -119,6 +123,8 @@ def created_test_settings(
         oauth_redirect_uri=oauth_redirect_uri,
         cors_origins=cors_origins if cors_origins is not None else ["http://localhost:5173"],
         dashboard_enabled=dashboard_enabled,
+        merge_status_retry_max=merge_status_retry_max,
+        merge_status_retry_delay_seconds=merge_status_retry_delay_seconds,
     )
     return settings
 
