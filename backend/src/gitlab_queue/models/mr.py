@@ -38,6 +38,9 @@ class MergeRequest:
         has_conflicts: Whether MR has merge conflicts
         rebase_in_progress: Whether rebase is currently running
         web_url: URL to the MR in GitLab UI
+        merge_error: Error message if the last merge attempt failed, e.g. "Rebase failed"
+        detailed_merge_status: Granular merge readiness status from GitLab API (v15.6+),
+            e.g. "mergeable", "checking", "need_rebase", "broken_status"
     """
 
     iid: int
