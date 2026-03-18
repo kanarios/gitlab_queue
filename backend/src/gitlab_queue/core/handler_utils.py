@@ -56,7 +56,18 @@ async def verify_mr_in_queue(
         mr = await gitlab_client.get_mr(mr_iid)
 
         if mr.state != "opened":
-            log.info("MR is no longer open", mr_iid=mr_iid, state=mr.state)
+            if mr.state == "merged":
+                log.info(
+                    "Removing merge_queue label after external merge",
+                    mr_iid=mr_iid,
+                    reason="external_merge",
+                )
+                try:
+                    await gitlab_client.remove_mr_label(mr_iid, settings.queue_label)
+                except Exception:
+                    log.warning("Failed to remove queue label after external merge", mr_iid=mr_iid)
+            else:
+                log.info("MR is no longer open", mr_iid=mr_iid, state=mr.state)
             return False
 
         if settings.queue_label not in mr.labels and settings.hotfix_label not in mr.labels:

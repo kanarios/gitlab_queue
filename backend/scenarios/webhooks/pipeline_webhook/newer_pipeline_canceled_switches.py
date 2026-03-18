@@ -60,5 +60,8 @@ class Scenario(vedro.Scenario):
         switch_calls = [c for c in self.queue_manager.update_state_calls if c.get("pipeline_id") == NEW_PIPELINE_ID]
         assert len(switch_calls) >= 1
 
+    def and_no_failure_was_triggered(self):
+        assert not any(c.get("state") == "failed" for c in self.queue_manager.update_state_calls)
+
     async def cleanup(self):
         await self.gitlab_client.close()
