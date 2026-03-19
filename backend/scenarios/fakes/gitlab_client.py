@@ -20,6 +20,7 @@ class FakeGitLabClient:
     mr_response_sequence: list[MergeRequest] = field(default_factory=list)
     pipeline_responses: dict[int, Pipeline] = field(default_factory=dict)
     mr_pipelines_response: list[Pipeline] = field(default_factory=list)
+    mr_pipelines_response_sequence: list[list[Pipeline]] = field(default_factory=list)
     latest_pipeline_response: Pipeline | None = None
     pipeline_jobs_response: list[Job] | Exception = field(default_factory=list)
     pipeline_jobs_response_sequence: list[list[Job]] = field(default_factory=list)
@@ -132,6 +133,8 @@ class FakeGitLabClient:
         return create_mr(iid=iid)
 
     async def get_mr_pipelines(self, iid: int) -> list[Pipeline]:
+        if self.mr_pipelines_response_sequence:
+            return self.mr_pipelines_response_sequence.pop(0)
         return self.mr_pipelines_response
 
     async def get_latest_mr_pipeline(self, iid: int) -> Pipeline | None:

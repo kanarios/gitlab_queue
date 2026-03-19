@@ -284,7 +284,24 @@ class RebaseHandler:
                                 new_status=best.status,
                             )
                             return PollStatus.DONE, (best, new_sha)
-                        # No newer pipeline: first-processing case, accept as-is
+                        # No newer pipeline yet — grace period to let GitLab create one
+                        stale_skip_count += 1
+                        if stale_skip_count < STALE_PIPELINE_GRACE_POLLS:
+                            log.info(
+                                "Waiting for possible newer pipeline in fast-forward case",
+                                mr_iid=mr_iid,
+                                pipeline_id=pipeline.id,
+                                pipeline_status=pipeline.status,
+                                skip_count=stale_skip_count,
+                            )
+                            return PollStatus.CONTINUE, None
+                        log.info(
+                            "Accepting old pipeline after grace period (no newer found)",
+                            mr_iid=mr_iid,
+                            pipeline_id=pipeline.id,
+                            pipeline_status=pipeline.status,
+                            skip_count=stale_skip_count,
+                        )
 
                     return PollStatus.DONE, (pipeline, new_sha)
                 # No valid pipeline in fast-forward case: create one (GitLab won't create it automatically)
