@@ -402,6 +402,7 @@ class PipelineHandler:
         # Skip stale pipelines
         stale_check = await self.check_stale_pipeline(mr_iid, pipeline)
         if stale_check == StaleCheckResult.SKIP:
+            await self._try_recover_from_stale_skip(mr_iid, pipeline, state)
             return None
         if stale_check == StaleCheckResult.SWITCHED:
             await self.queue_manager.update_mr_state(
@@ -410,9 +411,7 @@ class PipelineHandler:
                 pipeline_id=pipeline.id,
                 retried_jobs={},
             )
-            state.start_time = datetime.now(UTC)
-            state.retried_jobs = {}
-            state.canceled_seen_count = 0
+            self._reset_pipeline_wait_state(state)
             return None
 
         # Grace period for transient canceled status (e.g. after retry_pipeline)
@@ -454,6 +453,50 @@ class PipelineHandler:
         if outcome.context is not None:
             state.rebase_ctx = outcome.context
         return None
+
+    async def _try_recover_from_stale_skip(
+        self,
+        mr_iid: int,
+        pipeline: Pipeline,
+        state: PipelineWaitState,
+    ) -> None:
+        """Try to recover when stale-check skips a newer pipeline.
+
+        If the API returns a newer pipeline than our tracked one and the
+        tracked pipeline is dead (canceled/failed/canceling), force-switch
+        to the newer pipeline. This handles wrong pipeline binding after rebase.
+        """
+        queue_item = await self.queue_manager.get_queue_item(mr_iid)
+        if not (queue_item and queue_item.pipeline_id is not None and pipeline.id > queue_item.pipeline_id):
+            return
+
+        tracked = await self.gitlab_client.get_pipeline_status(queue_item.pipeline_id)
+        if tracked.status not in ("canceled", "failed", "canceling"):
+            return
+
+        log.info(
+            "Tracked pipeline is dead, switching to newer pipeline",
+            mr_iid=mr_iid,
+            old_pipeline_id=queue_item.pipeline_id,
+            old_status=tracked.status,
+            new_pipeline_id=pipeline.id,
+            new_sha=pipeline.sha,
+        )
+        await self.queue_manager.update_mr_state(
+            mr_iid,
+            "testing",
+            pipeline_id=pipeline.id,
+            expected_sha=pipeline.sha,
+            retried_jobs={},
+        )
+        self._reset_pipeline_wait_state(state)
+
+    @staticmethod
+    def _reset_pipeline_wait_state(state: PipelineWaitState) -> None:
+        """Reset pipeline wait state after switching to a new pipeline."""
+        state.start_time = datetime.now(UTC)
+        state.retried_jobs = {}
+        state.canceled_seen_count = 0
 
     @staticmethod
     def _apply_canceled_grace_period(
@@ -580,6 +623,47 @@ class PipelineHandler:
 
         return StaleCheckResult.OK
 
+    async def _try_switch_to_replacement_pipeline(self, mr_iid: int, pipeline: Pipeline) -> bool:
+        """Search for a replacement pipeline when current one is canceled.
+
+        Looks for a newer pipeline with matching expected_sha that is still
+        active (not canceled/failed). If found, switches queue state to it.
+
+        Returns:
+            True if a replacement was found and state was updated.
+        """
+        queue_item = await self.queue_manager.get_queue_item(mr_iid)
+        if not (queue_item and queue_item.expected_sha):
+            return False
+
+        all_pipelines = await self.gitlab_client.get_mr_pipelines(mr_iid)
+        replacements = [
+            p
+            for p in all_pipelines
+            if p.id > pipeline.id
+            and p.sha is not None
+            and p.sha == queue_item.expected_sha
+            and p.status not in ("canceled", "failed")
+        ]
+        if not replacements:
+            return False
+
+        best = max(replacements, key=lambda p: p.id)
+        log.info(
+            "Canceled pipeline has replacement, switching in poller",
+            mr_iid=mr_iid,
+            old_pipeline_id=pipeline.id,
+            new_pipeline_id=best.id,
+            new_status=best.status,
+        )
+        await self.queue_manager.update_mr_state(
+            mr_iid,
+            "testing",
+            pipeline_id=best.id,
+            retried_jobs={},
+        )
+        return True
+
     async def _get_canceled_pipeline_failed_jobs(
         self,
         mr_iid: int,
@@ -635,6 +719,11 @@ class PipelineHandler:
             return ProcessingResult.SUCCESS
 
         if pipeline.status == "canceled":
+            # Search for replacement pipeline before failing (defense-in-depth)
+            if await self._try_switch_to_replacement_pipeline(mr_iid, pipeline):
+                return None  # Continue polling with replacement
+
+            # No replacement found — fail as before
             failed_job_names = await self._get_canceled_pipeline_failed_jobs(mr_iid, pipeline)
             if failed_job_names:
                 error_message = f"Pipeline canceled due to failed jobs: {', '.join(failed_job_names)}"
