@@ -430,6 +430,7 @@ class MergeRequestRepository:
 
         # Create history record
         history = MergeRequestHistoryModel(
+            project_id=mr.project_id,
             iid=mr.iid,
             title=mr.title,
             author_name=mr.author_name,

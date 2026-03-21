@@ -96,7 +96,8 @@ CREATE TABLE IF NOT EXISTS merge_requests_history (
     pipeline_status TEXT,
     pipeline_duration_seconds INTEGER,
     pipeline_failed_jobs TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(project_id, iid)
 )
 """
 
@@ -110,7 +111,6 @@ _CREATE_INDEXES_SQL = [
 _CREATE_HISTORY_INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_history_finished_at ON merge_requests_history(finished_at)",
     "CREATE INDEX IF NOT EXISTS idx_history_status ON merge_requests_history(status)",
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_history_project_iid_unique ON merge_requests_history(project_id, iid)",
 ]
 
 _INSERT_MR_SQL = """
