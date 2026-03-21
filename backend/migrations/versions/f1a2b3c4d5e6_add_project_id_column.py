@@ -26,6 +26,13 @@ down_revision: str | None = "e9a1b2c3d4f5"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+# Naming convention for resolving unnamed constraints in SQLite batch mode.
+# PostgreSQL auto-names constraints (e.g. 'table_col_key'), but SQLite leaves
+# them unnamed. This convention lets Alembic batch mode find and drop them.
+_NAMING_CONVENTION = {
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+}
+
 
 def _has_column(inspector: sa.Inspector, table: str, column: str) -> bool:
     """Check if a column exists in a table."""
@@ -41,13 +48,34 @@ def _table_exists(inspector: sa.Inspector, table: str) -> bool:
 def _find_unique_constraint_name(inspector: sa.Inspector, table: str, columns: list[str]) -> str | None:
     """Find the name of a unique constraint on the given columns.
 
-    Works across dialects (PostgreSQL auto-names like 'table_col_key',
-    SQLite may leave them unnamed). Returns None if not found.
+    PostgreSQL returns real names (e.g. 'merge_requests_iid_key').
+    SQLite returns None for unnamed constraints.
     """
     for constraint in inspector.get_unique_constraints(table):
         if constraint["column_names"] == columns:
             return constraint.get("name")
     return None
+
+
+def _drop_unique_and_replace(
+    batch_op: sa.Any,
+    inspector: sa.Inspector,
+    table: str,
+    old_columns: list[str],
+    new_constraint_name: str,
+    new_columns: list[str],
+) -> None:
+    """Drop old unique constraint and create a new composite one.
+
+    Uses inspector to find the actual constraint name (PostgreSQL),
+    falls back to naming_convention-generated name (SQLite batch mode).
+    """
+    real_name = _find_unique_constraint_name(inspector, table, old_columns)
+    # real_name is set for PostgreSQL; for SQLite it's None but naming_convention
+    # (passed to batch_alter_table) lets Alembic resolve it by column pattern.
+    drop_name = real_name or f"uq_{table}_{old_columns[0]}"
+    batch_op.drop_constraint(drop_name, type_="unique")
+    batch_op.create_unique_constraint(new_constraint_name, new_columns)
 
 
 def upgrade() -> None:
@@ -57,12 +85,11 @@ def upgrade() -> None:
 
     # --- merge_requests ---
     if _table_exists(inspector, "merge_requests") and not _has_column(inspector, "merge_requests", "project_id"):
-        uq_name = _find_unique_constraint_name(inspector, "merge_requests", ["iid"])
-        with op.batch_alter_table("merge_requests", schema=None) as batch_op:
+        with op.batch_alter_table("merge_requests", schema=None, naming_convention=_NAMING_CONVENTION) as batch_op:
             batch_op.add_column(sa.Column("project_id", sa.Integer(), nullable=False, server_default="0"))
-            if uq_name:
-                batch_op.drop_constraint(uq_name, type_="unique")
-            batch_op.create_unique_constraint("uq_mr_project_iid", ["project_id", "iid"])
+            _drop_unique_and_replace(
+                batch_op, inspector, "merge_requests", ["iid"], "uq_mr_project_iid", ["project_id", "iid"]
+            )
             batch_op.create_index("idx_mr_project_id", ["project_id"])
 
     # --- merge_requests_history ---
@@ -85,12 +112,11 @@ def upgrade() -> None:
 
     # --- analytics_daily ---
     if _table_exists(inspector, "analytics_daily") and not _has_column(inspector, "analytics_daily", "project_id"):
-        uq_name = _find_unique_constraint_name(inspector, "analytics_daily", ["date"])
-        with op.batch_alter_table("analytics_daily", schema=None) as batch_op:
+        with op.batch_alter_table("analytics_daily", schema=None, naming_convention=_NAMING_CONVENTION) as batch_op:
             batch_op.add_column(sa.Column("project_id", sa.Integer(), nullable=False, server_default="0"))
-            if uq_name:
-                batch_op.drop_constraint(uq_name, type_="unique")
-            batch_op.create_unique_constraint("uq_daily_project_date", ["project_id", "date"])
+            _drop_unique_and_replace(
+                batch_op, inspector, "analytics_daily", ["date"], "uq_daily_project_date", ["project_id", "date"]
+            )
             batch_op.create_index("idx_daily_project_id", ["project_id"])
 
 
