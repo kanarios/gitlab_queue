@@ -43,5 +43,8 @@ class Scenario(vedro.Scenario):
         assert len(self.queue_manager.complete_calls) == 1
         assert self.queue_manager.complete_calls[0]["status"] == "merged"
 
+    def and_no_failure_reason_is_recorded(self):
+        assert self.queue_manager.complete_calls[0]["failure_reason"] is None
+
     def and_label_is_not_removed_again(self):
         assert self.notifier.remove_label_calls == []

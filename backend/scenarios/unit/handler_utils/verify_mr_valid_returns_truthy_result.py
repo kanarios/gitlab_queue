@@ -22,5 +22,8 @@ class Scenario(vedro.Scenario):
     async def when_verify_mr_in_queue_is_called(self):
         self.result = await verify_mr_in_queue(self.gitlab_client, self.settings, 42)
 
-    def then_result_is_valid(self):
+    def then_result_is_truthy(self):
+        assert self.result
+
+    def and_valid_attribute_is_true(self):
         assert self.result.valid is True
