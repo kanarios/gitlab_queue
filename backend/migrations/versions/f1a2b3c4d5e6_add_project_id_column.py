@@ -38,9 +38,16 @@ def _table_exists(inspector: sa.Inspector, table: str) -> bool:
     return table in inspector.get_table_names()
 
 
-_NAMING_CONVENTION = {
-    "uq": "uq_%(table_name)s_%(column_0_name)s",
-}
+def _find_unique_constraint_name(inspector: sa.Inspector, table: str, columns: list[str]) -> str | None:
+    """Find the name of a unique constraint on the given columns.
+
+    Works across dialects (PostgreSQL auto-names like 'table_col_key',
+    SQLite may leave them unnamed). Returns None if not found.
+    """
+    for constraint in inspector.get_unique_constraints(table):
+        if constraint["column_names"] == columns:
+            return constraint.get("name")
+    return None
 
 
 def upgrade() -> None:
@@ -50,10 +57,11 @@ def upgrade() -> None:
 
     # --- merge_requests ---
     if _table_exists(inspector, "merge_requests") and not _has_column(inspector, "merge_requests", "project_id"):
-        with op.batch_alter_table("merge_requests", schema=None, naming_convention=_NAMING_CONVENTION) as batch_op:
+        uq_name = _find_unique_constraint_name(inspector, "merge_requests", ["iid"])
+        with op.batch_alter_table("merge_requests", schema=None) as batch_op:
             batch_op.add_column(sa.Column("project_id", sa.Integer(), nullable=False, server_default="0"))
-            # Drop old unique constraint on iid (unnamed in SQLite, resolved via naming_convention)
-            batch_op.drop_constraint("uq_merge_requests_iid", type_="unique")
+            if uq_name:
+                batch_op.drop_constraint(uq_name, type_="unique")
             batch_op.create_unique_constraint("uq_mr_project_iid", ["project_id", "iid"])
             batch_op.create_index("idx_mr_project_id", ["project_id"])
 
@@ -63,7 +71,7 @@ def upgrade() -> None:
     ):
         with op.batch_alter_table("merge_requests_history", schema=None) as batch_op:
             batch_op.add_column(sa.Column("project_id", sa.Integer(), nullable=False, server_default="0"))
-            # Drop old unique index on iid, replace with composite
+            # idx_history_iid_unique is a named unique index (created in migration b8c5a3f12e47)
             batch_op.drop_index("idx_history_iid_unique")
             batch_op.create_unique_constraint("uq_history_project_iid", ["project_id", "iid"])
             batch_op.create_index("idx_history_project_id", ["project_id"])
@@ -77,10 +85,11 @@ def upgrade() -> None:
 
     # --- analytics_daily ---
     if _table_exists(inspector, "analytics_daily") and not _has_column(inspector, "analytics_daily", "project_id"):
-        with op.batch_alter_table("analytics_daily", schema=None, naming_convention=_NAMING_CONVENTION) as batch_op:
+        uq_name = _find_unique_constraint_name(inspector, "analytics_daily", ["date"])
+        with op.batch_alter_table("analytics_daily", schema=None) as batch_op:
             batch_op.add_column(sa.Column("project_id", sa.Integer(), nullable=False, server_default="0"))
-            # Drop old UNIQUE(date) — prevents multi-project data for the same date
-            batch_op.drop_constraint("uq_analytics_daily_date", type_="unique")
+            if uq_name:
+                batch_op.drop_constraint(uq_name, type_="unique")
             batch_op.create_unique_constraint("uq_daily_project_date", ["project_id", "date"])
             batch_op.create_index("idx_daily_project_id", ["project_id"])
 
@@ -92,10 +101,10 @@ def downgrade() -> None:
 
     # --- analytics_daily ---
     if _table_exists(inspector, "analytics_daily") and _has_column(inspector, "analytics_daily", "project_id"):
-        with op.batch_alter_table("analytics_daily", schema=None, naming_convention=_NAMING_CONVENTION) as batch_op:
+        with op.batch_alter_table("analytics_daily", schema=None) as batch_op:
             batch_op.drop_index("idx_daily_project_id")
             batch_op.drop_constraint("uq_daily_project_date", type_="unique")
-            batch_op.create_unique_constraint("uq_analytics_daily_date", ["date"])
+            batch_op.create_unique_constraint("analytics_daily_date_key", ["date"])
             batch_op.drop_column("project_id")
 
     # --- analytics_hourly ---
@@ -117,8 +126,8 @@ def downgrade() -> None:
 
     # --- merge_requests ---
     if _table_exists(inspector, "merge_requests") and _has_column(inspector, "merge_requests", "project_id"):
-        with op.batch_alter_table("merge_requests", schema=None, naming_convention=_NAMING_CONVENTION) as batch_op:
+        with op.batch_alter_table("merge_requests", schema=None) as batch_op:
             batch_op.drop_index("idx_mr_project_id")
             batch_op.drop_constraint("uq_mr_project_iid", type_="unique")
-            batch_op.create_unique_constraint("uq_merge_requests_iid", ["iid"])
+            batch_op.create_unique_constraint("merge_requests_iid_key", ["iid"])
             batch_op.drop_column("project_id")
