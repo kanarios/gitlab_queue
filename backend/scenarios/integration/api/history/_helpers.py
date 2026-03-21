@@ -21,6 +21,7 @@ def _queue_item_to_history_model(item: QueueItem) -> HistoryItemModel:
     """
     finished = item.finished_at or datetime.now(UTC)
     return HistoryItemModel(
+        project_id=item.project_id,
         iid=item.mr_iid,
         title=item.title,
         author_name=item.author_name,

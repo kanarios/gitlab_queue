@@ -60,7 +60,11 @@ def create_mock_database() -> tuple[FakeMockDatabase, _FakeSession, _FakeSession
     return db, db.session_obj, db.transaction_obj
 
 
-def create_test_mr(iid: int = 123, title: str = "Test MR") -> MergeRequest:
+def create_test_mr(
+    iid: int = 123,
+    title: str = "Test MR",
+    project_id: int = 99999,
+) -> MergeRequest:
     """Create a test MergeRequest."""
     return MergeRequest(
         iid=iid,
@@ -72,6 +76,7 @@ def create_test_mr(iid: int = 123, title: str = "Test MR") -> MergeRequest:
         target_branch="master",
         merge_status="can_be_merged",
         author=Author(id=1, name="Test User", username="testuser"),
+        project_id=project_id,
     )
 
 
@@ -79,9 +84,11 @@ def create_mock_row(
     iid: int = 123,
     status: str = QueueState.QUEUED,
     is_hotfix: int = 0,
+    project_id: int = 99999,
 ) -> dict:
     """Create a mock database row."""
     return {
+        "project_id": project_id,
         "iid": iid,
         "title": "Test MR",
         "author_name": "Test User",
