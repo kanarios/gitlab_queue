@@ -43,7 +43,7 @@ class Scenario(vedro.Scenario):
 
     def and_trigger_mark_removed_was_called(self):
         assert len(self.mock_sm.mark_removed_calls) == 1
-        assert self.mock_sm.mark_removed_calls[0]["reason"] == "label_removed"
+        assert self.mock_sm.mark_removed_calls[0]["reason"] == "external_merge"
 
 
 class ScenarioClosedDoesNotRemoveLabel(vedro.Scenario):
@@ -67,3 +67,7 @@ class ScenarioClosedDoesNotRemoveLabel(vedro.Scenario):
 
     def and_queue_label_was_NOT_removed_via_api(self):
         assert self.processor.gitlab_client.remove_label_calls == []
+
+    def and_reason_is_closed(self):
+        assert len(self.mock_sm.mark_removed_calls) == 1
+        assert self.mock_sm.mark_removed_calls[0]["reason"] == "closed"

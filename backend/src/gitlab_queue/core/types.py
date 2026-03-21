@@ -17,6 +17,21 @@ if TYPE_CHECKING:
     from gitlab_queue.core.rebase_during_testing import RebaseDuringTestingContext
 
 
+@dataclass(frozen=True)
+class VerifyResult:
+    """Result of verify_mr_in_queue check.
+
+    Truthy when MR is valid for processing, falsy otherwise.
+    Carries the reason for rejection when falsy.
+    """
+
+    valid: bool
+    reason: str = ""
+
+    def __bool__(self) -> bool:
+        return self.valid
+
+
 class ProcessingResult(Enum):
     """Result of processing a single MR."""
 
@@ -90,4 +105,5 @@ __all__: list[str] = [
     "RebaseContext",
     "RetrySignal",
     "StaleCheckResult",
+    "VerifyResult",
 ]

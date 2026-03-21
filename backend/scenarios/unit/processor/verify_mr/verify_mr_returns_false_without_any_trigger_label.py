@@ -33,4 +33,7 @@ class Scenario(vedro.Scenario):
         self.result = await self.processor._verify_mr_in_queue(42)
 
     def then_result_should_be_false(self):
-        assert self.result is False
+        assert not self.result
+
+    def and_reason_is_label_removed(self):
+        assert self.result.reason == "label_removed"
