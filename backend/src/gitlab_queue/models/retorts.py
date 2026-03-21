@@ -125,6 +125,7 @@ def parse_merge_request(data: dict[str, Any]) -> MergeRequest:
         target_branch=data["target_branch"],
         merge_status=data.get("merge_status", ""),
         author=author,
+        project_id=data.get("project_id", 0),
         has_conflicts=has_conflicts,
         rebase_in_progress=data.get("rebase_in_progress", False),
         web_url=data.get("web_url"),
@@ -238,6 +239,7 @@ def dump_queue_item(item: QueueItem) -> dict[str, Any]:
         Dictionary with ISO datetime strings
     """
     return {
+        "project_id": item.project_id,
         "mr_iid": item.mr_iid,
         "title": item.title,
         "author_name": item.author_name,
@@ -290,6 +292,7 @@ def load_queue_item(data: dict[str, Any]) -> QueueItem:
         target_branch=data["target_branch"],
         state=data["state"],
         queued_at=queued_at,
+        project_id=data.get("project_id", 0),
         is_hotfix=bool(data.get("is_hotfix", False)),
         author_avatar=data.get("author_avatar"),
         labels=labels,

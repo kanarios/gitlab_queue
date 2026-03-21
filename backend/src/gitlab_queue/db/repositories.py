@@ -430,6 +430,7 @@ class MergeRequestRepository:
 
         # Create history record
         history = MergeRequestHistoryModel(
+            project_id=mr.project_id,
             iid=mr.iid,
             title=mr.title,
             author_name=mr.author_name,
@@ -1063,6 +1064,7 @@ class ModelConverter:
             target_branch=mr.target_branch,
             state=mr.status,
             queued_at=queued_at,
+            project_id=mr.project_id,
             is_hotfix=bool(mr.is_hotfix),
             author_avatar=mr.author_avatar,
             labels=labels,
@@ -1099,6 +1101,7 @@ class ModelConverter:
             target_branch=history.target_branch,
             state=history.status,
             queued_at=queued_at,
+            project_id=history.project_id,
             is_hotfix=bool(history.is_hotfix),
             author_avatar=history.author_avatar,
             labels=labels,

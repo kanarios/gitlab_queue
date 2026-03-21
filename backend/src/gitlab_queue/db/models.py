@@ -10,7 +10,7 @@ ORM access if needed in the future.
 
 from __future__ import annotations
 
-from sqlalchemy import Index, Integer, Text
+from sqlalchemy import Index, Integer, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -30,7 +30,8 @@ class MergeRequestModel(Base):
     __tablename__ = "merge_requests"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    iid: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
+    project_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    iid: Mapped[int] = mapped_column(Integer, nullable=False)
     title: Mapped[str] = mapped_column(Text, nullable=False)
     author_name: Mapped[str] = mapped_column(Text, nullable=False)
     author_username: Mapped[str] = mapped_column(Text, nullable=False)
@@ -50,6 +51,8 @@ class MergeRequestModel(Base):
     created_at: Mapped[str | None] = mapped_column(Text, nullable=True, server_default="CURRENT_TIMESTAMP")
 
     __table_args__ = (
+        UniqueConstraint("project_id", "iid", name="uq_mr_project_iid"),
+        Index("idx_mr_project_id", "project_id"),
         Index("idx_mr_status", "status"),
         Index("idx_mr_queued_at", "queued_at"),
         Index("idx_mr_iid", "iid"),
@@ -123,6 +126,7 @@ class MergeRequestHistoryModel(Base):
     __tablename__ = "merge_requests_history"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     iid: Mapped[int] = mapped_column(Integer, nullable=False)
     title: Mapped[str] = mapped_column(Text, nullable=False)
     author_name: Mapped[str] = mapped_column(Text, nullable=False)
@@ -145,6 +149,8 @@ class MergeRequestHistoryModel(Base):
     created_at: Mapped[str | None] = mapped_column(Text, nullable=True, server_default="CURRENT_TIMESTAMP")
 
     __table_args__ = (
+        UniqueConstraint("project_id", "iid", name="uq_history_project_iid"),
+        Index("idx_history_project_id", "project_id"),
         Index("idx_history_finished_at", "finished_at"),
         Index("idx_history_status", "status"),
     )
@@ -163,6 +169,7 @@ class AnalyticsHourlyModel(Base):
     __tablename__ = "analytics_hourly"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     timestamp: Mapped[str] = mapped_column(Text, nullable=False)
     queue_depth: Mapped[int] = mapped_column(Integer, nullable=False)
     processed_count: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -170,7 +177,11 @@ class AnalyticsHourlyModel(Base):
     failed_count: Mapped[int] = mapped_column(Integer, nullable=False)
     avg_wait_time_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    __table_args__ = (Index("idx_hourly_timestamp", "timestamp"),)
+    __table_args__ = (
+        UniqueConstraint("project_id", "timestamp", name="uq_hourly_project_timestamp"),
+        Index("idx_hourly_project_id", "project_id"),
+        Index("idx_hourly_timestamp", "timestamp"),
+    )
 
     def __repr__(self) -> str:
         return f"<AnalyticsHourly(timestamp={self.timestamp!r})>"
@@ -186,7 +197,8 @@ class AnalyticsDailyModel(Base):
     __tablename__ = "analytics_daily"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    date: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    project_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    date: Mapped[str] = mapped_column(Text, nullable=False)
     total_processed: Mapped[int] = mapped_column(Integer, nullable=False)
     success_count: Mapped[int] = mapped_column(Integer, nullable=False)
     failed_count: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -197,7 +209,11 @@ class AnalyticsDailyModel(Base):
     avg_processing_time_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     max_queue_depth: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    __table_args__ = (Index("idx_daily_date", "date"),)
+    __table_args__ = (
+        UniqueConstraint("project_id", "date", name="uq_daily_project_date"),
+        Index("idx_daily_project_id", "project_id"),
+        Index("idx_daily_date", "date"),
+    )
 
     def __repr__(self) -> str:
         return f"<AnalyticsDaily(date={self.date!r})>"

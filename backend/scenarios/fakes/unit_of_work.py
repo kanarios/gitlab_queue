@@ -61,6 +61,7 @@ class AnalyticsMetrics:
 class HistoryItemModel:
     """Fake history item model matching DB model attributes."""
 
+    project_id: int = 0
     iid: int = 0
     title: str = ""
     author_name: str = ""

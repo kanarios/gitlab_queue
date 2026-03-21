@@ -47,7 +47,8 @@ _JSON_SERIALIZED_FIELDS = frozenset({"retried_jobs"})
 _CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS merge_requests (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    iid INTEGER NOT NULL UNIQUE,
+    project_id INTEGER NOT NULL DEFAULT 0,
+    iid INTEGER NOT NULL,
     title TEXT NOT NULL,
     author_name TEXT NOT NULL,
     author_username TEXT NOT NULL,
@@ -67,13 +68,15 @@ CREATE TABLE IF NOT EXISTS merge_requests (
     last_error TEXT,
     stale_warning_sent INTEGER DEFAULT 0,
     processing_attempts INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(project_id, iid)
 )
 """
 
 _CREATE_HISTORY_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS merge_requests_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL DEFAULT 0,
     iid INTEGER NOT NULL,
     title TEXT NOT NULL,
     author_name TEXT NOT NULL,
@@ -93,7 +96,8 @@ CREATE TABLE IF NOT EXISTS merge_requests_history (
     pipeline_status TEXT,
     pipeline_duration_seconds INTEGER,
     pipeline_failed_jobs TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(project_id, iid)
 )
 """
 
@@ -107,19 +111,18 @@ _CREATE_INDEXES_SQL = [
 _CREATE_HISTORY_INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_history_finished_at ON merge_requests_history(finished_at)",
     "CREATE INDEX IF NOT EXISTS idx_history_status ON merge_requests_history(status)",
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_history_iid_unique ON merge_requests_history(iid)",
 ]
 
 _INSERT_MR_SQL = """
 INSERT INTO merge_requests (
-    iid, title, author_name, author_username, author_avatar,
+    project_id, iid, title, author_name, author_username, author_avatar,
     status, is_hotfix, labels, target_branch, queued_at
 )
 VALUES (
-    :iid, :title, :author_name, :author_username, :author_avatar,
+    :project_id, :iid, :title, :author_name, :author_username, :author_avatar,
     'queued', :is_hotfix, :labels, :target_branch, :queued_at
 )
-ON CONFLICT(iid) DO NOTHING
+ON CONFLICT(project_id, iid) DO NOTHING
 """
 
 _SELECT_MR_BY_IID_SQL = """
@@ -198,14 +201,14 @@ WHERE finished_at >= datetime('now', :days_param)
 
 _INSERT_HISTORY_SQL = """
 INSERT INTO merge_requests_history (
-    iid, title, author_name, author_username, author_avatar,
+    project_id, iid, title, author_name, author_username, author_avatar,
     status, is_hotfix, labels, target_branch,
     queued_at, started_at, finished_at,
     wait_time_seconds, processing_time_seconds, failure_reason,
     pipeline_id, pipeline_status, pipeline_duration_seconds, pipeline_failed_jobs
 )
 VALUES (
-    :iid, :title, :author_name, :author_username, :author_avatar,
+    :project_id, :iid, :title, :author_name, :author_username, :author_avatar,
     :status, :is_hotfix, :labels, :target_branch,
     :queued_at, :started_at, :finished_at,
     :wait_time_seconds, :processing_time_seconds, :failure_reason,
@@ -403,6 +406,7 @@ class QueueManager:
                 await session.execute(
                     text(_INSERT_MR_SQL),
                     {
+                        "project_id": mr.project_id,
                         "iid": mr.iid,
                         "title": mr.title,
                         "author_name": mr.author.name,
@@ -793,6 +797,7 @@ class QueueManager:
 
         # Prepare history record params
         history_params = {
+            "project_id": mr.project_id,
             "iid": mr.mr_iid,
             "title": mr.title,
             "author_name": mr.author_name,
@@ -1120,6 +1125,7 @@ class QueueManager:
             target_branch=row["target_branch"],
             state=row["status"],
             queued_at=queued_at,
+            project_id=row.get("project_id", 0),
             is_hotfix=bool(row.get("is_hotfix", 0)),
             author_avatar=row.get("author_avatar"),
             labels=labels,

@@ -35,6 +35,9 @@ class MergeRequest:
         target_branch: Branch being merged into
         merge_status: Merge readiness status
         author: Author information
+        project_id: GitLab project ID. Default 0 is a backward-compat sentinel —
+            parse_merge_request() always sets this from the API response.
+            Will become a required field once all callers are migrated to multi-project.
         has_conflicts: Whether MR has merge conflicts
         rebase_in_progress: Whether rebase is currently running
         web_url: URL to the MR in GitLab UI
@@ -52,6 +55,7 @@ class MergeRequest:
     target_branch: str
     merge_status: str
     author: Author
+    project_id: int = 0
     has_conflicts: bool = False
     rebase_in_progress: bool = False
     web_url: str | None = None

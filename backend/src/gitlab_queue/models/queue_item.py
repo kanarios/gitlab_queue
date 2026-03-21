@@ -27,6 +27,9 @@ class QueueItem:
         target_branch: Branch the MR targets (e.g., 'master')
         state: Current queue state (queued, rebasing, testing, merging, merged, failed, removed)
         queued_at: When the MR was added to the queue
+        project_id: GitLab project ID that owns this MR. Default 0 is a backward-compat
+            sentinel — production code always sets this from MergeRequest.project_id or DB.
+            Will become a required field once all callers are migrated to multi-project.
         is_hotfix: Whether this MR has hotfix priority
         author_avatar: Author's avatar URL (optional)
         labels: List of label names on the MR
@@ -51,6 +54,7 @@ class QueueItem:
     queued_at: datetime
 
     # Optional fields (with defaults)
+    project_id: int = 0
     is_hotfix: bool = False
     author_avatar: str | None = None
     labels: list[str] = field(default_factory=list)
