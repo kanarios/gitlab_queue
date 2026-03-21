@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from gitlab_queue.clients.gitlab import GitLabAPIError, GitLabConflictError, GitLabNotFoundError
 from gitlab_queue.core.polling import PollingConfig, PollStatus, poll_until_done
+from gitlab_queue.core.types import VerifyResult
 from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -41,7 +42,7 @@ async def verify_mr_in_queue(
     gitlab_client: GitLabClient,
     settings: Settings,
     mr_iid: int,
-) -> bool:
+) -> VerifyResult:
     """Verify MR still has queue label and is open.
 
     Args:
@@ -50,7 +51,7 @@ async def verify_mr_in_queue(
         mr_iid: MR IID to verify.
 
     Returns:
-        True if MR is still valid for processing.
+        VerifyResult: truthy if MR is valid, falsy with reason otherwise.
     """
     try:
         mr = await gitlab_client.get_mr(mr_iid)
@@ -66,19 +67,20 @@ async def verify_mr_in_queue(
                     await gitlab_client.remove_mr_label(mr_iid, settings.queue_label)
                 except Exception:
                     log.warning("Failed to remove queue label after external merge", mr_iid=mr_iid)
+                return VerifyResult(valid=False, reason="external_merge")
             else:
                 log.info("MR is no longer open", mr_iid=mr_iid, state=mr.state)
-            return False
+                return VerifyResult(valid=False, reason="closed")
 
         if settings.queue_label not in mr.labels and settings.hotfix_label not in mr.labels:
             log.info("MR no longer has queue or hotfix label", mr_iid=mr_iid)
-            return False
+            return VerifyResult(valid=False, reason="label_removed")
 
-        return True
+        return VerifyResult(valid=True)
 
     except GitLabNotFoundError:
         log.warning("MR not found", mr_iid=mr_iid)
-        return False
+        return VerifyResult(valid=False, reason="not_found")
 
 
 async def wait_for_rebase_completion(

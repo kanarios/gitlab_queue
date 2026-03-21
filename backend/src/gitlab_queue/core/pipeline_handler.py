@@ -25,6 +25,7 @@ from gitlab_queue.core.types import (
     RebaseCheckOutcome,
     RetrySignal,
     StaleCheckResult,
+    VerifyResult,
 )
 from gitlab_queue.utils.logging import get_logger
 
@@ -564,8 +565,9 @@ class PipelineHandler:
             await sm.trigger_timeout(max_wait_hours=hours)
             return ProcessingResult.TIMEOUT
 
-        if not await self._verify_mr_in_queue(mr_iid):
-            await sm.trigger_mark_removed(reason="label_removed")
+        verify = await self._verify_mr_in_queue(mr_iid)
+        if not verify:
+            await sm.trigger_mark_removed(reason=verify.reason)
             return ProcessingResult.REMOVED
 
         return None
@@ -797,7 +799,7 @@ class PipelineHandler:
         """Sleep that can be interrupted by shutdown event."""
         return await interruptible_sleep(self.shutdown_event, seconds)
 
-    async def _verify_mr_in_queue(self, mr_iid: int) -> bool:
+    async def _verify_mr_in_queue(self, mr_iid: int) -> VerifyResult:
         """Verify MR still has queue label and is open."""
         return await verify_mr_in_queue(self.gitlab_client, self.settings, mr_iid)
 

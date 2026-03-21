@@ -33,4 +33,4 @@ class Scenario(vedro.Scenario):
         self.result = await self.processor._verify_mr_in_queue(42)
 
     def then_result_should_be_true(self):
-        assert self.result is True
+        assert self.result

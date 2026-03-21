@@ -403,6 +403,16 @@ class MRStateMachine(StateMachine):
                 "removed_closed",
                 removed_at=datetime.now(UTC),
             )
+        elif removal_reason == "external_merge":
+            queue_item = await self.queue_manager.get_queue_item(self.mr_iid)
+            duration = self._calculate_duration(queue_item)
+            await self.notifier.notify(
+                self.mr_iid,
+                "merged",
+                merged_at=datetime.now(UTC),
+                duration=duration,
+                target_branch=self.target_branch,
+            )
         else:
             previous_state = self._context.get("previous_state", "queued")
             await self.notifier.notify(
@@ -415,20 +425,27 @@ class MRStateMachine(StateMachine):
 
         # Broadcast WebSocket completion
         if self.websocket_manager:
+            ws_status = "merged" if removal_reason == "external_merge" else "removed"
             await self.websocket_manager.broadcast_mr_completed(
                 self.mr_iid,
-                "removed",
+                ws_status,
                 finished_at=datetime.now(UTC),
             )
 
         positions_before, old_total = await self._capture_queue_positions_if_enabled()
 
         # Move MR to history table
-        history_status = "timeout" if removal_reason == "timeout" else "removed"
+        if removal_reason == "timeout":
+            history_status = "timeout"
+        elif removal_reason == "external_merge":
+            history_status = "merged"
+        else:
+            history_status = "removed"
+        failure_reason = None if removal_reason == "external_merge" else f"Removed: {removal_reason}"
         await self.queue_manager.complete_mr(
             self.mr_iid,
             status=history_status,
-            failure_reason=f"Removed: {removal_reason}",
+            failure_reason=failure_reason,
         )
 
         await self._notify_position_changes_if_any(positions_before, old_total)
@@ -602,7 +619,7 @@ class MRStateMachine(StateMachine):
         """Remove MR from queue.
 
         Args:
-            reason: Reason for removal - "label_removed" or "closed".
+            reason: Reason for removal - "label_removed", "closed", or "external_merge".
         """
         log.info("Triggering mark_removed", mr_iid=self.mr_iid, reason=reason)
         self._context = {

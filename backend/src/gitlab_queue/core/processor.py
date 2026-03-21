@@ -26,7 +26,7 @@ from gitlab_queue.clients.gitlab import (
 from gitlab_queue.core.handler_utils import interruptible_sleep, verify_mr_in_queue
 from gitlab_queue.core.polling import poll_until_done
 from gitlab_queue.core.state_machine import create_state_machine_for_mr
-from gitlab_queue.core.types import ProcessingContext, ProcessingResult, RetrySignal
+from gitlab_queue.core.types import ProcessingContext, ProcessingResult, RetrySignal, VerifyResult
 from gitlab_queue.metrics import MR_DURATION
 from gitlab_queue.utils.logging import LogContext, get_logger
 
@@ -248,8 +248,9 @@ class MergeProcessor:
                 )
 
                 # Check if MR still has the queue label
-                if not await self._verify_mr_in_queue(mr_iid):
-                    await sm.trigger_mark_removed(reason="label_removed")
+                verify = await self._verify_mr_in_queue(mr_iid)
+                if not verify:
+                    await sm.trigger_mark_removed(reason=verify.reason)
                     result = ProcessingResult.REMOVED
                     return result
 
@@ -564,7 +565,7 @@ class MergeProcessor:
             return await self.sleep_fn(seconds)
         return await interruptible_sleep(self._shutdown_event, seconds)
 
-    async def _verify_mr_in_queue(self, mr_iid: int) -> bool:
+    async def _verify_mr_in_queue(self, mr_iid: int) -> VerifyResult:
         """Verify MR still has queue label and is open."""
         return await verify_mr_in_queue(self.gitlab_client, self.settings, mr_iid)
 
