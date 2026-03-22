@@ -106,7 +106,7 @@ class FakeQueueManager:
         return {"state": item.state}
 
     async def update_mr_state(self, project_id: int, mr_iid: int, state: str, **extra: Any) -> bool:
-        self.update_state_calls.append({"mr_iid": mr_iid, "state": state, **extra})
+        self.update_state_calls.append({"project_id": project_id, "mr_iid": mr_iid, "state": state, **extra})
         if self.update_state_error:
             raise self.update_state_error
         item = self._items.get(mr_iid)
@@ -145,6 +145,7 @@ class FakeQueueManager:
     ) -> bool:
         self.complete_calls.append(
             {
+                "project_id": project_id,
                 "mr_iid": mr_iid,
                 "status": status,
                 "failure_reason": failure_reason,

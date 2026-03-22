@@ -57,7 +57,10 @@ class Scenario(vedro.Scenario):
         await self.handler.handle(self.event)
 
     def then_queue_item_should_be_checked(self):
-        assert any(c["mr_iid"] == MR_IID for c in self.queue_manager.get_queue_item_calls)
+        assert any(
+            c["project_id"] == self.event.project_id and c["mr_iid"] == MR_IID
+            for c in self.queue_manager.get_queue_item_calls
+        )
 
     def and_state_machine_should_not_be_created(self):
         assert self.sm_factory.calls == []
