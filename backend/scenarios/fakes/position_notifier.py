@@ -18,18 +18,18 @@ class FakePositionNotifier:
     notify_initial_error: Exception | None = None
 
     # Call recording
-    notify_initial_calls: list[int] = field(default_factory=list)
-    capture_calls: list[None] = field(default_factory=list)
+    notify_initial_calls: list[dict[str, Any]] = field(default_factory=list)
+    capture_calls: list[int] = field(default_factory=list)
     notify_after_completion_calls: list[dict[str, Any]] = field(default_factory=list)
     notify_after_add_calls: list[dict[str, Any]] = field(default_factory=list)
 
     async def notify_initial_position(self, project_id: int, mr_iid: int) -> None:
-        self.notify_initial_calls.append(mr_iid)
+        self.notify_initial_calls.append({"project_id": project_id, "mr_iid": mr_iid})
         if self.notify_initial_error is not None:
             raise self.notify_initial_error
 
     async def capture_queue_positions(self, project_id: int) -> dict[int, int]:
-        self.capture_calls.append(None)
+        self.capture_calls.append(project_id)
         return self.captured_positions
 
     async def notify_affected_mrs_after_completion(
@@ -41,6 +41,7 @@ class FakePositionNotifier:
     ) -> None:
         self.notify_after_completion_calls.append(
             {
+                "project_id": project_id,
                 "completed_mr_iid": completed_mr_iid,
                 "positions_before": positions_before,
                 "old_total": old_total,
@@ -58,6 +59,7 @@ class FakePositionNotifier:
     ) -> None:
         self.notify_after_add_calls.append(
             {
+                "project_id": project_id,
                 "added_mr_iid": added_mr_iid,
                 "positions_before": positions_before,
                 "old_total": old_total,

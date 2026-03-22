@@ -62,7 +62,7 @@ class Scenario(vedro.Scenario):
             await self.handler.handle(self.event)
 
     def then_remove_from_queue_was_called(self):
-        assert MR_IID in self.queue_manager.remove_calls
+        assert any(c["mr_iid"] == MR_IID for c in self.queue_manager.remove_calls)
 
     def and_log_should_not_report_removal(self):
         removal_entries = [e for e in self.captured if e.get("event") == "MR removed from queue after close"]

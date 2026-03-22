@@ -37,7 +37,7 @@ class Scenario(vedro.Scenario):
 
         The fetched value is the mapping of queue statuses to their counts and is stored on the scenario instance for later assertions.
         """
-        self.stats = await self.queue.get_queue_stats()
+        self.stats = await self.queue.get_queue_stats(99999)
 
     def then_queued_count_should_be_1(self):
         assert self.stats["queued"] == 1

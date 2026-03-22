@@ -55,7 +55,7 @@ class Scenario(vedro.Scenario):
         Raises:
             AssertionError: if the queue length is not zero.
         """
-        length = await self.queue.get_queue_length()
+        length = await self.queue.get_queue_length(99999)
         assert length == 0
 
     async def do_cleanup(self):

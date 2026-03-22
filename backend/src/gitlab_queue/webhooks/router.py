@@ -723,8 +723,8 @@ async def get_queue_status(request: Request) -> dict[str, Any]:
 
     project_id = state.settings.gitlab_project_id
     active_queue = await queue_manager.get_active_queue(project_id)
-    recent_history = await queue_manager.get_recent_history(limit=10)
-    dashboard_stats = await queue_manager.get_dashboard_stats(days=7)
+    recent_history = await queue_manager.get_recent_history(limit=10, project_id=project_id)
+    dashboard_stats = await queue_manager.get_dashboard_stats(days=7, project_id=project_id)
     current_stats = await queue_manager.get_queue_stats(project_id)
 
     return {
@@ -772,7 +772,7 @@ async def get_queue_statistics(request: Request) -> dict[str, Any]:
     queue_manager = state.queue_manager
 
     project_id = state.settings.gitlab_project_id
-    dashboard_stats = await queue_manager.get_dashboard_stats(days=7)
+    dashboard_stats = await queue_manager.get_dashboard_stats(days=7, project_id=project_id)
     current_stats = await queue_manager.get_queue_stats(project_id)
 
     return _dashboard_stats_to_dict(dashboard_stats, current_stats)

@@ -34,12 +34,12 @@ class FakeQueueManager:
 
     # Call recording
     complete_calls: list[dict[str, Any]] = field(default_factory=list)
-    remove_calls: list[int] = field(default_factory=list)
-    stale_warning_calls: list[int] = field(default_factory=list)
+    remove_calls: list[dict[str, Any]] = field(default_factory=list)
+    stale_warning_calls: list[dict[str, Any]] = field(default_factory=list)
     update_state_calls: list[dict[str, Any]] = field(default_factory=list)
     add_to_queue_calls: list[dict[str, Any]] = field(default_factory=list)
     update_hotfix_calls: list[dict[str, Any]] = field(default_factory=list)
-    get_queue_item_calls: list[int] = field(default_factory=list)
+    get_queue_item_calls: list[dict[str, Any]] = field(default_factory=list)
 
     def add_item(self, item: QueueItem) -> None:
         self._items[item.mr_iid] = item
@@ -64,7 +64,7 @@ class FakeQueueManager:
         return item
 
     async def remove_from_queue(self, project_id: int, mr_iid: int) -> bool:
-        self.remove_calls.append(mr_iid)
+        self.remove_calls.append({"project_id": project_id, "mr_iid": mr_iid})
         return self._items.pop(mr_iid, None) is not None
 
     async def get_queue_position(self, project_id: int, mr_iid: int) -> int | None:
@@ -86,7 +86,7 @@ class FakeQueueManager:
         return min(queued, key=lambda i: (not i.is_hotfix, i.queued_at))
 
     async def get_queue_item(self, project_id: int, mr_iid: int) -> QueueItem | None:
-        self.get_queue_item_calls.append(mr_iid)
+        self.get_queue_item_calls.append({"project_id": project_id, "mr_iid": mr_iid})
         if self.get_queue_item_sequence:
             return self.get_queue_item_sequence.pop(0)
         return self._items.get(mr_iid)
@@ -121,6 +121,7 @@ class FakeQueueManager:
     async def update_hotfix_status(self, project_id: int, mr_iid: int, is_hotfix: bool, labels: list[str]) -> bool:
         self.update_hotfix_calls.append(
             {
+                "project_id": project_id,
                 "mr_iid": mr_iid,
                 "is_hotfix": is_hotfix,
                 "labels": labels,
@@ -169,7 +170,7 @@ class FakeQueueManager:
         return [i for i in self._items.values() if i.stale_warning_sent is False]
 
     async def mark_stale_warning_sent(self, project_id: int, mr_iid: int) -> bool:
-        self.stale_warning_calls.append(mr_iid)
+        self.stale_warning_calls.append({"project_id": project_id, "mr_iid": mr_iid})
         item = self._items.get(mr_iid)
         if item is None:
             return False

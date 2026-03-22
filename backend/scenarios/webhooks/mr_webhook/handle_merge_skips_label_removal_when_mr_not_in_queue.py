@@ -52,7 +52,7 @@ class Scenario(vedro.Scenario):
         await self.handler._handle_merge(self.event)
 
     def then_it_should_check_queue(self):
-        assert self.queue_manager.get_queue_item_calls == [123]
+        assert self.queue_manager.get_queue_item_calls == [{"project_id": 1, "mr_iid": 123}]
 
     def then_it_should_not_remove_from_queue(self):
         assert self.queue_manager.remove_calls == []

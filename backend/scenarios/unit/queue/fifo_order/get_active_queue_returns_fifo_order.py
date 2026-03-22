@@ -30,7 +30,7 @@ class Scenario(vedro.Scenario):
         await self.queue.update_mr_state(99999, 4, "testing")
 
     async def when_active_queue_is_retrieved(self):
-        self.active_queue = await self.queue.get_active_queue()
+        self.active_queue = await self.queue.get_active_queue(99999)
 
     def then_all_active_mrs_should_be_in_fifo_order(self):
         """

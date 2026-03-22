@@ -60,7 +60,7 @@ class Scenario(vedro.Scenario):
         assert len(self.queue_manager.add_to_queue_calls) == 1
 
     def and_notification_should_have_been_attempted(self):
-        assert self.position_notifier.notify_initial_calls == [123]
+        assert [c["mr_iid"] for c in self.position_notifier.notify_initial_calls] == [123]
 
     async def cleanup(self):
         await self.gitlab_client.close()

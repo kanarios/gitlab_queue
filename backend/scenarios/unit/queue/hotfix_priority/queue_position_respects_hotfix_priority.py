@@ -57,7 +57,7 @@ class Scenario(vedro.Scenario):
 
         The expected order of merge request IIDs is [2, 4, 1, 3].
         """
-        active = await self.queue.get_active_queue()
+        active = await self.queue.get_active_queue(99999)
         expected_order = [2, 4, 1, 3]  # hotfixes first, then regulars, each group FIFO
         actual_order = [item.mr_iid for item in active]
         assert actual_order == expected_order

@@ -46,7 +46,7 @@ class Scenario(vedro.Scenario):
 
         This sets self.stats to the dashboard metrics returned by the queue manager for a 7-day window.
         """
-        self.stats = await self.queue.get_dashboard_stats(days=7)
+        self.stats = await self.queue.get_dashboard_stats(days=7, project_id=99999)
 
     def then_total_in_queue_should_reflect_active_mrs(self):
         # Active queue includes queued + rebasing + testing + merging
