@@ -25,11 +25,11 @@ class Scenario(vedro.Scenario):
         await self.queue.ensure_schema()
 
         mr = create_test_mr(iid=42)
-        await self.queue.add_to_queue(mr)
+        await self.queue.add_to_queue(99999, mr)
         # Transition to testing sets started_at
-        await self.queue.update_mr_state(42, "testing")
+        await self.queue.update_mr_state(99999, 42, "testing")
         # Transition to merged sets finished_at
-        await self.queue.update_mr_state(42, "merged")
+        await self.queue.update_mr_state(99999, 42, "merged")
 
     async def when_mr_is_completed(self):
         """
@@ -37,7 +37,7 @@ class Scenario(vedro.Scenario):
 
         The boolean result is stored in `self.result` (`True` if completion succeeded, `False` otherwise).
         """
-        self.result = await self.queue.complete_mr(42, "merged")
+        self.result = await self.queue.complete_mr(99999, 42, "merged")
 
     def then_result_should_be_true(self):
         """
@@ -55,7 +55,7 @@ class Scenario(vedro.Scenario):
         Raises:
                 AssertionError: If the MR state is missing or its "status" is not "merged".
         """
-        state = await self.queue.get_mr_state(42)
+        state = await self.queue.get_mr_state(99999, 42)
         assert state is not None
         assert state["status"] == "merged"
 
@@ -66,7 +66,7 @@ class Scenario(vedro.Scenario):
         Raises:
             AssertionError: If the MR state does not exist or its `finished_at` is None.
         """
-        state = await self.queue.get_mr_state(42)
+        state = await self.queue.get_mr_state(99999, 42)
         assert state is not None
         assert state["finished_at"] is not None
 

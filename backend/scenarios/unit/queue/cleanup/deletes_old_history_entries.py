@@ -56,9 +56,9 @@ class Scenario(vedro.Scenario):
         await self.queue.ensure_schema()
 
         mr = create_test_mr(iid=42)
-        await self.queue.add_to_queue(mr)
+        await self.queue.add_to_queue(99999, mr)
         # Set MR to terminal state so finished_at gets set
-        await self.queue.update_mr_state(42, "merged")
+        await self.queue.update_mr_state(99999, 42, "merged")
 
         # Move finished_at to the past so cleanup finds it
         async with self.db.transaction() as session:
@@ -73,7 +73,7 @@ class Scenario(vedro.Scenario):
 
         Stores the deleted entry count on `self.deleted_count`.
         """
-        self.deleted_count = await self.queue.cleanup_old_entries(days=1)
+        self.deleted_count = await self.queue.cleanup_old_entries(99999, days=1)
 
     def then_should_delete_1_entry(self):
         """
@@ -90,7 +90,7 @@ class Scenario(vedro.Scenario):
         Raises:
             AssertionError: If a queue item with IID 42 exists.
         """
-        item = await self.queue.get_queue_item(42)
+        item = await self.queue.get_queue_item(99999, 42)
         assert item is None
 
     async def do_cleanup(self):

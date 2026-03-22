@@ -82,7 +82,7 @@ async def process_mr_with_conflict_after_multiple_mrs():
     with then("MR 46 fails with CONFLICT but MR 47 remains queued"):
         assert result == ProcessingResult.CONFLICT
 
-        second_item = await processor.queue_manager.get_queue_item(47)
+        second_item = await processor.queue_manager.get_queue_item(99999, 47)
         assert second_item is not None
         assert second_item.state == "queued"
 

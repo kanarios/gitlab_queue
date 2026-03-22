@@ -31,10 +31,10 @@ class Scenario(vedro.Scenario):
         await self.queue.ensure_schema()
 
         mr = create_test_mr(iid=42)
-        await self.queue.add_to_queue(mr)
+        await self.queue.add_to_queue(99999, mr)
         # Transition through rebasing to testing (sets started_at)
-        await self.queue.update_mr_state(42, "rebasing")
-        await self.queue.update_mr_state(42, "testing")
+        await self.queue.update_mr_state(99999, 42, "rebasing")
+        await self.queue.update_mr_state(99999, 42, "testing")
 
     async def when_mr_is_completed(self):
         """
@@ -43,7 +43,7 @@ class Scenario(vedro.Scenario):
         Stores the boolean result of the completion operation in `self.result`
         and the history timing record in `self.history`.
         """
-        self.result = await self.queue.complete_mr(42, "merged")
+        self.result = await self.queue.complete_mr(99999, 42, "merged")
 
         async with self.db.session() as session:
             result = await session.execute(

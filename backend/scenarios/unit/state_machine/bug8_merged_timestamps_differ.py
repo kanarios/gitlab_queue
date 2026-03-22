@@ -22,6 +22,7 @@ class Scenario(vedro.Scenario):
         self.sm = MRStateMachine(
             notifier=self.notifier,
             queue_manager=self.queue_manager,
+            project_id=99999,
             mr_iid=42,
             start_value="merging",
             websocket_manager=self.ws,

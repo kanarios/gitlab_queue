@@ -96,7 +96,7 @@ async def processor_state_recovery_after_shutdown():
 
     with then("all intermediate states are reset to queued"):
         for mr_iid in [71, 72, 73, 74]:
-            item = await processor.queue_manager.get_queue_item(mr_iid)
+            item = await processor.queue_manager.get_queue_item(99999, mr_iid)
             assert item is not None, f"MR {mr_iid} should still be in the queue"
             assert item.state == "queued", f"MR {mr_iid} should be 'queued', got '{item.state}'"
 

@@ -39,6 +39,7 @@ class Scenario(vedro.Scenario):
         This invokes the notifier with excluded_mr_iid=999, the scenario's positions_before, old_total set to the length of positions_before, and an empty log_context, then assigns the result to self.notified_count.
         """
         self.notified_count = await self.position_notifier._notify_position_changes(
+            99999,
             excluded_mr_iid=999,
             positions_before=self.positions_before,
             old_total=len(self.positions_before),

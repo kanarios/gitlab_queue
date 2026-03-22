@@ -25,10 +25,10 @@ class Scenario(vedro.Scenario):
         await self.queue.ensure_schema()
 
         mr = create_test_mr(iid=42)
-        await self.queue.add_to_queue(mr)
-        await self.queue.update_mr_state(42, "merged")
+        await self.queue.add_to_queue(99999, mr)
+        await self.queue.update_mr_state(99999, 42, "merged")
         # First completion moves MR to history
-        first_result = await self.queue.complete_mr(42, "merged")
+        first_result = await self.queue.complete_mr(99999, 42, "merged")
         assert first_result is True
 
     async def when_mr_is_completed_again(self):
@@ -38,7 +38,7 @@ class Scenario(vedro.Scenario):
 
         Stores the boolean result of the completion attempt in self.result: `True` if completion succeeded, `False` otherwise.
         """
-        self.result = await self.queue.complete_mr(42, "merged")
+        self.result = await self.queue.complete_mr(99999, 42, "merged")
 
     def then_result_should_be_false(self):
         """
@@ -55,7 +55,7 @@ class Scenario(vedro.Scenario):
 
         Asserts that the MR state is present and that its "status" field equals "merged".
         """
-        state = await self.queue.get_mr_state(42)
+        state = await self.queue.get_mr_state(99999, 42)
         assert state is not None
         assert state["status"] == "merged"
 

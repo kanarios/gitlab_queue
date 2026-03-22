@@ -184,6 +184,7 @@ class FakeStateMachineFactory:
 
     async def __call__(
         self,
+        project_id: int,
         mr_iid: int,
         notifier: Any,
         queue_manager: Any,
@@ -191,6 +192,7 @@ class FakeStateMachineFactory:
     ) -> FakeStateMachine:
         self.calls.append(
             {
+                "project_id": project_id,
                 "mr_iid": mr_iid,
                 "notifier": notifier,
                 "queue_manager": queue_manager,

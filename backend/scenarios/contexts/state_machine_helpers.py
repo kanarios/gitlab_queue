@@ -53,6 +53,7 @@ async def create_state_machine(
     queue_manager: QueueManagerProtocol,
     mr_iid: int = 123,
     *,
+    project_id: int = 99999,
     start_value: str | None = None,
     target_branch: str = "master",
     skip_initial_enter: bool = True,
@@ -63,6 +64,7 @@ async def create_state_machine(
         notifier: Notifier instance.
         queue_manager: Queue manager instance.
         mr_iid: MR internal ID.
+        project_id: GitLab project ID.
         start_value: Initial state (defaults to 'queued').
         target_branch: Target branch name.
         skip_initial_enter: If True, skip the first on_enter callback once.
@@ -73,6 +75,7 @@ async def create_state_machine(
     sm = MRStateMachine(
         notifier=notifier,
         queue_manager=queue_manager,
+        project_id=project_id,
         mr_iid=mr_iid,
         start_value=start_value,
         target_branch=target_branch,

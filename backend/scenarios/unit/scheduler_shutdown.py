@@ -199,7 +199,7 @@ async def scheduler_sync_lock_prevents_concurrent_syncs():
         max_concurrent = 0
 
         class TrackingQueueManager(FakeQueueManager):
-            async def get_active_queue(self) -> list[object]:
+            async def get_active_queue(self, project_id: int | None = None) -> list[object]:
                 nonlocal sync_operations, concurrent_syncs, max_concurrent
                 concurrent_syncs += 1
                 max_concurrent = max(max_concurrent, concurrent_syncs)

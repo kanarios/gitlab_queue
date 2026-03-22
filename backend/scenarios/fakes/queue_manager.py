@@ -34,18 +34,18 @@ class FakeQueueManager:
 
     # Call recording
     complete_calls: list[dict[str, Any]] = field(default_factory=list)
-    remove_calls: list[int] = field(default_factory=list)
-    stale_warning_calls: list[int] = field(default_factory=list)
+    remove_calls: list[dict[str, Any]] = field(default_factory=list)
+    stale_warning_calls: list[dict[str, Any]] = field(default_factory=list)
     update_state_calls: list[dict[str, Any]] = field(default_factory=list)
     add_to_queue_calls: list[dict[str, Any]] = field(default_factory=list)
     update_hotfix_calls: list[dict[str, Any]] = field(default_factory=list)
-    get_queue_item_calls: list[int] = field(default_factory=list)
+    get_queue_item_calls: list[dict[str, Any]] = field(default_factory=list)
 
     def add_item(self, item: QueueItem) -> None:
         self._items[item.mr_iid] = item
 
-    async def add_to_queue(self, mr: MergeRequest, is_hotfix: bool = False) -> QueueItem:
-        self.add_to_queue_calls.append({"mr": mr, "is_hotfix": is_hotfix})
+    async def add_to_queue(self, project_id: int, mr: MergeRequest, is_hotfix: bool = False) -> QueueItem:
+        self.add_to_queue_calls.append({"project_id": project_id, "mr": mr, "is_hotfix": is_hotfix})
         if self.add_error:
             raise self.add_error
         item = QueueItem(
@@ -56,24 +56,25 @@ class FakeQueueManager:
             target_branch=mr.target_branch,
             state="queued",
             queued_at=datetime.now(UTC),
+            project_id=project_id,
             is_hotfix=is_hotfix,
             labels=mr.labels,
         )
         self._items[mr.iid] = item
         return item
 
-    async def remove_from_queue(self, mr_iid: int) -> bool:
-        self.remove_calls.append(mr_iid)
+    async def remove_from_queue(self, project_id: int, mr_iid: int) -> bool:
+        self.remove_calls.append({"project_id": project_id, "mr_iid": mr_iid})
         return self._items.pop(mr_iid, None) is not None
 
-    async def get_queue_position(self, mr_iid: int) -> int | None:
+    async def get_queue_position(self, project_id: int, mr_iid: int) -> int | None:
         items = sorted(self._items.values(), key=lambda i: i.queued_at)
         for pos, item in enumerate(items, start=1):
             if item.mr_iid == mr_iid:
                 return pos
         return None
 
-    async def get_next_mr(self) -> QueueItem | None:
+    async def get_next_mr(self, project_id: int) -> QueueItem | None:
         if self.get_next_mr_sequence:
             item = self.get_next_mr_sequence.pop(0)
             if isinstance(item, Exception):
@@ -84,28 +85,28 @@ class FakeQueueManager:
             return None
         return min(queued, key=lambda i: (not i.is_hotfix, i.queued_at))
 
-    async def get_queue_item(self, mr_iid: int) -> QueueItem | None:
-        self.get_queue_item_calls.append(mr_iid)
+    async def get_queue_item(self, project_id: int, mr_iid: int) -> QueueItem | None:
+        self.get_queue_item_calls.append({"project_id": project_id, "mr_iid": mr_iid})
         if self.get_queue_item_sequence:
             return self.get_queue_item_sequence.pop(0)
         return self._items.get(mr_iid)
 
-    async def get_active_queue(self) -> list[QueueItem]:
+    async def get_active_queue(self, project_id: int | None = None) -> list[QueueItem]:
         if self.get_active_queue_error:
             raise self.get_active_queue_error
         return sorted(self._items.values(), key=lambda i: i.queued_at)
 
-    async def get_queue_length(self) -> int:
+    async def get_queue_length(self, project_id: int | None = None) -> int:
         return len(self._items)
 
-    async def get_mr_state(self, mr_iid: int) -> dict[str, Any] | None:
+    async def get_mr_state(self, project_id: int, mr_iid: int) -> dict[str, Any] | None:
         item = self._items.get(mr_iid)
         if item is None:
             return None
         return {"state": item.state}
 
-    async def update_mr_state(self, mr_iid: int, state: str, **extra: Any) -> bool:
-        self.update_state_calls.append({"mr_iid": mr_iid, "state": state, **extra})
+    async def update_mr_state(self, project_id: int, mr_iid: int, state: str, **extra: Any) -> bool:
+        self.update_state_calls.append({"project_id": project_id, "mr_iid": mr_iid, "state": state, **extra})
         if self.update_state_error:
             raise self.update_state_error
         item = self._items.get(mr_iid)
@@ -117,9 +118,10 @@ class FakeQueueManager:
                 setattr(item, key, value)
         return True
 
-    async def update_hotfix_status(self, mr_iid: int, is_hotfix: bool, labels: list[str]) -> bool:
+    async def update_hotfix_status(self, project_id: int, mr_iid: int, is_hotfix: bool, labels: list[str]) -> bool:
         self.update_hotfix_calls.append(
             {
+                "project_id": project_id,
                 "mr_iid": mr_iid,
                 "is_hotfix": is_hotfix,
                 "labels": labels,
@@ -134,6 +136,7 @@ class FakeQueueManager:
 
     async def complete_mr(
         self,
+        project_id: int,
         mr_iid: int,
         status: str,
         failure_reason: str | None = None,
@@ -142,6 +145,7 @@ class FakeQueueManager:
     ) -> bool:
         self.complete_calls.append(
             {
+                "project_id": project_id,
                 "mr_iid": mr_iid,
                 "status": status,
                 "failure_reason": failure_reason,
@@ -158,26 +162,26 @@ class FakeQueueManager:
         item.finished_at = datetime.now(UTC)
         return True
 
-    async def get_queue_stats(self) -> dict[str, int]:
+    async def get_queue_stats(self, project_id: int | None = None) -> dict[str, int]:
         if self.queue_stats is not None:
             return self.queue_stats
         return {"queued": len(self._items)}
 
-    async def get_stale_mrs(self, hours: int) -> list[QueueItem]:
+    async def get_stale_mrs(self, project_id: int, hours: int) -> list[QueueItem]:
         return [i for i in self._items.values() if i.stale_warning_sent is False]
 
-    async def mark_stale_warning_sent(self, mr_iid: int) -> bool:
-        self.stale_warning_calls.append(mr_iid)
+    async def mark_stale_warning_sent(self, project_id: int, mr_iid: int) -> bool:
+        self.stale_warning_calls.append({"project_id": project_id, "mr_iid": mr_iid})
         item = self._items.get(mr_iid)
         if item is None:
             return False
         item.stale_warning_sent = True
         return True
 
-    async def get_recent_history(self, limit: int = 10) -> list[QueueItem]:
+    async def get_recent_history(self, limit: int = 10, project_id: int | None = None) -> list[QueueItem]:
         return self.recent_history[:limit]
 
-    async def get_dashboard_stats(self, days: int = 7) -> Any:
+    async def get_dashboard_stats(self, days: int = 7, project_id: int | None = None) -> Any:
         if self.dashboard_stats is not None:
             return self.dashboard_stats
         from gitlab_queue.models.queue_item import DashboardStats

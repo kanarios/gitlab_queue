@@ -21,7 +21,7 @@ class Scenario(vedro.Scenario):
         # Add MRs in order: 5, 15, 25
         for iid in [5, 15, 25]:
             mr = create_test_mr(iid=iid)
-            await self.queue.add_to_queue(mr)
+            await self.queue.add_to_queue(99999, mr)
             await asyncio.sleep(0.01)
 
     async def when_positions_are_queried(self):
@@ -34,7 +34,7 @@ class Scenario(vedro.Scenario):
         """
         self.positions = {}
         for iid in [5, 15, 25]:
-            self.positions[iid] = await self.queue.get_queue_position(iid)
+            self.positions[iid] = await self.queue.get_queue_position(99999, iid)
 
     def then_positions_should_reflect_insertion_order(self):
         """
@@ -55,9 +55,9 @@ class Scenario(vedro.Scenario):
         Removes the MR with iid 5 from the queue and asserts that the MR with
         iid 15 is at position 1 and the MR with iid 25 is at position 2.
         """
-        await self.queue.remove_from_queue(5)
-        pos_15 = await self.queue.get_queue_position(15)
-        pos_25 = await self.queue.get_queue_position(25)
+        await self.queue.remove_from_queue(99999, 5)
+        pos_15 = await self.queue.get_queue_position(99999, 15)
+        pos_25 = await self.queue.get_queue_position(99999, 25)
         assert pos_15 == 1
         assert pos_25 == 2
 

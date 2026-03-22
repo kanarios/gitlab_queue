@@ -60,6 +60,7 @@ class RebaseContext:
 class ProcessingContext:
     """Context for current MR processing."""
 
+    project_id: int
     mr_iid: int
     state_machine: StateMachineProtocol
     start_time: datetime

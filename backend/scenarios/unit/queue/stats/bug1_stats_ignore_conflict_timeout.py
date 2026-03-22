@@ -22,8 +22,8 @@ class Scenario(vedro.Scenario):
         # Add 4 MRs, complete each with a different status
         for iid, status in [(1, "merged"), (2, "failed"), (3, "conflict"), (4, "timeout")]:
             mr = create_test_mr(iid=iid, title=f"MR {iid}")
-            await self.queue.add_to_queue(mr)
-            await self.queue.complete_mr(iid, status=status)
+            await self.queue.add_to_queue(99999, mr)
+            await self.queue.complete_mr(99999, iid, status=status)
 
     async def when_dashboard_stats_are_retrieved(self):
         self.stats = await self.queue.get_dashboard_stats(days=7)

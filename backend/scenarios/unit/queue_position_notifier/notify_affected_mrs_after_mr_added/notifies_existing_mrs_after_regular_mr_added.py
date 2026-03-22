@@ -47,6 +47,7 @@ class Scenario(vedro.Scenario):
         Calls notify_affected_mrs_after_mr_added using the scenario's added_mr_iid, positions_before, and old_total, with is_hotfix set to False.
         """
         await self.position_notifier.notify_affected_mrs_after_mr_added(
+            99999,
             added_mr_iid=self.added_mr_iid,
             positions_before=self.positions_before,
             old_total=self.old_total,

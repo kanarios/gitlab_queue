@@ -50,7 +50,9 @@ class Scenario(vedro.Scenario):
         await self.handler.handle(self.event)
 
     def then_mr_should_be_removed_from_queue(self):
-        assert self.queue_manager.remove_calls == [123]
+        assert [(c["project_id"], c["mr_iid"]) for c in self.queue_manager.remove_calls] == [
+            (self.event.project_id, 123)
+        ]
 
     async def cleanup(self):
         await self.gitlab_client.close()

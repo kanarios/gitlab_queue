@@ -64,6 +64,7 @@ async def process_mr_successfully_from_queue_to_merge():
         processor.queue_manager.add_item(queue_item)
 
         ctx = ProcessingContext(
+            project_id=99999,
             mr_iid=42,
             state_machine=sm,
             start_time=datetime.now(UTC),

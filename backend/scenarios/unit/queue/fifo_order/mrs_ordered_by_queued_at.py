@@ -22,7 +22,7 @@ class Scenario(vedro.Scenario):
         self.iid_order = [10, 20, 30]
         for iid in self.iid_order:
             mr = create_test_mr(iid=iid, title=f"MR {iid}")
-            await self.queue.add_to_queue(mr)
+            await self.queue.add_to_queue(99999, mr)
             await asyncio.sleep(0.01)
 
     async def when_active_queue_is_retrieved(self):

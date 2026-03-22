@@ -73,7 +73,7 @@ class Scenario(vedro.Scenario):
         self.qm = QueueManager(db=self.db)
 
     async def when_complete_mr_is_called(self):
-        self.result = await self.qm.complete_mr(42, status="merged")
+        self.result = await self.qm.complete_mr(99999, 42, status="merged")
 
     def then_result_should_be_false(self):
         assert self.result is False

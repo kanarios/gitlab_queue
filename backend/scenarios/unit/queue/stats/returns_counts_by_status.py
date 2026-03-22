@@ -27,9 +27,9 @@ class Scenario(vedro.Scenario):
         # Add two MRs: one stays queued, one moves to testing
         mr1 = create_test_mr(iid=1, title="MR 1")
         mr2 = create_test_mr(iid=2, title="MR 2")
-        await self.queue.add_to_queue(mr1)
-        await self.queue.add_to_queue(mr2)
-        await self.queue.update_mr_state(2, "testing")
+        await self.queue.add_to_queue(99999, mr1)
+        await self.queue.add_to_queue(99999, mr2)
+        await self.queue.update_mr_state(99999, 2, "testing")
 
     async def when_stats_are_retrieved(self):
         """
@@ -37,7 +37,7 @@ class Scenario(vedro.Scenario):
 
         The fetched value is the mapping of queue statuses to their counts and is stored on the scenario instance for later assertions.
         """
-        self.stats = await self.queue.get_queue_stats()
+        self.stats = await self.queue.get_queue_stats(99999)
 
     def then_queued_count_should_be_1(self):
         assert self.stats["queued"] == 1

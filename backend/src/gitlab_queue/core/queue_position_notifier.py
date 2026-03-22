@@ -38,13 +38,14 @@ class QueuePositionNotifier:
     notifier: MRNotifier
     queue_manager: QueueManager
 
-    async def notify_initial_position(self, mr_iid: int) -> None:
+    async def notify_initial_position(self, project_id: int, mr_iid: int) -> None:
         """Send initial position notification when MR is added to queue.
 
         Args:
+            project_id: GitLab project ID.
             mr_iid: Internal ID of the MR that was just added.
         """
-        queue_items = await self.queue_manager.get_active_queue()
+        queue_items = await self.queue_manager.get_active_queue(project_id)
         total = len(queue_items)
 
         position: int | None = None
@@ -80,15 +81,18 @@ class QueuePositionNotifier:
             queued_at=matched_item.queued_at,
         )
 
-    async def capture_queue_positions(self) -> dict[int, int]:
+    async def capture_queue_positions(self, project_id: int) -> dict[int, int]:
         """Capture current positions of queued MRs for comparison.
+
+        Args:
+            project_id: GitLab project ID.
 
         Only captures MRs in 'queued' state (not actively processing).
 
         Returns:
             Dict mapping mr_iid to 1-indexed position.
         """
-        queue_items = await self.queue_manager.get_active_queue()
+        queue_items = await self.queue_manager.get_active_queue(project_id)
         positions: dict[int, int] = {}
         for i, item in enumerate(queue_items, start=1):
             if item.state == "queued":
@@ -119,6 +123,7 @@ class QueuePositionNotifier:
 
     async def _notify_position_changes(
         self,
+        project_id: int,
         excluded_mr_iid: int,
         positions_before: dict[int, int],
         old_total: int,
@@ -129,6 +134,7 @@ class QueuePositionNotifier:
         """Notify MRs whose positions or total changed, excluding a specific MR.
 
         Args:
+            project_id: GitLab project ID.
             excluded_mr_iid: IID of MR to exclude from notifications.
             positions_before: Positions captured before the change.
             old_total: Total queue size before the change.
@@ -138,7 +144,7 @@ class QueuePositionNotifier:
         Returns:
             Number of MRs notified.
         """
-        queue_items = await self.queue_manager.get_active_queue()
+        queue_items = await self.queue_manager.get_active_queue(project_id)
         total = len(queue_items)
 
         # Build position map synchronously from queue_items
@@ -190,6 +196,7 @@ class QueuePositionNotifier:
 
     async def notify_affected_mrs_after_completion(
         self,
+        project_id: int,
         completed_mr_iid: int,
         positions_before: dict[int, int],
         old_total: int,
@@ -199,11 +206,13 @@ class QueuePositionNotifier:
         Only notifies MRs in 'queued' state (not actively processing).
 
         Args:
+            project_id: GitLab project ID.
             completed_mr_iid: IID of the MR that was just completed.
             positions_before: Positions captured before completion.
             old_total: Total queue size before the completion.
         """
         notified_count = await self._notify_position_changes(
+            project_id=project_id,
             excluded_mr_iid=completed_mr_iid,
             positions_before=positions_before,
             old_total=old_total,
@@ -219,6 +228,7 @@ class QueuePositionNotifier:
 
     async def notify_affected_mrs_after_mr_added(
         self,
+        project_id: int,
         added_mr_iid: int,
         positions_before: dict[int, int],
         old_total: int,
@@ -231,6 +241,7 @@ class QueuePositionNotifier:
         about the updated queue size. If it's a hotfix, positions also shift.
 
         Args:
+            project_id: GitLab project ID.
             added_mr_iid: IID of the MR that was just added.
             positions_before: Positions captured before the MR was added.
             old_total: Total queue size before the MR was added.
@@ -238,6 +249,7 @@ class QueuePositionNotifier:
         """
         log_context = " due to hotfix" if is_hotfix else ""
         notified_count = await self._notify_position_changes(
+            project_id=project_id,
             excluded_mr_iid=added_mr_iid,
             positions_before=positions_before,
             old_total=old_total,

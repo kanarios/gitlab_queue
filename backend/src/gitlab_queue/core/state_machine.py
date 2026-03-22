@@ -97,6 +97,7 @@ class MRStateMachine(StateMachine):
         self,
         notifier: NotifierProtocol,
         queue_manager: QueueManagerProtocol,
+        project_id: int,
         mr_iid: int,
         *,
         target_branch: str = "master",
@@ -110,6 +111,7 @@ class MRStateMachine(StateMachine):
         Args:
             notifier: Notifier for sending notifications.
             queue_manager: Queue manager for state persistence.
+            project_id: GitLab project ID.
             mr_iid: Merge request IID to manage.
             target_branch: Target branch for rebasing/merging.
             start_value: Initial state (for resuming from DB). If None, starts at queued.
@@ -118,6 +120,7 @@ class MRStateMachine(StateMachine):
         """
         self.notifier = notifier
         self.queue_manager = queue_manager
+        self._project_id = project_id
         self.mr_iid = mr_iid
         self.target_branch = target_branch
         self.websocket_manager: WebSocketManager | None = websocket_manager
@@ -164,8 +167,8 @@ class MRStateMachine(StateMachine):
             return
         log.debug("Entering queued state", mr_iid=self.mr_iid)
 
-        position = await self.queue_manager.get_queue_position(self.mr_iid)
-        total = await self.queue_manager.get_queue_length()
+        position = await self.queue_manager.get_queue_position(self._project_id, self.mr_iid)
+        total = await self.queue_manager.get_queue_length(self._project_id)
 
         await self.notifier.notify(
             self.mr_iid,
@@ -186,7 +189,7 @@ class MRStateMachine(StateMachine):
             return
         log.debug("Entering rebasing state", mr_iid=self.mr_iid)
 
-        await self.queue_manager.update_mr_state(self.mr_iid, "rebasing")
+        await self.queue_manager.update_mr_state(self._project_id, self.mr_iid, "rebasing")
         await self.notifier.notify(
             self.mr_iid,
             "rebasing",
@@ -209,6 +212,7 @@ class MRStateMachine(StateMachine):
         expected_sha = self._context.get("expected_sha")
 
         await self.queue_manager.update_mr_state(
+            self._project_id,
             self.mr_iid,
             "testing",
             pipeline_id=pipeline_id,
@@ -233,7 +237,7 @@ class MRStateMachine(StateMachine):
             return
         log.debug("Entering merging state", mr_iid=self.mr_iid)
 
-        await self.queue_manager.update_mr_state(self.mr_iid, "merging")
+        await self.queue_manager.update_mr_state(self._project_id, self.mr_iid, "merging")
         await self.notifier.notify(
             self.mr_iid,
             "merging",
@@ -252,7 +256,7 @@ class MRStateMachine(StateMachine):
             return
         log.debug("Entering merged state", mr_iid=self.mr_iid)
 
-        queue_item = await self.queue_manager.get_queue_item(self.mr_iid)
+        queue_item = await self.queue_manager.get_queue_item(self._project_id, self.mr_iid)
         duration = self._calculate_duration(queue_item)
 
         now = datetime.now(UTC)
@@ -278,6 +282,7 @@ class MRStateMachine(StateMachine):
         # Move MR to history table
         pipeline_duration = self._context.get("pipeline_duration_seconds")
         await self.queue_manager.complete_mr(
+            self._project_id,
             self.mr_iid,
             status="merged",
             pipeline_duration_seconds=pipeline_duration,
@@ -319,7 +324,7 @@ class MRStateMachine(StateMachine):
                 failed_jobs=self._context.get("failed_jobs", []),
             )
         elif failure_reason == "timeout":
-            queue_item = await self.queue_manager.get_queue_item(self.mr_iid)
+            queue_item = await self.queue_manager.get_queue_item(self._project_id, self.mr_iid)
             max_wait_hours = self._context.get("max_wait_hours", 2)
             await self.notifier.notify(
                 self.mr_iid,
@@ -365,6 +370,7 @@ class MRStateMachine(StateMachine):
             history_status = "merge_failed"
 
         await self.queue_manager.complete_mr(
+            self._project_id,
             self.mr_iid,
             status=history_status,
             failure_reason=error_message,
@@ -385,10 +391,10 @@ class MRStateMachine(StateMachine):
         log.debug("Entering removed state", mr_iid=self.mr_iid)
 
         removal_reason = self._context.get("removal_reason", "label_removed")
-        position = await self.queue_manager.get_queue_position(self.mr_iid)
+        position = await self.queue_manager.get_queue_position(self._project_id, self.mr_iid)
 
         if removal_reason == "timeout":
-            queue_item = await self.queue_manager.get_queue_item(self.mr_iid)
+            queue_item = await self.queue_manager.get_queue_item(self._project_id, self.mr_iid)
             max_wait_hours = self._context.get("max_wait_hours", 2)
             await self.notifier.notify(
                 self.mr_iid,
@@ -404,7 +410,7 @@ class MRStateMachine(StateMachine):
                 removed_at=datetime.now(UTC),
             )
         elif removal_reason == "external_merge":
-            queue_item = await self.queue_manager.get_queue_item(self.mr_iid)
+            queue_item = await self.queue_manager.get_queue_item(self._project_id, self.mr_iid)
             duration = self._calculate_duration(queue_item)
             await self.notifier.notify(
                 self.mr_iid,
@@ -443,6 +449,7 @@ class MRStateMachine(StateMachine):
             history_status = "removed"
         failure_reason = None if removal_reason == "external_merge" else f"Removed: {removal_reason}"
         await self.queue_manager.complete_mr(
+            self._project_id,
             self.mr_iid,
             status=history_status,
             failure_reason=failure_reason,
@@ -458,8 +465,8 @@ class MRStateMachine(StateMachine):
     async def _capture_queue_positions_if_enabled(self) -> tuple[dict[int, int], int]:
         """Capture current queue positions before MR completion for later notification."""
         if self.position_notifier:
-            positions_before = await self.position_notifier.capture_queue_positions()
-            old_total = await self.queue_manager.get_queue_length()
+            positions_before = await self.position_notifier.capture_queue_positions(self._project_id)
+            old_total = await self.queue_manager.get_queue_length(self._project_id)
             return positions_before, old_total
         return {}, 0
 
@@ -467,6 +474,7 @@ class MRStateMachine(StateMachine):
         """Notify affected MRs about queue position changes after this MR is completed."""
         if self.position_notifier and positions_before:
             await self.position_notifier.notify_affected_mrs_after_completion(
+                self._project_id,
                 self.mr_iid,
                 positions_before,
                 old_total,
@@ -613,7 +621,7 @@ class MRStateMachine(StateMachine):
         self._suppress_queued_notification = True
         self._context = {}
         await self.reset_to_queued()
-        await self.queue_manager.update_mr_state(self.mr_iid, "queued")
+        await self.queue_manager.update_mr_state(self._project_id, self.mr_iid, "queued")
 
     async def trigger_mark_removed(self, *, reason: str = "label_removed") -> None:
         """Remove MR from queue.
@@ -695,8 +703,8 @@ class MRStateMachine(StateMachine):
         Args:
             old_position: Previous position in queue.
         """
-        position = await self.queue_manager.get_queue_position(self.mr_iid)
-        total = await self.queue_manager.get_queue_length()
+        position = await self.queue_manager.get_queue_position(self._project_id, self.mr_iid)
+        total = await self.queue_manager.get_queue_length(self._project_id)
 
         if position and position != old_position:
             log.info(
@@ -742,8 +750,8 @@ class MRStateMachine(StateMachine):
             warning_hours=warning_hours,
         )
 
-        queue_item = await self.queue_manager.get_queue_item(self.mr_iid)
-        position = await self.queue_manager.get_queue_position(self.mr_iid)
+        queue_item = await self.queue_manager.get_queue_item(self._project_id, self.mr_iid)
+        position = await self.queue_manager.get_queue_position(self._project_id, self.mr_iid)
 
         await self.notifier.notify(
             self.mr_iid,
@@ -786,6 +794,7 @@ class MRStateMachine(StateMachine):
 
         # Update pipeline_id and expected_sha in DB
         await self.queue_manager.update_mr_state(
+            self._project_id,
             self.mr_iid,
             "testing",
             pipeline_id=new_pipeline_id,
@@ -871,6 +880,7 @@ def calculate_duration(queued_at: datetime | None, *, now: datetime | None = Non
 
 
 async def create_state_machine_for_mr(
+    project_id: int,
     mr_iid: int,
     notifier: NotifierProtocol,
     queue_manager: QueueManagerProtocol,
@@ -882,6 +892,7 @@ async def create_state_machine_for_mr(
     """Create state machine for an MR, resuming from DB state if exists.
 
     Args:
+        project_id: GitLab project ID.
         mr_iid: Merge request IID.
         notifier: Notifier for sending notifications.
         queue_manager: Queue manager for state persistence.
@@ -892,7 +903,7 @@ async def create_state_machine_for_mr(
     Returns:
         MRStateMachine initialized with the correct state.
     """
-    queue_item = await queue_manager.get_queue_item(mr_iid)
+    queue_item = await queue_manager.get_queue_item(project_id, mr_iid)
 
     if queue_item:
         log.debug(
@@ -903,6 +914,7 @@ async def create_state_machine_for_mr(
         sm = MRStateMachine(
             notifier=notifier,
             queue_manager=queue_manager,
+            project_id=project_id,
             mr_iid=mr_iid,
             target_branch=target_branch,
             start_value=queue_item.state,
@@ -915,6 +927,7 @@ async def create_state_machine_for_mr(
         sm = MRStateMachine(
             notifier=notifier,
             queue_manager=queue_manager,
+            project_id=project_id,
             mr_iid=mr_iid,
             target_branch=target_branch,
             websocket_manager=websocket_manager,

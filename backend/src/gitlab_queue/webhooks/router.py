@@ -350,7 +350,7 @@ async def metrics(request: Request) -> Response:
     state: WebhookAppState = request.app.state.webhook_state
 
     # Update current metrics from application state
-    await update_queue_metrics(state.queue_manager)
+    await update_queue_metrics(state.queue_manager, state.settings.gitlab_project_id)
     update_gitlab_metrics(state.gitlab_client)
 
     return Response(
@@ -721,10 +721,11 @@ async def get_queue_status(request: Request) -> dict[str, Any]:
     state: WebhookAppState = request.app.state.webhook_state
     queue_manager = state.queue_manager
 
-    active_queue = await queue_manager.get_active_queue()
-    recent_history = await queue_manager.get_recent_history(limit=10)
-    dashboard_stats = await queue_manager.get_dashboard_stats(days=7)
-    current_stats = await queue_manager.get_queue_stats()
+    project_id = state.settings.gitlab_project_id
+    active_queue = await queue_manager.get_active_queue(project_id)
+    recent_history = await queue_manager.get_recent_history(limit=10, project_id=project_id)
+    dashboard_stats = await queue_manager.get_dashboard_stats(days=7, project_id=project_id)
+    current_stats = await queue_manager.get_queue_stats(project_id)
 
     return {
         "queue": [_queue_item_to_dict(item, position=idx + 1) for idx, item in enumerate(active_queue)],
@@ -748,7 +749,8 @@ async def get_active_queue(request: Request) -> dict[str, Any]:
     state: WebhookAppState = request.app.state.webhook_state
     queue_manager = state.queue_manager
 
-    active_queue = await queue_manager.get_active_queue()
+    project_id = state.settings.gitlab_project_id
+    active_queue = await queue_manager.get_active_queue(project_id)
 
     return {
         "items": [_queue_item_to_dict(item, position=idx + 1) for idx, item in enumerate(active_queue)],
@@ -769,8 +771,9 @@ async def get_queue_statistics(request: Request) -> dict[str, Any]:
     state: WebhookAppState = request.app.state.webhook_state
     queue_manager = state.queue_manager
 
-    dashboard_stats = await queue_manager.get_dashboard_stats(days=7)
-    current_stats = await queue_manager.get_queue_stats()
+    project_id = state.settings.gitlab_project_id
+    dashboard_stats = await queue_manager.get_dashboard_stats(days=7, project_id=project_id)
+    current_stats = await queue_manager.get_queue_stats(project_id)
 
     return _dashboard_stats_to_dict(dashboard_stats, current_stats)
 
@@ -792,11 +795,12 @@ async def get_queue_item(request: Request, mr_iid: int) -> dict[str, Any]:
     state: WebhookAppState = request.app.state.webhook_state
     queue_manager = state.queue_manager
 
-    item = await queue_manager.get_queue_item(mr_iid)
+    project_id = state.settings.gitlab_project_id
+    item = await queue_manager.get_queue_item(project_id, mr_iid)
     if item is None:
         raise HTTPException(status_code=404, detail=f"MR !{mr_iid} not found in queue")
 
-    position = await queue_manager.get_queue_position(mr_iid)
+    position = await queue_manager.get_queue_position(project_id, mr_iid)
 
     return _queue_item_to_dict(item, position=position)
 

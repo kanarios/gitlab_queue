@@ -29,7 +29,7 @@ class Scenario(vedro.Scenario):
         )
 
     async def when_notify_initial_position_is_called(self):
-        await self.position_notifier.notify_initial_position(self.mr_iid)
+        await self.position_notifier.notify_initial_position(99999, self.mr_iid)
 
     def then_queued_at_matches_queue_item_value(self):
         self.notifier.notify.assert_awaited_once()

@@ -40,6 +40,7 @@ class Scenario(vedro.Scenario):
         Sets self.notified_count to the number of notifications reported by the notifier call.
         """
         self.notified_count = await self.position_notifier._notify_position_changes(
+            99999,
             excluded_mr_iid=self.excluded_mr_iid,
             positions_before=self.positions_before,
             old_total=len(self.positions_before),

@@ -21,7 +21,7 @@ class Scenario(vedro.Scenario):
         )
 
     async def when_capture_queue_positions_is_called(self):
-        self.positions = await self.position_notifier.capture_queue_positions()
+        self.positions = await self.position_notifier.capture_queue_positions(99999)
 
     def then_first_mr_has_position_1(self):
         assert self.positions[self.mr_iids[0]] == 1

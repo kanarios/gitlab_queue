@@ -30,6 +30,7 @@ async def restart_recovery_continues_processing():
         with given("MRs stuck in various intermediate states after crash"):
             queue = QueueManager(db)
             await queue.ensure_schema()
+            settings = created_test_settings()
 
             # Add MRs in different states to simulate mid-processing shutdown
             mrs_states = [
@@ -52,12 +53,11 @@ async def restart_recovery_continues_processing():
                     merge_status="can_be_merged",
                     web_url=f"https://gitlab.com/test/project/-/merge_requests/{mr_iid}",
                 )
-                await queue.add_to_queue(test_mr, is_hotfix=False)
+                await queue.add_to_queue(settings.gitlab_project_id, test_mr, is_hotfix=False)
                 if state != "queued":
-                    await queue.update_mr_state(mr_iid, state)
+                    await queue.update_mr_state(settings.gitlab_project_id, mr_iid, state)
 
             transport = GitLabMockTransport()
-            settings = created_test_settings()
 
             # Register list MRs response - all still open and labeled
             transport.register_get(
@@ -143,7 +143,7 @@ async def restart_recovery_continues_processing():
             # Get recovered states
             recovered_states = {}
             for mr_iid, _ in mrs_states:
-                state_data = await queue.get_mr_state(mr_iid)
+                state_data = await queue.get_mr_state(settings.gitlab_project_id, mr_iid)
                 recovered_states[mr_iid] = state_data["status"] if state_data else None
 
         with then("all intermediate states reset to queued"):
@@ -154,7 +154,7 @@ async def restart_recovery_continues_processing():
             assert recovered_states[503] == "queued", "Merging should reset to queued"
 
             # Verify queue is ready for processing
-            next_mr = await queue.get_next_mr()
+            next_mr = await queue.get_next_mr(settings.gitlab_project_id)
             assert next_mr is not None, "Queue should have MRs ready"
             assert next_mr.mr_iid == 500, "First MR should be next (FIFO order)"
 
@@ -167,6 +167,7 @@ async def restart_detects_merged_mr_in_gitlab():
         with given("MR in 'merging' state but already merged in GitLab"):
             queue = QueueManager(db)
             await queue.ensure_schema()
+            settings = created_test_settings()
 
             # Add MR that's in "merging" state locally
             test_mr = MergeRequest(
@@ -181,11 +182,10 @@ async def restart_detects_merged_mr_in_gitlab():
                 merge_status="can_be_merged",
                 web_url="https://gitlab.com/test/project/-/merge_requests/600",
             )
-            await queue.add_to_queue(test_mr, is_hotfix=False)
-            await queue.update_mr_state(600, "merging")
+            await queue.add_to_queue(settings.gitlab_project_id, test_mr, is_hotfix=False)
+            await queue.update_mr_state(settings.gitlab_project_id, 600, "merging")
 
             transport = GitLabMockTransport()
-            settings = created_test_settings()
 
             # GitLab says MR is now merged
             transport.register_get(
@@ -238,14 +238,14 @@ async def restart_detects_merged_mr_in_gitlab():
             )
 
             await processor._recover_interrupted_state()
-            state_data = await queue.get_mr_state(600)
+            state_data = await queue.get_mr_state(settings.gitlab_project_id, 600)
             final_state = state_data["status"] if state_data else None
 
         with then("MR is marked as merged"):
             assert final_state == "merged", "MR should be marked as merged"
 
             # Queue should be empty
-            next_mr = await queue.get_next_mr()
+            next_mr = await queue.get_next_mr(settings.gitlab_project_id)
             assert next_mr is None, "Queue should be empty"
 
 
@@ -257,6 +257,7 @@ async def restart_detects_closed_mr_in_gitlab():
         with given("MR in 'testing' state but closed in GitLab"):
             queue = QueueManager(db)
             await queue.ensure_schema()
+            settings = created_test_settings()
 
             test_mr = MergeRequest(
                 iid=700,
@@ -270,11 +271,10 @@ async def restart_detects_closed_mr_in_gitlab():
                 merge_status="can_be_merged",
                 web_url="https://gitlab.com/test/project/-/merge_requests/700",
             )
-            await queue.add_to_queue(test_mr, is_hotfix=False)
-            await queue.update_mr_state(700, "testing")
+            await queue.add_to_queue(settings.gitlab_project_id, test_mr, is_hotfix=False)
+            await queue.update_mr_state(settings.gitlab_project_id, 700, "testing")
 
             transport = GitLabMockTransport()
-            settings = created_test_settings()
 
             # GitLab says MR is now closed
             transport.register_get(
@@ -327,7 +327,7 @@ async def restart_detects_closed_mr_in_gitlab():
             )
 
             await processor._recover_interrupted_state()
-            state_data = await queue.get_mr_state(700)
+            state_data = await queue.get_mr_state(settings.gitlab_project_id, 700)
             final_state = state_data["status"] if state_data else None
 
         with then("MR is marked as removed"):

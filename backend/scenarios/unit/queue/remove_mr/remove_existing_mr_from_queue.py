@@ -17,14 +17,14 @@ class Scenario(vedro.Scenario):
         self.queue = QueueManager(db=self.db)
         await self.queue.ensure_schema()
         mr = create_test_mr(iid=42)
-        await self.queue.add_to_queue(mr)
+        await self.queue.add_to_queue(99999, mr)
 
     async def when_mr_is_removed(self):
         """
         Attempt to remove the merge request with IID 42 from the queue and
         store the result.
         """
-        self.result = await self.queue.remove_from_queue(42)
+        self.result = await self.queue.remove_from_queue(99999, 42)
 
     def then_result_should_be_true(self):
         """
@@ -44,7 +44,7 @@ class Scenario(vedro.Scenario):
             AssertionError: If the MR state is missing or its "status" is not
             "removed".
         """
-        state = await self.queue.get_mr_state(42)
+        state = await self.queue.get_mr_state(99999, 42)
         assert state is not None
         assert state["status"] == "removed"
 
@@ -55,7 +55,7 @@ class Scenario(vedro.Scenario):
         Raises:
             AssertionError: if the queue length is not zero.
         """
-        length = await self.queue.get_queue_length()
+        length = await self.queue.get_queue_length(99999)
         assert length == 0
 
     async def do_cleanup(self):

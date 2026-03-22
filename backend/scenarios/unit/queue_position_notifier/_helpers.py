@@ -47,7 +47,7 @@ class FakeRecordingQueueManager:
 
     _queue_items: list[MockQueueItem] = field(default_factory=list)
 
-    async def get_active_queue(self) -> list[MockQueueItem]:
+    async def get_active_queue(self, project_id: int | None = None) -> list[MockQueueItem]:
         return self._queue_items
 
 

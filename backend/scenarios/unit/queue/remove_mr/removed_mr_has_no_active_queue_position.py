@@ -17,8 +17,8 @@ class Scenario(vedro.Scenario):
         self.queue = QueueManager(db=self.db)
         await self.queue.ensure_schema()
         mr = create_test_mr(iid=42)
-        await self.queue.add_to_queue(mr)
-        await self.queue.remove_from_queue(42)
+        await self.queue.add_to_queue(99999, mr)
+        await self.queue.remove_from_queue(99999, 42)
 
     async def when_position_is_queried(self):
         """
@@ -26,7 +26,7 @@ class Scenario(vedro.Scenario):
 
         Sets `self.position` to the queue index for MR with id 42, or `None` if the MR has no active queue position.
         """
-        self.position = await self.queue.get_queue_position(42)
+        self.position = await self.queue.get_queue_position(99999, 42)
 
     def then_position_should_be_none(self):
         """
@@ -52,7 +52,7 @@ class Scenario(vedro.Scenario):
 
         Asserts that the queue item for MR 42 is present and its `state` equals "removed".
         """
-        item = await self.queue.get_queue_item(42)
+        item = await self.queue.get_queue_item(99999, 42)
         assert item is not None
         assert item.state == "removed"
 

@@ -25,7 +25,7 @@ class Scenario(vedro.Scenario):
         await self.queue.ensure_schema()
 
         mr = create_test_mr(iid=42)
-        await self.queue.add_to_queue(mr)
+        await self.queue.add_to_queue(99999, mr)
 
     async def when_state_is_retrieved(self):
         """
@@ -33,7 +33,7 @@ class Scenario(vedro.Scenario):
 
         After execution, self.state will contain the MR state dictionary if found, otherwise None.
         """
-        self.state = await self.queue.get_mr_state(42)
+        self.state = await self.queue.get_mr_state(99999, 42)
 
     def then_state_should_not_be_none(self):
         """

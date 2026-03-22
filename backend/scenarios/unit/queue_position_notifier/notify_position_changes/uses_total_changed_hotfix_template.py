@@ -39,6 +39,7 @@ class Scenario(vedro.Scenario):
         This step invokes the position_notifier's _notify_position_changes with excluded_mr_iid=102, the scenario's positions_before and old_total, log_context set to " due to hotfix", and is_hotfix=True. The numeric result is stored in self.notified_count.
         """
         self.notified_count = await self.position_notifier._notify_position_changes(
+            99999,
             excluded_mr_iid=102,
             positions_before=self.positions_before,
             old_total=self.old_total,

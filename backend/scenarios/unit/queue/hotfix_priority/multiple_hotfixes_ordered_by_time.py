@@ -21,7 +21,7 @@ class Scenario(vedro.Scenario):
         # Add hotfixes in order
         for iid in [10, 20, 30]:
             mr = create_test_mr(iid=iid, title=f"Hotfix {iid}")
-            await self.queue.add_to_queue(mr, is_hotfix=True)
+            await self.queue.add_to_queue(99999, mr, is_hotfix=True)
             await asyncio.sleep(0.01)  # Ensure distinct queued_at
 
     async def when_positions_are_queried(self):
@@ -32,7 +32,7 @@ class Scenario(vedro.Scenario):
         """
         self.positions = {}
         for iid in [10, 20, 30]:
-            self.positions[iid] = await self.queue.get_queue_position(iid)
+            self.positions[iid] = await self.queue.get_queue_position(99999, iid)
 
     def then_hotfixes_should_be_in_fifo_order(self):
         """

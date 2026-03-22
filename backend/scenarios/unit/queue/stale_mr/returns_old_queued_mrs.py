@@ -25,7 +25,7 @@ class Scenario(vedro.Scenario):
         await self.queue.ensure_schema()
 
         mr = create_test_mr(iid=42)
-        await self.queue.add_to_queue(mr)
+        await self.queue.add_to_queue(99999, mr)
 
         await backfill_queued_at_hours_ago(self.db, iid=42, hours=2)
 
@@ -35,7 +35,7 @@ class Scenario(vedro.Scenario):
 
         self.stale will contain a list of merge request records queued more than one hour ago.
         """
-        self.stale = await self.queue.get_stale_mrs(hours=1)
+        self.stale = await self.queue.get_stale_mrs(99999, hours=1)
 
     def then_should_return_the_old_mr(self):
         """

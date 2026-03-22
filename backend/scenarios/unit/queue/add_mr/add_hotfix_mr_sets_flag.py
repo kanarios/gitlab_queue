@@ -19,13 +19,13 @@ class Scenario(vedro.Scenario):
 
     async def when_hotfix_mr_is_added(self):
         mr = create_test_mr(iid=42, title="Hotfix MR")
-        self.item = await self.queue.add_to_queue(mr, is_hotfix=True)
+        self.item = await self.queue.add_to_queue(99999, mr, is_hotfix=True)
 
     def then_item_should_have_hotfix_flag(self):
         assert self.item.is_hotfix is True
 
     async def and_item_should_be_retrievable_with_flag(self):
-        retrieved = await self.queue.get_queue_item(self.item.mr_iid)
+        retrieved = await self.queue.get_queue_item(99999, self.item.mr_iid)
         assert retrieved is not None
         assert retrieved.is_hotfix is True
 

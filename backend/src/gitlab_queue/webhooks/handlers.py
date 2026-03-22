@@ -54,6 +54,7 @@ class MRWebhookHandler:
 
     async def _notify_position_after_add(
         self,
+        project_id: int,
         mr_iid: int,
         is_hotfix: bool,
         positions_before: dict[int, int],
@@ -62,6 +63,7 @@ class MRWebhookHandler:
         """Send position notifications after adding MR to queue.
 
         Args:
+            project_id: GitLab project ID.
             mr_iid: The MR's internal ID.
             is_hotfix: Whether the MR is a hotfix.
             positions_before: Positions captured before adding.
@@ -71,10 +73,11 @@ class MRWebhookHandler:
             return
 
         try:
-            await self.position_notifier.notify_initial_position(mr_iid)
+            await self.position_notifier.notify_initial_position(project_id, mr_iid)
 
             if positions_before:
                 await self.position_notifier.notify_affected_mrs_after_mr_added(
+                    project_id,
                     mr_iid,
                     positions_before,
                     old_total,
@@ -144,25 +147,25 @@ class MRWebhookHandler:
         is_hotfix = self.settings.hotfix_label in event.labels
 
         # Check if MR is already in queue
-        existing_item = await self.queue_manager.get_queue_item(mr_iid)
+        existing_item = await self.queue_manager.get_queue_item(event.project_id, mr_iid)
 
         if existing_item is not None:
             # MR already in queue - refresh metadata to keep it current
-            await self._refresh_queue_item_metadata(mr_iid, event)
+            await self._refresh_queue_item_metadata(event.project_id, mr_iid, event)
             return
 
         # Capture positions before adding (for notifying existing MRs about queue changes)
         positions_before: dict[int, int] = {}
         old_total: int = 0
         if self.position_notifier:
-            positions_before = await self.position_notifier.capture_queue_positions()
-            old_total = await self.queue_manager.get_queue_length()
+            positions_before = await self.position_notifier.capture_queue_positions(event.project_id)
+            old_total = await self.queue_manager.get_queue_length(event.project_id)
 
         # Fetch full MR data from API for new queue entry
         mr = await self.gitlab_client.get_mr(mr_iid)
 
         # Add to queue
-        await self.queue_manager.add_to_queue(mr, is_hotfix=is_hotfix)
+        await self.queue_manager.add_to_queue(event.project_id, mr, is_hotfix=is_hotfix)
 
         log.info(
             "MR added to queue via webhook",
@@ -172,7 +175,7 @@ class MRWebhookHandler:
         )
 
         # Send position notification
-        await self._notify_position_after_add(mr_iid, is_hotfix, positions_before, old_total)
+        await self._notify_position_after_add(event.project_id, mr_iid, is_hotfix, positions_before, old_total)
 
     async def _handle_unlabeled(self, event: MergeRequestEvent) -> None:
         """Handle label removal from MR.
@@ -199,18 +202,19 @@ class MRWebhookHandler:
 
         if not should_remove:
             # MR stays in queue - refresh metadata to keep it current
-            await self._refresh_queue_item_metadata(event.object_attributes.iid, event)
+            await self._refresh_queue_item_metadata(event.project_id, event.object_attributes.iid, event)
             return
 
         mr_iid = event.object_attributes.iid
 
-        queue_item = await self.queue_manager.get_queue_item(mr_iid)
+        queue_item = await self.queue_manager.get_queue_item(event.project_id, mr_iid)
         if queue_item is None:
             log.debug("MR was not in queue", mr_iid=mr_iid)
             return
 
         if self.notifier:
             state_machine = await self.state_machine_factory(
+                event.project_id,
                 mr_iid=mr_iid,
                 notifier=self.notifier,
                 queue_manager=self.queue_manager,
@@ -227,11 +231,16 @@ class MRWebhookHandler:
                     mr_iid=mr_iid,
                     current_state=state_machine.current_state.id,
                 )
-                await self.queue_manager.complete_mr(mr_iid, status="removed", failure_reason="label_removed")
+                await self.queue_manager.complete_mr(
+                    event.project_id,
+                    mr_iid,
+                    status="removed",
+                    failure_reason="label_removed",
+                )
                 await self._remove_queue_label(mr_iid)
                 log.info("MR removed from queue via fallback", mr_iid=mr_iid)
         else:
-            removed = await self.queue_manager.remove_from_queue(mr_iid)
+            removed = await self.queue_manager.remove_from_queue(event.project_id, mr_iid)
             if removed:
                 log.info("MR removed from queue via label removal", mr_iid=mr_iid)
 
@@ -248,13 +257,14 @@ class MRWebhookHandler:
         """
         mr_iid = event.object_attributes.iid
 
-        queue_item = await self.queue_manager.get_queue_item(mr_iid)
+        queue_item = await self.queue_manager.get_queue_item(event.project_id, mr_iid)
         if queue_item is None:
             log.debug("Merged MR was not in queue", mr_iid=mr_iid)
             return
 
         if self.notifier:
             state_machine = await self.state_machine_factory(
+                event.project_id,
                 mr_iid=mr_iid,
                 notifier=self.notifier,
                 queue_manager=self.queue_manager,
@@ -272,7 +282,7 @@ class MRWebhookHandler:
                         mr_iid=mr_iid,
                         current_state=state_machine.current_state.id,
                     )
-                    await self.queue_manager.complete_mr(mr_iid, status="merged")
+                    await self.queue_manager.complete_mr(event.project_id, mr_iid, status="merged")
                     await self._remove_queue_label(mr_iid)
                 finally:
                     await self._broadcast_queue_update()
@@ -302,14 +312,15 @@ class MRWebhookHandler:
                 positions_before: dict[int, int] = {}
                 old_total: int = 0
                 if self.position_notifier:
-                    positions_before = await self.position_notifier.capture_queue_positions()
-                    old_total = await self.queue_manager.get_queue_length()
+                    positions_before = await self.position_notifier.capture_queue_positions(event.project_id)
+                    old_total = await self.queue_manager.get_queue_length(event.project_id)
 
-                await self.queue_manager.complete_mr(mr_iid, status="merged")
+                await self.queue_manager.complete_mr(event.project_id, mr_iid, status="merged")
                 await self._remove_queue_label(mr_iid)
 
                 if self.position_notifier and positions_before:
                     await self.position_notifier.notify_affected_mrs_after_completion(
+                        event.project_id,
                         mr_iid,
                         positions_before,
                         old_total,
@@ -325,7 +336,7 @@ class MRWebhookHandler:
                     state=current_state,
                 )
         else:
-            await self.queue_manager.remove_from_queue(mr_iid)
+            await self.queue_manager.remove_from_queue(event.project_id, mr_iid)
             await self._remove_queue_label(mr_iid)
             log.info("MR cleaned up from queue after merge", mr_iid=mr_iid)
 
@@ -339,13 +350,14 @@ class MRWebhookHandler:
         """
         mr_iid = event.object_attributes.iid
 
-        queue_item = await self.queue_manager.get_queue_item(mr_iid)
+        queue_item = await self.queue_manager.get_queue_item(event.project_id, mr_iid)
         if queue_item is None:
             log.debug("Closed MR was not in queue", mr_iid=mr_iid)
             return
 
         if self.notifier:
             state_machine = await self.state_machine_factory(
+                event.project_id,
                 mr_iid=mr_iid,
                 notifier=self.notifier,
                 queue_manager=self.queue_manager,
@@ -361,11 +373,16 @@ class MRWebhookHandler:
                     mr_iid=mr_iid,
                     current_state=state_machine.current_state.id,
                 )
-                await self.queue_manager.complete_mr(mr_iid, status="removed", failure_reason="closed")
+                await self.queue_manager.complete_mr(
+                    event.project_id,
+                    mr_iid,
+                    status="removed",
+                    failure_reason="closed",
+                )
                 await self._remove_queue_label(mr_iid)
             log.info("MR removed from queue after close", mr_iid=mr_iid)
         else:
-            removed = await self.queue_manager.remove_from_queue(mr_iid)
+            removed = await self.queue_manager.remove_from_queue(event.project_id, mr_iid)
             if removed:
                 await self._remove_queue_label(mr_iid)
                 log.info("MR removed from queue after close", mr_iid=mr_iid)
@@ -390,7 +407,7 @@ class MRWebhookHandler:
         has_trigger_label = has_queue_label or has_hotfix_label
 
         # Check if MR is in queue
-        queue_item = await self.queue_manager.get_queue_item(mr_iid)
+        queue_item = await self.queue_manager.get_queue_item(event.project_id, mr_iid)
 
         # Terminal states - MR is not actively in queue
         terminal_states = ("removed", "failed", "merged")
@@ -402,13 +419,13 @@ class MRWebhookHandler:
                 positions_before: dict[int, int] = {}
                 old_total: int = 0
                 if self.position_notifier:
-                    positions_before = await self.position_notifier.capture_queue_positions()
-                    old_total = await self.queue_manager.get_queue_length()
+                    positions_before = await self.position_notifier.capture_queue_positions(event.project_id)
+                    old_total = await self.queue_manager.get_queue_length(event.project_id)
 
                 # MR has label but not in active queue - add it
                 mr = await self.gitlab_client.get_mr(mr_iid)
                 is_hotfix = has_hotfix_label
-                await self.queue_manager.add_to_queue(mr, is_hotfix=is_hotfix)
+                await self.queue_manager.add_to_queue(event.project_id, mr, is_hotfix=is_hotfix)
                 log.info(
                     "MR added to queue via update webhook",
                     mr_iid=mr_iid,
@@ -419,7 +436,7 @@ class MRWebhookHandler:
                 await self._broadcast_queue_update()
 
                 # Send position notification
-                await self._notify_position_after_add(mr_iid, is_hotfix, positions_before, old_total)
+                await self._notify_position_after_add(event.project_id, mr_iid, is_hotfix, positions_before, old_total)
             else:
                 log.debug("Updated MR not in queue and no trigger label", mr_iid=mr_iid)
             return
@@ -465,8 +482,8 @@ class MRWebhookHandler:
             return
 
         try:
-            queue_items = await self.queue_manager.get_active_queue()
-            queue_stats = await self.queue_manager.get_queue_stats()
+            queue_items = await self.queue_manager.get_active_queue(self.settings.gitlab_project_id)
+            queue_stats = await self.queue_manager.get_queue_stats(self.settings.gitlab_project_id)
 
             # Convert queue items to dicts for WebSocket
             queue_data = []
@@ -500,6 +517,7 @@ class MRWebhookHandler:
 
     async def _refresh_queue_item_metadata(
         self,
+        project_id: int,
         mr_iid: int,
         event: MergeRequestEvent,
     ) -> None:
@@ -514,6 +532,7 @@ class MRWebhookHandler:
         """
         is_hotfix = self.settings.hotfix_label in event.labels
         await self.queue_manager.update_hotfix_status(
+            project_id,
             mr_iid=mr_iid,
             is_hotfix=is_hotfix,
             labels=list(event.labels),
@@ -659,7 +678,7 @@ class PipelineWebhookHandler:
 
         pipeline_id = event.object_attributes.id
 
-        queue_item = await self.queue_manager.get_queue_item(mr_iid)
+        queue_item = await self.queue_manager.get_queue_item(event.project_id, mr_iid)
         if queue_item is None:
             log.debug(f"MR not in queue, ignoring pipeline {event_type}", mr_iid=mr_iid)
             return None
@@ -688,13 +707,14 @@ class PipelineWebhookHandler:
                     new_pipeline_id=pipeline_id,
                 )
                 await self.queue_manager.update_mr_state(
+                    event.project_id,
                     mr_iid,
                     queue_item.state,
                     pipeline_id=pipeline_id,
                     retried_jobs={},
                 )
                 # Re-fetch updated queue item
-                queue_item = await self.queue_manager.get_queue_item(mr_iid)
+                queue_item = await self.queue_manager.get_queue_item(event.project_id, mr_iid)
                 return queue_item
 
             log.debug(
@@ -729,7 +749,7 @@ class PipelineWebhookHandler:
         pipeline_id = event.object_attributes.id
 
         # Re-fetch to detect concurrent state change (e.g. processor already moved to merging)
-        fresh_item = await self.queue_manager.get_queue_item(mr_iid)
+        fresh_item = await self.queue_manager.get_queue_item(event.project_id, mr_iid)
         if fresh_item is None or fresh_item.state != "testing":
             log.debug(
                 "MR not in testing state, skipping pipeline success transition",
@@ -765,6 +785,7 @@ class PipelineWebhookHandler:
         )
 
         state_machine = await self.state_machine_factory(
+            event.project_id,
             mr_iid=mr_iid,
             notifier=self.notifier,
             queue_manager=self.queue_manager,
@@ -793,7 +814,7 @@ class PipelineWebhookHandler:
         pipeline_id = event.object_attributes.id
 
         # Re-fetch queue item to detect concurrent state changes (e.g. rebase during testing)
-        fresh_item = await self.queue_manager.get_queue_item(mr_iid)
+        fresh_item = await self.queue_manager.get_queue_item(event.project_id, mr_iid)
         if fresh_item is None or fresh_item.state != "testing":
             log.debug(
                 "MR state changed, skipping pipeline failure",
@@ -820,6 +841,7 @@ class PipelineWebhookHandler:
             retry_count=current_retry_count,
         )
         await self.queue_manager.update_mr_state(
+            event.project_id,
             mr_iid,
             "testing",
             pipeline_status="failed",
@@ -837,7 +859,7 @@ class PipelineWebhookHandler:
         pipeline_id = event.object_attributes.id
 
         # Re-fetch queue item to detect concurrent state changes (e.g. rebase during testing)
-        fresh_item = await self.queue_manager.get_queue_item(mr_iid)
+        fresh_item = await self.queue_manager.get_queue_item(event.project_id, mr_iid)
         if fresh_item is None or fresh_item.state != "testing":
             log.debug(
                 "MR state changed, skipping pipeline cancellation",
@@ -873,6 +895,7 @@ class PipelineWebhookHandler:
                 new_pipeline_id=best.id,
             )
             await self.queue_manager.update_mr_state(
+                event.project_id,
                 mr_iid,
                 "testing",
                 pipeline_id=best.id,
@@ -887,6 +910,7 @@ class PipelineWebhookHandler:
                 retry_count=current_retry_count,
             )
             await self.queue_manager.update_mr_state(
+                event.project_id,
                 mr_iid,
                 "testing",
                 pipeline_status="failed",

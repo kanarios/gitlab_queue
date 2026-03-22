@@ -30,12 +30,12 @@ class Scenario(vedro.Scenario):
             author=Author(id=1, name="Alice", username="alice"),
         )
 
-        self.item = await self.queue.add_to_queue(self.mr)
+        self.item = await self.queue.add_to_queue(99999, self.mr)
         assert self.item.started_at is None
 
     async def when_update_mr_state_called_with_queued(self):
-        await self.queue.update_mr_state(self.mr.iid, "queued")
-        self.refetched = await self.queue.get_queue_item(self.mr.iid)
+        await self.queue.update_mr_state(99999, self.mr.iid, "queued")
+        self.refetched = await self.queue.get_queue_item(99999, self.mr.iid)
 
     def then_started_at_should_still_be_none(self):
         assert self.refetched is not None

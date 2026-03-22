@@ -65,7 +65,7 @@ class Scenario(vedro.Scenario):
         await self.handler._handle_merge(self.event)
 
     def then_it_should_remove_mr_from_queue(self):
-        assert 123 in self.queue_manager.remove_calls
+        assert {"project_id": 1, "mr_iid": 123} in self.queue_manager.remove_calls
 
     def then_it_should_remove_queue_label(self):
         assert (123, "merge_queue") in self.gitlab_client.remove_label_calls

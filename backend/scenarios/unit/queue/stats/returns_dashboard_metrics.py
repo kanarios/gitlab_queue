@@ -28,15 +28,15 @@ class Scenario(vedro.Scenario):
         mr1 = create_test_mr(iid=1, title="MR 1")
         mr2 = create_test_mr(iid=2, title="MR 2")
         mr3 = create_test_mr(iid=3, title="MR 3")
-        await self.queue.add_to_queue(mr1)
-        await self.queue.add_to_queue(mr2)
-        await self.queue.add_to_queue(mr3)
+        await self.queue.add_to_queue(99999, mr1)
+        await self.queue.add_to_queue(99999, mr2)
+        await self.queue.add_to_queue(99999, mr3)
 
         # MR 1: complete as merged (moves to history table)
-        await self.queue.complete_mr(1, status="merged")
+        await self.queue.complete_mr(99999, 1, status="merged")
 
         # MR 2: complete as failed (moves to history table)
-        await self.queue.complete_mr(2, status="failed")
+        await self.queue.complete_mr(99999, 2, status="failed")
 
         # MR 3: stays queued (active)
 
@@ -46,7 +46,7 @@ class Scenario(vedro.Scenario):
 
         This sets self.stats to the dashboard metrics returned by the queue manager for a 7-day window.
         """
-        self.stats = await self.queue.get_dashboard_stats(days=7)
+        self.stats = await self.queue.get_dashboard_stats(days=7, project_id=99999)
 
     def then_total_in_queue_should_reflect_active_mrs(self):
         # Active queue includes queued + rebasing + testing + merging

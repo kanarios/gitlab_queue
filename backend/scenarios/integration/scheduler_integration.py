@@ -100,8 +100,8 @@ async def scheduler_integrates_with_real_queue_manager():
         stats = await scheduler.sync_queue()
 
         # Get queue state after sync
-        queue_items = await queue_manager.get_active_queue()
-        queue_stats = await queue_manager.get_queue_stats()
+        queue_items = await queue_manager.get_active_queue(settings.gitlab_project_id)
+        queue_stats = await queue_manager.get_queue_stats(settings.gitlab_project_id)
 
     with vedro.then:
         # Verify MRs were added
@@ -189,13 +189,13 @@ async def scheduler_handles_concurrent_webhook_and_polling():
         stats1 = await scheduler.sync_queue()
 
         # Simulate webhook adding MR to queue (concurrent operation)
-        await queue_manager.add_to_queue(mr1, is_hotfix=False)
+        await queue_manager.add_to_queue(settings.gitlab_project_id, mr1, is_hotfix=False)
 
         # Second sync - MR already in queue from webhook
         stats2 = await scheduler.sync_queue()
 
         # Get final queue state
-        queue_items = await queue_manager.get_active_queue()
+        queue_items = await queue_manager.get_active_queue(settings.gitlab_project_id)
 
     with vedro.then:
         # First sync found nothing
@@ -287,7 +287,7 @@ async def scheduler_recovers_from_gitlab_outage():
         await asyncio.wait_for(scheduler_task, timeout=2.0)
 
         # Get final queue state
-        queue_items = await queue_manager.get_active_queue()
+        queue_items = await queue_manager.get_active_queue(settings.gitlab_project_id)
 
     with vedro.then:
         # Verify scheduler recovered and added MR after outage
@@ -314,6 +314,8 @@ async def scheduler_removes_orphaned_entries_after_mr_closed():
 
         queue_manager = QueueManager(db=database)
         await queue_manager.ensure_schema()
+
+        settings = FakeSettings()
 
         mr1 = MergeRequest(
             iid=1,
@@ -356,8 +358,8 @@ async def scheduler_removes_orphaned_entries_after_mr_closed():
         )
 
         # Add both to queue
-        await queue_manager.add_to_queue(mr1, is_hotfix=False)
-        await queue_manager.add_to_queue(mr2, is_hotfix=False)
+        await queue_manager.add_to_queue(settings.gitlab_project_id, mr1, is_hotfix=False)
+        await queue_manager.add_to_queue(settings.gitlab_project_id, mr2, is_hotfix=False)
 
         # MR2 is now closed
         mr2_closed = MergeRequest(
@@ -385,8 +387,6 @@ async def scheduler_removes_orphaned_entries_after_mr_closed():
             mr_responses={2: mr2_closed},
         )
 
-        settings = FakeSettings()
-
         scheduler = create_scheduler(
             gitlab_client=gitlab_client,
             queue_manager=queue_manager,
@@ -398,7 +398,7 @@ async def scheduler_removes_orphaned_entries_after_mr_closed():
         stats = await scheduler.sync_queue()
 
         # Get queue state after sync
-        queue_items = await queue_manager.get_active_queue()
+        queue_items = await queue_manager.get_active_queue(settings.gitlab_project_id)
 
     with vedro.then:
         # Verify orphaned MR was removed
@@ -410,7 +410,7 @@ async def scheduler_removes_orphaned_entries_after_mr_closed():
         assert queue_items[0].mr_iid == 1
 
         # MR2 was marked as removed
-        mr2_state = await queue_manager.get_mr_state(2)
+        mr2_state = await queue_manager.get_mr_state(settings.gitlab_project_id, 2)
         assert mr2_state["status"] == "removed"
 
     # Cleanup

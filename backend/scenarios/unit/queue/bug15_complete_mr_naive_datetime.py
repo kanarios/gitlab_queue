@@ -69,7 +69,7 @@ class Scenario(vedro.Scenario):
     async def when_complete_mr_is_called(self):
         self.error = None
         try:
-            await self.qm.complete_mr(42, status="merged")
+            await self.qm.complete_mr(99999, 42, status="merged")
         except TypeError as e:
             self.error = e
 

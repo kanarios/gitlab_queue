@@ -20,7 +20,7 @@ class Scenario(vedro.Scenario):
 
     async def when_mr_is_added(self):
         self.mr = create_test_mr(iid=42)
-        self.item = await self.queue.add_to_queue(self.mr)
+        self.item = await self.queue.add_to_queue(99999, self.mr)
 
     async def then_item_should_be_at_position_1(self):
         """
@@ -29,7 +29,7 @@ class Scenario(vedro.Scenario):
         Raises:
             AssertionError: If the merge request's position is not 1.
         """
-        position = await self.queue.get_queue_position(42)
+        position = await self.queue.get_queue_position(99999, 42)
         assert position == 1
 
     def and_state_should_be_queued(self):
