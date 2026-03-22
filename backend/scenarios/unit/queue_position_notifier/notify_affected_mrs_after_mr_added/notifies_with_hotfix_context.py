@@ -49,6 +49,7 @@ class Scenario(vedro.Scenario):
         Calls the position notifier with the hotfix MR IID, the positions before the addition, the previous total, and indicates a hotfix context.
         """
         await self.position_notifier.notify_affected_mrs_after_mr_added(
+            99999,
             added_mr_iid=self.hotfix_mr_iid,
             positions_before=self.positions_before,
             old_total=self.old_total,

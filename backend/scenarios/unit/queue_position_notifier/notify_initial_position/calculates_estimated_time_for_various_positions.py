@@ -35,7 +35,7 @@ class Scenario(vedro.Scenario):
         """
         Invoke notify_initial_position on the prepared position notifier using the stored merge request IID.
         """
-        await self.position_notifier.notify_initial_position(self.mr_iid)
+        await self.position_notifier.notify_initial_position(99999, self.mr_iid)
 
     def then_estimated_minutes_equals_position_times_15(self):
         self.notifier.notify.assert_awaited_once()

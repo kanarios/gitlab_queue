@@ -24,10 +24,10 @@ class Scenario(vedro.Scenario):
         # Add 5 MRs
         for iid in [1, 2, 3, 4, 5]:
             mr = create_test_mr(iid=iid)
-            await self.queue.add_to_queue(mr)
+            await self.queue.add_to_queue(99999, mr)
         # Change some states (but they remain in active queue)
-        await self.queue.update_mr_state(2, "rebasing")
-        await self.queue.update_mr_state(4, "testing")
+        await self.queue.update_mr_state(99999, 2, "rebasing")
+        await self.queue.update_mr_state(99999, 4, "testing")
 
     async def when_active_queue_is_retrieved(self):
         self.active_queue = await self.queue.get_active_queue()

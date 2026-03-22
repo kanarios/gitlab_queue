@@ -71,6 +71,7 @@ class Scenario(vedro.Scenario):
         test inputs and assigns the returned notified count to `self.notified_count`.
         """
         self.notified_count = await self.position_notifier._notify_position_changes(
+            99999,
             excluded_mr_iid=999,
             positions_before=self.positions_before,
             old_total=len(self.positions_before),

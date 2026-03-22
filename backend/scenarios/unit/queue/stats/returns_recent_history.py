@@ -27,8 +27,8 @@ class Scenario(vedro.Scenario):
         # Add and complete 3 MRs — complete_mr moves them to history table
         for iid in (1, 2, 3):
             mr = create_test_mr(iid=iid, title=f"MR {iid}")
-            await self.queue.add_to_queue(mr)
-            await self.queue.complete_mr(iid, status="merged")
+            await self.queue.add_to_queue(99999, mr)
+            await self.queue.complete_mr(99999, iid, status="merged")
 
     async def when_recent_history_is_retrieved(self):
         """

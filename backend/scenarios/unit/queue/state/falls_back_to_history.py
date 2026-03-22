@@ -29,11 +29,11 @@ class Scenario(vedro.Scenario):
         await self.queue.ensure_schema()
 
         mr = create_test_mr(iid=42)
-        await self.queue.add_to_queue(mr)
-        await self.queue.update_mr_state(42, "testing")
-        await self.queue.update_mr_state(42, "merged")
+        await self.queue.add_to_queue(99999, mr)
+        await self.queue.update_mr_state(99999, 42, "testing")
+        await self.queue.update_mr_state(99999, 42, "merged")
         # Move to history table (deletes from active)
-        await self.queue.complete_mr(42, "merged")
+        await self.queue.complete_mr(99999, 42, "merged")
 
     async def when_state_is_retrieved(self):
         """
@@ -41,7 +41,7 @@ class Scenario(vedro.Scenario):
 
         The fetched state (or `None` if not found) is assigned to `self.state`.
         """
-        self.state = await self.queue.get_mr_state(42)
+        self.state = await self.queue.get_mr_state(99999, 42)
 
     def then_state_should_not_be_none(self):
         """

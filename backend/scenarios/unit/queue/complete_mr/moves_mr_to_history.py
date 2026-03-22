@@ -25,8 +25,8 @@ class Scenario(vedro.Scenario):
         await self.queue.ensure_schema()
 
         mr = create_test_mr(iid=42)
-        await self.queue.add_to_queue(mr)
-        await self.queue.update_mr_state(42, "merged")
+        await self.queue.add_to_queue(99999, mr)
+        await self.queue.update_mr_state(99999, 42, "merged")
 
     async def when_mr_is_completed(self):
         """
@@ -34,7 +34,7 @@ class Scenario(vedro.Scenario):
 
         Invokes the queue's completion operation for MR 42 and assigns the returned result to self.result.
         """
-        self.result = await self.queue.complete_mr(42, "merged")
+        self.result = await self.queue.complete_mr(99999, 42, "merged")
 
     def then_result_should_be_true(self):
         """
@@ -52,7 +52,7 @@ class Scenario(vedro.Scenario):
         Raises:
             AssertionError: If a queue item for MR id 42 still exists.
         """
-        item = await self.queue.get_queue_item(42)
+        item = await self.queue.get_queue_item(99999, 42)
         assert item is None
 
     async def and_mr_should_exist_in_history(self):
@@ -61,7 +61,7 @@ class Scenario(vedro.Scenario):
 
         Retrieves the stored MR state for ID 42 and verifies it is present and its `status` equals "merged".
         """
-        state = await self.queue.get_mr_state(42)
+        state = await self.queue.get_mr_state(99999, 42)
         assert state is not None
         assert state["status"] == "merged"
 

@@ -33,6 +33,7 @@ class Scenario(vedro.Scenario):
         This coroutine invokes self.position_notifier._notify_position_changes with an excluded MR IID of 999, the previously recorded positions, the previous total count, and an empty log context. Sets self.notified_count to the number of notifications that were sent.
         """
         self.notified_count = await self.position_notifier._notify_position_changes(
+            99999,
             excluded_mr_iid=999,
             positions_before=self.positions_before,
             old_total=len(self.positions_before),

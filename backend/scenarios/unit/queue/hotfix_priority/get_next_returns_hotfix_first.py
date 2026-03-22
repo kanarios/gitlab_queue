@@ -20,14 +20,14 @@ class Scenario(vedro.Scenario):
         await self.queue.ensure_schema()
         # Add regular MR first
         regular = create_test_mr(iid=1, title="Regular MR")
-        await self.queue.add_to_queue(regular, is_hotfix=False)
+        await self.queue.add_to_queue(99999, regular, is_hotfix=False)
         await asyncio.sleep(0.01)
         # Add hotfix second (but should be returned first)
         hotfix = create_test_mr(iid=2, title="Hotfix MR")
-        await self.queue.add_to_queue(hotfix, is_hotfix=True)
+        await self.queue.add_to_queue(99999, hotfix, is_hotfix=True)
 
     async def when_next_mr_is_requested(self):
-        self.next_item = await self.queue.get_next_mr()
+        self.next_item = await self.queue.get_next_mr(99999)
 
     def then_hotfix_should_be_returned(self):
         assert self.next_item is not None

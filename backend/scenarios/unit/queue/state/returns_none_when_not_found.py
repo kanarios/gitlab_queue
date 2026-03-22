@@ -28,7 +28,7 @@ class Scenario(vedro.Scenario):
 
         Calls the queue's get_mr_state for MR id 999 and assigns the result to self.state for later assertions.
         """
-        self.state = await self.queue.get_mr_state(999)
+        self.state = await self.queue.get_mr_state(99999, 999)
 
     def then_state_should_be_none(self):
         """

@@ -30,6 +30,7 @@ class Scenario(vedro.Scenario):
 
     async def when_state_machine_is_created_for_existing_item(self):
         await create_state_machine_for_mr(
+            project_id=99999,
             mr_iid=42,
             notifier=self.notifier,
             queue_manager=self.queue_manager,

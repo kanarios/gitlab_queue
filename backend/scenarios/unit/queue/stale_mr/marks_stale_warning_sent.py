@@ -25,7 +25,7 @@ class Scenario(vedro.Scenario):
         await self.queue.ensure_schema()
 
         mr = create_test_mr(iid=42)
-        await self.queue.add_to_queue(mr)
+        await self.queue.add_to_queue(99999, mr)
 
         await backfill_queued_at_hours_ago(self.db, iid=42, hours=2)
 
@@ -35,7 +35,7 @@ class Scenario(vedro.Scenario):
 
         This step invokes the queue manager to mark the stale warning as sent for MR 42 and stores the boolean result in `self.mark_result`.
         """
-        self.mark_result = await self.queue.mark_stale_warning_sent(42)
+        self.mark_result = await self.queue.mark_stale_warning_sent(99999, 42)
 
     def then_mark_result_should_be_true(self):
         """
@@ -52,7 +52,7 @@ class Scenario(vedro.Scenario):
 
         Fetches stale MRs for a 1-hour window and fails the test if any are returned.
         """
-        stale = await self.queue.get_stale_mrs(hours=1)
+        stale = await self.queue.get_stale_mrs(99999, hours=1)
         assert len(stale) == 0
 
     async def do_cleanup(self):

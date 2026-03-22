@@ -18,12 +18,12 @@ class Scenario(vedro.Scenario):
         await self.queue.ensure_schema()
         # Add MR first time
         mr = create_test_mr(iid=42, title="Original Title")
-        self.first_item = await self.queue.add_to_queue(mr)
+        self.first_item = await self.queue.add_to_queue(99999, mr)
 
     async def when_same_mr_is_added_again(self):
         # Try to add same MR with different title
         mr = create_test_mr(iid=42, title="New Title")
-        self.second_item = await self.queue.add_to_queue(mr)
+        self.second_item = await self.queue.add_to_queue(99999, mr)
 
     def then_returned_item_should_be_the_existing_one(self):
         assert self.second_item.mr_iid == self.first_item.mr_iid
@@ -43,7 +43,7 @@ class Scenario(vedro.Scenario):
 
         Checks the stored position for MR with IID 42 and asserts it equals 1.
         """
-        position = await self.queue.get_queue_position(42)
+        position = await self.queue.get_queue_position(99999, 42)
         assert position == 1
 
     async def do_cleanup(self):

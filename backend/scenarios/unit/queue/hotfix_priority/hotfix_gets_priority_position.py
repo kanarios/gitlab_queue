@@ -21,12 +21,12 @@ class Scenario(vedro.Scenario):
         # Add regular MRs first
         for iid in [1, 2, 3]:
             mr = create_test_mr(iid=iid, title=f"Regular MR {iid}")
-            await self.queue.add_to_queue(mr, is_hotfix=False)
+            await self.queue.add_to_queue(99999, mr, is_hotfix=False)
             await asyncio.sleep(0.01)  # Ensure distinct queued_at
 
     async def when_hotfix_mr_is_added(self):
         hotfix = create_test_mr(iid=99, title="Hotfix MR")
-        self.hotfix_item = await self.queue.add_to_queue(hotfix, is_hotfix=True)
+        self.hotfix_item = await self.queue.add_to_queue(99999, hotfix, is_hotfix=True)
 
     async def then_hotfix_should_be_at_position_1(self):
         """
@@ -35,7 +35,7 @@ class Scenario(vedro.Scenario):
         Raises:
             AssertionError: If the MR's queue position is not 1.
         """
-        position = await self.queue.get_queue_position(99)
+        position = await self.queue.get_queue_position(99999, 99)
         assert position == 1
 
     async def and_regular_mrs_should_shift_positions(self):
@@ -45,7 +45,7 @@ class Scenario(vedro.Scenario):
         Checks queue positions for MRs with IIDs 1, 2, and 3 and verifies each equals its IID plus 1, confirming they were moved down by one slot.
         """
         for iid in [1, 2, 3]:
-            position = await self.queue.get_queue_position(iid)
+            position = await self.queue.get_queue_position(99999, iid)
             expected = iid + 1  # Shifted by 1 due to hotfix
             assert position == expected
 

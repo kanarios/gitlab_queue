@@ -32,7 +32,7 @@ async def process_multiple_mrs_in_order():
     with when("get_next_mr is called sequentially"):
         processed_order = []
         while True:
-            item = await queue_manager.get_next_mr()
+            item = await queue_manager.get_next_mr(99999)
             if item is None:
                 break
             processed_order.append(item.mr_iid)

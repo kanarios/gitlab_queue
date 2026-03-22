@@ -25,9 +25,9 @@ class Scenario(vedro.Scenario):
         await self.queue.ensure_schema()
 
         mr = create_test_mr(iid=42)
-        await self.queue.add_to_queue(mr)
+        await self.queue.add_to_queue(99999, mr)
         # Transition to a terminal state (e.g., "failed")
-        await self.queue.update_mr_state(42, "failed")
+        await self.queue.update_mr_state(99999, 42, "failed")
 
     async def when_mr_is_readded_to_queue(self):
         """
@@ -36,7 +36,7 @@ class Scenario(vedro.Scenario):
         Creates a test MR with title "Reopened MR" and adds it to the scenario's queue so subsequent steps can verify re-queuing behavior.
         """
         mr = create_test_mr(iid=42, title="Reopened MR")
-        await self.queue.add_to_queue(mr)
+        await self.queue.add_to_queue(99999, mr)
 
     async def then_mr_should_exist_in_queue(self):
         """
@@ -44,7 +44,7 @@ class Scenario(vedro.Scenario):
 
         Retrieves the queue item with iid 42, stores it on self.item, and asserts the item is not None.
         """
-        self.item = await self.queue.get_queue_item(42)
+        self.item = await self.queue.get_queue_item(99999, 42)
         assert self.item is not None
 
     def and_mr_should_be_in_queued_state(self):

@@ -109,6 +109,7 @@ def create_mock_processor(**overrides: object) -> MergeProcessor:
 
 
 def create_processing_context(
+    project_id: int = 99999,
     mr_iid: int = 42,
     state_machine: FakeStateMachine | None = None,
 ) -> ProcessingContext:
@@ -116,15 +117,17 @@ def create_processing_context(
     Create a ProcessingContext configured for tests.
 
     Parameters:
+        project_id (int): GitLab project ID.
         mr_iid (int): Merge request internal ID to associate with the context.
         state_machine (FakeStateMachine | None): State machine to use; if None a fake state machine is created.
 
     Returns:
-        ProcessingContext: Context with the given `mr_iid`, the provided or faked `state_machine`, and `start_time` set to the current UTC datetime.
+        ProcessingContext: Context with the given `project_id`, `mr_iid`, the provided or faked `state_machine`, and `start_time` set to the current UTC datetime.
     """
     if state_machine is None:
         state_machine = create_mock_state_machine()
     return ProcessingContext(
+        project_id=project_id,
         mr_iid=mr_iid,
         state_machine=state_machine,
         start_time=datetime.now(UTC),

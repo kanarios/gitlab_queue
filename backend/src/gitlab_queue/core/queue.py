@@ -126,18 +126,26 @@ ON CONFLICT(project_id, iid) DO NOTHING
 """
 
 _SELECT_MR_BY_IID_SQL = """
-SELECT * FROM merge_requests WHERE iid = :iid
+SELECT * FROM merge_requests WHERE iid = :iid AND project_id = :project_id
 """
 
-_SELECT_ACTIVE_QUEUE_SQL = """
+_SELECT_ACTIVE_QUEUE_BASE_SQL = """
 SELECT * FROM merge_requests
 WHERE status IN ('queued', 'rebasing', 'testing', 'merging')
-ORDER BY is_hotfix DESC, id ASC
+"""
+
+_SELECT_ACTIVE_QUEUE_PROJECT_SQL = (
+    _SELECT_ACTIVE_QUEUE_BASE_SQL
+    + """AND project_id = :project_id
+"""
+)
+
+_SELECT_ACTIVE_QUEUE_ORDER_SQL = """ORDER BY is_hotfix DESC, id ASC
 """
 
 _SELECT_NEXT_MR_SQL = """
 SELECT * FROM merge_requests
-WHERE status = 'queued'
+WHERE status = 'queued' AND project_id = :project_id
 ORDER BY is_hotfix DESC, id ASC
 LIMIT 1
 """
@@ -145,22 +153,27 @@ LIMIT 1
 _UPDATE_STATUS_SQL = """
 UPDATE merge_requests
 SET status = :status
-WHERE iid = :iid AND status != :status
+WHERE iid = :iid AND project_id = :project_id AND status != :status
 """
 
 _SELECT_MR_STATE_SQL = """
-SELECT status, started_at, last_error, finished_at FROM merge_requests WHERE iid = :iid
+SELECT status, started_at, last_error, finished_at FROM merge_requests WHERE iid = :iid AND project_id = :project_id
 """
 
-_SELECT_QUEUE_STATS_SQL = """
+_SELECT_QUEUE_STATS_BASE_SQL = """
 SELECT status, COUNT(*) as count FROM merge_requests
 WHERE status IN ('queued', 'rebasing', 'testing', 'merging')
-GROUP BY status
+"""
+
+_SELECT_QUEUE_STATS_PROJECT_SQL = """AND project_id = :project_id
+"""
+
+_SELECT_QUEUE_STATS_GROUP_SQL = """GROUP BY status
 """
 
 _CLEANUP_OLD_ENTRIES_SQL = """
 DELETE FROM merge_requests
-WHERE finished_at IS NOT NULL AND finished_at < datetime('now', :days_param)
+WHERE finished_at IS NOT NULL AND finished_at < datetime('now', :days_param) AND project_id = :project_id
 """
 
 _SELECT_STALE_MRS_SQL = """
@@ -168,24 +181,30 @@ SELECT * FROM merge_requests
 WHERE status IN ('queued', 'rebasing', 'testing', 'merging')
 AND stale_warning_sent = 0
 AND queued_at < datetime('now', :hours_param)
+AND project_id = :project_id
 ORDER BY queued_at ASC
 """
 
 _MARK_STALE_WARNING_SENT_SQL = """
 UPDATE merge_requests
 SET stale_warning_sent = 1
-WHERE iid = :iid
+WHERE iid = :iid AND project_id = :project_id
 """
 
-_SELECT_RECENT_HISTORY_SQL = """
+_SELECT_RECENT_HISTORY_BASE_SQL = """
 SELECT * FROM merge_requests_history
 WHERE status IN ('merged', 'failed', 'removed', 'conflict', 'timeout')
 AND finished_at IS NOT NULL
-ORDER BY finished_at DESC
+"""
+
+_SELECT_RECENT_HISTORY_PROJECT_SQL = """AND project_id = :project_id
+"""
+
+_SELECT_RECENT_HISTORY_TAIL_SQL = """ORDER BY finished_at DESC
 LIMIT :limit
 """
 
-_SELECT_STATS_WINDOW_SQL = """
+_SELECT_STATS_WINDOW_BASE_SQL = """
 SELECT
     SUM(CASE WHEN status = 'merged' THEN 1 ELSE 0 END) as merged_count,
     SUM(CASE WHEN status IN ('merged', 'failed', 'conflict', 'timeout') THEN 1 ELSE 0 END) as total_completed,
@@ -197,6 +216,9 @@ SELECT
     ) as avg_processing_seconds
 FROM merge_requests_history
 WHERE finished_at >= datetime('now', :days_param)
+"""
+
+_SELECT_STATS_WINDOW_PROJECT_SQL = """AND project_id = :project_id
 """
 
 _INSERT_HISTORY_SQL = """
@@ -217,13 +239,13 @@ VALUES (
 """
 
 _DELETE_MR_SQL = """
-DELETE FROM merge_requests WHERE iid = :iid
+DELETE FROM merge_requests WHERE iid = :iid AND project_id = :project_id
 """
 
 _UPDATE_HOTFIX_STATUS_SQL = """
 UPDATE merge_requests
 SET is_hotfix = :is_hotfix, labels = :labels
-WHERE iid = :iid
+WHERE iid = :iid AND project_id = :project_id
 """
 
 
@@ -352,6 +374,7 @@ class QueueManager:
 
     async def add_to_queue(
         self,
+        project_id: int,
         mr: MergeRequest,
         is_hotfix: bool = False,
     ) -> QueueItem:
@@ -362,6 +385,7 @@ class QueueManager:
         and re-added as 'queued'.
 
         Args:
+            project_id: The GitLab project ID.
             mr: The MergeRequest to add.
             is_hotfix: Whether this MR has hotfix priority.
 
@@ -373,6 +397,7 @@ class QueueManager:
 
         log.debug(
             "Adding MR to queue",
+            project_id=project_id,
             mr_iid=mr.iid,
             is_hotfix=is_hotfix,
             title=mr.title,
@@ -384,7 +409,7 @@ class QueueManager:
             # Check if MR already exists
             result = await session.execute(
                 text(_SELECT_MR_BY_IID_SQL),
-                {"iid": mr.iid},
+                {"iid": mr.iid, "project_id": project_id},
             )
             existing = result.mappings().one_or_none()
 
@@ -397,7 +422,7 @@ class QueueManager:
                 )
                 await session.execute(
                     text(_DELETE_MR_SQL),
-                    {"iid": mr.iid},
+                    {"iid": mr.iid, "project_id": project_id},
                 )
                 existing = None
 
@@ -406,7 +431,7 @@ class QueueManager:
                 await session.execute(
                     text(_INSERT_MR_SQL),
                     {
-                        "project_id": mr.project_id,
+                        "project_id": project_id,
                         "iid": mr.iid,
                         "title": mr.title,
                         "author_name": mr.author.name,
@@ -422,7 +447,7 @@ class QueueManager:
             # Fetch the item (whether newly inserted or existing)
             result = await session.execute(
                 text(_SELECT_MR_BY_IID_SQL),
-                {"iid": mr.iid},
+                {"iid": mr.iid, "project_id": project_id},
             )
             row = result.mappings().one()
 
@@ -437,24 +462,25 @@ class QueueManager:
         )
         return item
 
-    async def remove_from_queue(self, mr_iid: int) -> bool:
+    async def remove_from_queue(self, project_id: int, mr_iid: int) -> bool:
         """Remove a merge request from the queue by setting status to 'removed'.
 
         Idempotent - returns True if status was changed, False if already removed
         or not found.
 
         Args:
+            project_id: The GitLab project ID.
             mr_iid: The MR's internal ID.
 
         Returns:
             True if the MR was removed, False if already removed or not found.
         """
-        log.debug("Removing MR from queue", mr_iid=mr_iid)
+        log.debug("Removing MR from queue", project_id=project_id, mr_iid=mr_iid)
 
         async with self.db.transaction() as session:
             cursor_result = await session.execute(
                 text(_UPDATE_STATUS_SQL),
-                {"iid": mr_iid, "status": "removed"},
+                {"iid": mr_iid, "project_id": project_id, "status": "removed"},
             )
             # CursorResult has rowcount for DML statements
             changed: bool = cursor_result.rowcount > 0  # type: ignore[attr-defined]
@@ -468,7 +494,7 @@ class QueueManager:
 
         return changed
 
-    async def get_queue_position(self, mr_iid: int) -> int | None:
+    async def get_queue_position(self, project_id: int, mr_iid: int) -> int | None:
         """Get the position of an MR in the active queue.
 
         Position is 1-indexed (first MR in queue = position 1).
@@ -476,18 +502,19 @@ class QueueManager:
         via get_active_queue().
 
         Args:
+            project_id: The GitLab project ID.
             mr_iid: The MR's internal ID.
 
         Returns:
             Position (1-indexed) if in active queue, None if not found or removed.
         """
-        queue = await self.get_active_queue()
+        queue = await self.get_active_queue(project_id)
         for i, item in enumerate(queue):
             if item.mr_iid == mr_iid:
                 return i + 1  # 1-indexed
         return None
 
-    async def get_next_mr(self) -> QueueItem | None:
+    async def get_next_mr(self, project_id: int) -> QueueItem | None:
         """Get the next MR to process from the queue.
 
         Returns the first MR with status 'queued', ordered by:
@@ -496,19 +523,23 @@ class QueueManager:
 
         Uses in-memory cache via get_active_queue().
 
+        Args:
+            project_id: The GitLab project ID.
+
         Returns:
             Next QueueItem to process, or None if queue is empty.
         """
-        queue = await self.get_active_queue()
+        queue = await self.get_active_queue(project_id)
         for item in queue:
             if item.state == "queued":
                 return item
         return None
 
-    async def get_queue_item(self, mr_iid: int) -> QueueItem | None:
+    async def get_queue_item(self, project_id: int, mr_iid: int) -> QueueItem | None:
         """Get a queue item by MR IID.
 
         Args:
+            project_id: The GitLab project ID.
             mr_iid: The MR's internal ID.
 
         Returns:
@@ -517,7 +548,7 @@ class QueueManager:
         async with self.db.session() as session:
             result = await session.execute(
                 text(_SELECT_MR_BY_IID_SQL),
-                {"iid": mr_iid},
+                {"iid": mr_iid, "project_id": project_id},
             )
             row = result.mappings().one_or_none()
             await session.commit()
@@ -527,19 +558,32 @@ class QueueManager:
 
         return self._row_to_queue_item(row)
 
-    async def get_active_queue(self) -> list[QueueItem]:
+    async def get_active_queue(self, project_id: int | None = None) -> list[QueueItem]:
         """Get all MRs in the active queue.
 
         Returns MRs with status in ('queued', 'rebasing', 'testing', 'merging'),
-        ordered by hotfix priority and queue time. Uses in-memory cache when available.
+        ordered by hotfix priority and queue time. Uses in-memory cache when available
+        (only for unfiltered queries).
+
+        Args:
+            project_id: Filter by project ID. None returns all projects.
 
         Returns:
             List of QueueItems in queue order.
         """
-        # Return cached data if available
-        cached = self._cache.get_active_queue()
-        if cached is not None:
-            return cached
+        # Return cached data if available (only for unfiltered queries)
+        if project_id is None:
+            cached = self._cache.get_active_queue()
+            if cached is not None:
+                return cached
+
+        # Build SQL based on project_id filter
+        if project_id is not None:
+            sql = _SELECT_ACTIVE_QUEUE_PROJECT_SQL + _SELECT_ACTIVE_QUEUE_ORDER_SQL
+            params: dict[str, Any] = {"project_id": project_id}
+        else:
+            sql = _SELECT_ACTIVE_QUEUE_BASE_SQL + _SELECT_ACTIVE_QUEUE_ORDER_SQL
+            params = {}
 
         # If cache is invalidated during refresh, avoid returning stale results.
         # We'll retry once if we detect version churn and cache remains empty.
@@ -548,16 +592,21 @@ class QueueManager:
 
             # Fetch from database and attempt to cache
             async with self.db.session() as session:
-                result = await session.execute(text(_SELECT_ACTIVE_QUEUE_SQL))
+                result = await session.execute(text(sql), params)
                 rows = result.mappings().all()
                 await session.commit()
 
             items = [self._row_to_queue_item(row) for row in rows]
-            self._cache.set_active_queue(items, version=version_before)
 
-            cached_after = self._cache.get_active_queue()
-            if cached_after is not None:
-                return cached_after
+            # Only cache unfiltered results
+            if project_id is None:
+                self._cache.set_active_queue(items, version=version_before)
+
+                cached_after = self._cache.get_active_queue()
+                if cached_after is not None:
+                    return cached_after
+            else:
+                return items
 
             # Cache still empty means version changed mid-refresh and someone invalidated it.
             # Loop and re-fetch once to align with current version.
@@ -565,21 +614,25 @@ class QueueManager:
         # Best effort fallback: return latest fetched items.
         return items
 
-    async def get_queue_length(self) -> int:
+    async def get_queue_length(self, project_id: int | None = None) -> int:
         """Get the number of MRs in the active queue.
+
+        Args:
+            project_id: Filter by project ID. None returns count for all projects.
 
         Returns:
             Number of MRs with active status.
         """
-        items = await self.get_active_queue()
+        items = await self.get_active_queue(project_id)
         return len(items)
 
-    async def get_mr_state(self, mr_iid: int) -> dict[str, Any] | None:
+    async def get_mr_state(self, project_id: int, mr_iid: int) -> dict[str, Any] | None:
         """Get the current state of an MR in the queue or history.
 
         First checks the active queue, then falls back to history if not found.
 
         Args:
+            project_id: The GitLab project ID.
             mr_iid: The MR's internal ID.
 
         Returns:
@@ -589,7 +642,7 @@ class QueueManager:
             # First check active queue
             result = await session.execute(
                 text(_SELECT_MR_STATE_SQL),
-                {"iid": mr_iid},
+                {"iid": mr_iid, "project_id": project_id},
             )
             row = result.mappings().one_or_none()
 
@@ -598,10 +651,11 @@ class QueueManager:
                 result = await session.execute(
                     text(
                         "SELECT status, started_at, failure_reason as last_error, "
-                        "finished_at FROM merge_requests_history WHERE iid = :iid "
+                        "finished_at FROM merge_requests_history "
+                        "WHERE iid = :iid AND project_id = :project_id "
                         "ORDER BY id DESC LIMIT 1"
                     ),
-                    {"iid": mr_iid},
+                    {"iid": mr_iid, "project_id": project_id},
                 )
                 row = result.mappings().one_or_none()
 
@@ -619,6 +673,7 @@ class QueueManager:
 
     async def update_mr_state(
         self,
+        project_id: int,
         mr_iid: int,
         state: str,
         **extra: Any,
@@ -629,6 +684,7 @@ class QueueManager:
         Sets finished_at automatically for terminal states (merged, failed, removed).
 
         Args:
+            project_id: The GitLab project ID.
             mr_iid: The MR's internal ID.
             state: New state to set.
             **extra: Additional fields to update (pipeline_id, pipeline_status,
@@ -640,14 +696,14 @@ class QueueManager:
         Raises:
             QueueItemNotFoundError: If MR not in queue.
         """
-        log.debug("Updating MR state", mr_iid=mr_iid, new_state=state, extra=extra)
+        log.debug("Updating MR state", project_id=project_id, mr_iid=mr_iid, new_state=state, extra=extra)
 
         now = datetime.now(UTC)
         terminal_states = ("merged", "failed", "removed")
 
         # Build dynamic UPDATE query
         set_clauses = ["status = :status"]
-        params: dict[str, Any] = {"iid": mr_iid, "status": state}
+        params: dict[str, Any] = {"iid": mr_iid, "project_id": project_id, "status": state}
 
         # Auto-set started_at if transitioning from queued
         set_clauses.append(
@@ -678,7 +734,7 @@ class QueueManager:
                 set_clauses.append("retry_count = :retry_count")
                 params["retry_count"] = max(rj.values()) if rj else 0
 
-        sql = f"UPDATE merge_requests SET {', '.join(set_clauses)} WHERE iid = :iid"
+        sql = f"UPDATE merge_requests SET {', '.join(set_clauses)} WHERE iid = :iid AND project_id = :project_id"
 
         async with self.db.transaction() as session:
             cursor_result = await session.execute(text(sql), params)
@@ -696,6 +752,7 @@ class QueueManager:
 
     async def update_hotfix_status(
         self,
+        project_id: int,
         mr_iid: int,
         is_hotfix: bool,
         labels: list[str],
@@ -706,6 +763,7 @@ class QueueManager:
         that is already in the queue.
 
         Args:
+            project_id: The GitLab project ID.
             mr_iid: The MR's internal ID.
             is_hotfix: New hotfix status.
             labels: Current labels on the MR.
@@ -715,6 +773,7 @@ class QueueManager:
         """
         log.debug(
             "Updating MR hotfix status",
+            project_id=project_id,
             mr_iid=mr_iid,
             is_hotfix=is_hotfix,
             labels=labels,
@@ -725,6 +784,7 @@ class QueueManager:
         async with self.db.transaction() as session:
             params = {
                 "iid": mr_iid,
+                "project_id": project_id,
                 "is_hotfix": 1 if is_hotfix else 0,
                 "labels": labels_json,
             }
@@ -746,6 +806,7 @@ class QueueManager:
 
     async def complete_mr(
         self,
+        project_id: int,
         mr_iid: int,
         status: str,
         failure_reason: str | None = None,
@@ -762,6 +823,7 @@ class QueueManager:
         Should be called after MR reaches terminal state (merged, failed, removed).
 
         Args:
+            project_id: The GitLab project ID.
             mr_iid: MR internal ID.
             status: Final status (merged, failed, conflict, timeout, removed).
             failure_reason: Reason for failure if applicable.
@@ -773,13 +835,14 @@ class QueueManager:
         """
         log.debug(
             "Completing MR and moving to history",
+            project_id=project_id,
             mr_iid=mr_iid,
             status=status,
             failure_reason=failure_reason,
         )
 
         # First get the MR data
-        mr = await self.get_queue_item(mr_iid)
+        mr = await self.get_queue_item(project_id, mr_iid)
         if not mr:
             log.debug(
                 "MR not found for completion (already completed)",
@@ -824,7 +887,7 @@ class QueueManager:
                 # Insert into history
                 await session.execute(text(_INSERT_HISTORY_SQL), history_params)
                 # Delete from active queue
-                await session.execute(text(_DELETE_MR_SQL), {"iid": mr_iid})
+                await session.execute(text(_DELETE_MR_SQL), {"iid": mr_iid, "project_id": project_id})
         except IntegrityError as e:
             # Only suppress the expected duplicate-key race condition on history table
             error_msg = str(e).lower()
@@ -842,7 +905,7 @@ class QueueManager:
             )
             # Explicitly delete from active table in a separate transaction
             async with self.db.transaction() as session:
-                await session.execute(text(_DELETE_MR_SQL), {"iid": mr_iid})
+                await session.execute(text(_DELETE_MR_SQL), {"iid": mr_iid, "project_id": project_id})
             self._cache.invalidate()
             return False
 
@@ -857,15 +920,25 @@ class QueueManager:
         )
         return True
 
-    async def get_queue_stats(self) -> dict[str, int]:
+    async def get_queue_stats(self, project_id: int | None = None) -> dict[str, int]:
         """Get statistics about the active queue.
+
+        Args:
+            project_id: Filter by project ID. None returns stats for all projects.
 
         Returns:
             Dict mapping status to count for active states.
             Example: {"queued": 5, "rebasing": 1, "testing": 2, "merging": 0}
         """
+        if project_id is not None:
+            sql = _SELECT_QUEUE_STATS_BASE_SQL + _SELECT_QUEUE_STATS_PROJECT_SQL + _SELECT_QUEUE_STATS_GROUP_SQL
+            params: dict[str, Any] = {"project_id": project_id}
+        else:
+            sql = _SELECT_QUEUE_STATS_BASE_SQL + _SELECT_QUEUE_STATS_GROUP_SQL
+            params = {}
+
         async with self.db.session() as session:
-            result = await session.execute(text(_SELECT_QUEUE_STATS_SQL))
+            result = await session.execute(text(sql), params)
             rows = result.mappings().all()
             await session.commit()
 
@@ -884,7 +957,11 @@ class QueueManager:
         log.debug("Queue stats retrieved", stats=stats)
         return stats
 
-    async def get_recent_history(self, limit: int = 10) -> list[QueueItem]:
+    async def get_recent_history(
+        self,
+        limit: int = 10,
+        project_id: int | None = None,
+    ) -> list[QueueItem]:
         """Get recently completed MRs for dashboard history.
 
         Returns MRs with status in ('merged', 'failed', 'removed') that have
@@ -892,17 +969,22 @@ class QueueManager:
 
         Args:
             limit: Maximum number of items to return (default: 10).
+            project_id: Filter by project ID. None returns history for all projects.
 
         Returns:
             List of QueueItems ordered by finished_at descending.
         """
-        log.debug("Getting recent history", limit=limit)
+        log.debug("Getting recent history", limit=limit, project_id=project_id)
+
+        if project_id is not None:
+            sql = _SELECT_RECENT_HISTORY_BASE_SQL + _SELECT_RECENT_HISTORY_PROJECT_SQL + _SELECT_RECENT_HISTORY_TAIL_SQL
+            params: dict[str, Any] = {"limit": limit, "project_id": project_id}
+        else:
+            sql = _SELECT_RECENT_HISTORY_BASE_SQL + _SELECT_RECENT_HISTORY_TAIL_SQL
+            params = {"limit": limit}
 
         async with self.db.session() as session:
-            result = await session.execute(
-                text(_SELECT_RECENT_HISTORY_SQL),
-                {"limit": limit},
-            )
+            result = await session.execute(text(sql), params)
             rows = result.mappings().all()
             await session.commit()
 
@@ -910,24 +992,33 @@ class QueueManager:
         log.debug("Recent history retrieved", count=len(history))
         return history
 
-    async def get_dashboard_stats(self, days: int = 7) -> DashboardStats:
+    async def get_dashboard_stats(
+        self,
+        days: int = 7,
+        project_id: int | None = None,
+    ) -> DashboardStats:
         """Get aggregate statistics for dashboard display.
 
         Computes statistics over a rolling window of completed MRs.
 
         Args:
             days: Number of days to include in statistics (default: 7).
+            project_id: Filter by project ID. None returns stats for all projects.
 
         Returns:
             DashboardStats with success rate and timing metrics.
         """
-        log.debug("Getting dashboard stats", days=days)
+        log.debug("Getting dashboard stats", days=days, project_id=project_id)
+
+        if project_id is not None:
+            sql = _SELECT_STATS_WINDOW_BASE_SQL + _SELECT_STATS_WINDOW_PROJECT_SQL
+            params: dict[str, Any] = {"days_param": f"-{days} days", "project_id": project_id}
+        else:
+            sql = _SELECT_STATS_WINDOW_BASE_SQL
+            params = {"days_param": f"-{days} days"}
 
         async with self.db.session() as session:
-            result = await session.execute(
-                text(_SELECT_STATS_WINDOW_SQL),
-                {"days_param": f"-{days} days"},
-            )
+            result = await session.execute(text(sql), params)
             row = result.mappings().one()
             await session.commit()
 
@@ -935,7 +1026,7 @@ class QueueManager:
         total_completed = int(row["total_completed"] or 0)
         success_rate = (merged_count / total_completed * 100) if total_completed > 0 else 0.0
 
-        total_in_queue = await self.get_queue_length()
+        total_in_queue = await self.get_queue_length(project_id)
 
         stats = DashboardStats(
             total_in_queue=total_in_queue,
@@ -950,24 +1041,25 @@ class QueueManager:
         log.debug("Dashboard stats retrieved", stats=stats)
         return stats
 
-    async def cleanup_old_entries(self, days: int = 90) -> int:
+    async def cleanup_old_entries(self, project_id: int, days: int = 90) -> int:
         """Delete queue entries older than specified days.
 
         Only deletes entries that have a finished_at timestamp (completed MRs).
         Active MRs are never deleted regardless of age.
 
         Args:
+            project_id: The GitLab project ID.
             days: Number of days after which to delete entries (default: 90).
 
         Returns:
             Number of entries deleted.
         """
-        log.debug("Cleaning up old queue entries", days=days)
+        log.debug("Cleaning up old queue entries", project_id=project_id, days=days)
 
         async with self.db.transaction() as session:
             cursor_result = await session.execute(
                 text(_CLEANUP_OLD_ENTRIES_SQL),
-                {"days_param": f"-{days} days"},
+                {"days_param": f"-{days} days", "project_id": project_id},
             )
             deleted_count: int = cursor_result.rowcount  # type: ignore[attr-defined]
 
@@ -978,23 +1070,24 @@ class QueueManager:
 
         return deleted_count
 
-    async def get_stale_mrs(self, hours: int) -> list[QueueItem]:
+    async def get_stale_mrs(self, project_id: int, hours: int) -> list[QueueItem]:
         """Get MRs that have been in queue longer than specified hours.
 
         Only returns MRs that haven't received a stale warning yet.
 
         Args:
+            project_id: The GitLab project ID.
             hours: Threshold in hours.
 
         Returns:
             List of QueueItem objects that exceed the threshold and haven't been warned.
         """
-        log.debug("Checking for stale MRs", hours=hours)
+        log.debug("Checking for stale MRs", project_id=project_id, hours=hours)
 
         async with self.db.session() as session:
             result = await session.execute(
                 text(_SELECT_STALE_MRS_SQL),
-                {"hours_param": f"-{hours} hours"},
+                {"hours_param": f"-{hours} hours", "project_id": project_id},
             )
             rows = result.mappings().all()
             await session.commit()
@@ -1010,21 +1103,22 @@ class QueueManager:
 
         return stale_items
 
-    async def mark_stale_warning_sent(self, mr_iid: int) -> bool:
+    async def mark_stale_warning_sent(self, project_id: int, mr_iid: int) -> bool:
         """Mark that stale warning has been sent for an MR.
 
         Args:
+            project_id: The GitLab project ID.
             mr_iid: The MR's internal ID.
 
         Returns:
             True if updated, False if MR not found.
         """
-        log.debug("Marking stale warning sent", mr_iid=mr_iid)
+        log.debug("Marking stale warning sent", project_id=project_id, mr_iid=mr_iid)
 
         async with self.db.transaction() as session:
             cursor_result = await session.execute(
                 text(_MARK_STALE_WARNING_SENT_SQL),
-                {"iid": mr_iid},
+                {"iid": mr_iid, "project_id": project_id},
             )
             changed: bool = cursor_result.rowcount > 0  # type: ignore[attr-defined]
 

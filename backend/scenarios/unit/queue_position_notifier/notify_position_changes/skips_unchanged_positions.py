@@ -38,6 +38,7 @@ class Scenario(vedro.Scenario):
     async def when_notify_position_changes_is_called(self):
         # old_total=2 matches new total (2 items), so no total change either
         self.notified_count = await self.position_notifier._notify_position_changes(
+            99999,
             excluded_mr_iid=999,
             positions_before=self.positions_before,
             old_total=len(self.positions_before),

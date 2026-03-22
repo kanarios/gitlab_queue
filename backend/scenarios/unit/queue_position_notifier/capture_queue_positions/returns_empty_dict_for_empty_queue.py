@@ -18,7 +18,7 @@ class Scenario(vedro.Scenario):
         )
 
     async def when_capture_queue_positions_is_called(self):
-        self.positions = await self.position_notifier.capture_queue_positions()
+        self.positions = await self.position_notifier.capture_queue_positions(99999)
 
     def then_result_is_empty_dict(self):
         assert self.positions == {}

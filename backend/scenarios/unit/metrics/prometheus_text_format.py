@@ -39,7 +39,7 @@ class _FakeQueueManager:
     def __init__(self, stats: dict[str, int]) -> None:
         self._stats = stats
 
-    async def get_queue_stats(self) -> dict[str, int]:
+    async def get_queue_stats(self, project_id: int | None = None) -> dict[str, int]:
         return self._stats
 
 
@@ -69,7 +69,7 @@ class Scenario2(vedro.Scenario):
         )
 
     async def when_queue_metrics_are_updated(self):
-        await update_queue_metrics(self.queue_manager)
+        await update_queue_metrics(self.queue_manager, 99999)
 
     def then_queue_length_gauges_should_be_set(self):
         output = get_metrics_output().decode("utf-8")

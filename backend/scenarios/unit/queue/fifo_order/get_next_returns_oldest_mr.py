@@ -21,11 +21,11 @@ class Scenario(vedro.Scenario):
         # Add MRs in specific order
         for iid in [100, 200, 300]:
             mr = create_test_mr(iid=iid, title=f"MR {iid}")
-            await self.queue.add_to_queue(mr)
+            await self.queue.add_to_queue(99999, mr)
             await asyncio.sleep(0.01)
 
     async def when_next_mr_is_requested(self):
-        self.next_item = await self.queue.get_next_mr()
+        self.next_item = await self.queue.get_next_mr(99999)
 
     def then_oldest_mr_should_be_returned(self):
         """
@@ -43,7 +43,7 @@ class Scenario(vedro.Scenario):
 
         Asserts that calling get_next_mr a second time yields a non-None MR whose IID remains 100 while the MR's state is 'queued'.
         """
-        second_next = await self.queue.get_next_mr()
+        second_next = await self.queue.get_next_mr(99999)
         assert second_next is not None
         assert second_next.mr_iid == 100
 

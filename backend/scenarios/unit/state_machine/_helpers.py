@@ -34,10 +34,12 @@ def create_state_machine(
     notifier: Any = None,
     queue_manager: Any = None,
     position_notifier: Any = None,
+    project_id: int = 99999,
 ) -> MRStateMachine:
     return MRStateMachine(
         notifier=notifier or create_mock_notifier(),
         queue_manager=queue_manager or create_mock_queue_manager(),
+        project_id=project_id,
         mr_iid=mr_iid,
         position_notifier=position_notifier,
     )

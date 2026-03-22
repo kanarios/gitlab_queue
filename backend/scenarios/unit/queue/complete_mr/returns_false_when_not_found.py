@@ -26,7 +26,7 @@ class Scenario(vedro.Scenario):
         """
         Attempts to complete a merge request with ID 999 using status "merged" and stores the boolean outcome in self.result.
         """
-        self.result = await self.queue.complete_mr(999, "merged")
+        self.result = await self.queue.complete_mr(99999, 999, "merged")
 
     def then_result_should_be_false(self):
         """

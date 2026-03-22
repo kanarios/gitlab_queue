@@ -184,7 +184,7 @@ class MergeProcessor:
         await self._check_stale_mrs()
 
         # Get next MR from queue
-        queue_item = await self.queue_manager.get_next_mr()
+        queue_item = await self.queue_manager.get_next_mr(self.settings.gitlab_project_id)
 
         if queue_item is None:
             log.debug("Queue empty, waiting for next iteration")
@@ -233,6 +233,7 @@ class MergeProcessor:
             try:
                 # Create state machine for this MR
                 sm = await self.state_machine_factory(
+                    self.settings.gitlab_project_id,
                     mr_iid=mr_iid,
                     notifier=self.notifier,
                     queue_manager=self.queue_manager,
@@ -242,6 +243,7 @@ class MergeProcessor:
                 )
 
                 ctx = ProcessingContext(
+                    project_id=self.settings.gitlab_project_id,
                     mr_iid=mr_iid,
                     state_machine=sm,
                     start_time=start_time,
@@ -281,7 +283,7 @@ class MergeProcessor:
         sm: StateMachineProtocol | None,
     ) -> None:
         """Handle error recovery: increment attempts, requeue or fail permanently."""
-        queue_item_now = await self.queue_manager.get_queue_item(mr_iid)
+        queue_item_now = await self.queue_manager.get_queue_item(self.settings.gitlab_project_id, mr_iid)
         if queue_item_now is None:
             log.warning("MR no longer in queue during error recovery", mr_iid=mr_iid)
             return
@@ -300,6 +302,7 @@ class MergeProcessor:
                 await self._fail_mr_permanently(sm, mr_iid, error_msg)
             else:
                 await self.queue_manager.complete_mr(
+                    self.settings.gitlab_project_id,
                     mr_iid,
                     status="failed",
                     failure_reason=error_msg,
@@ -315,6 +318,7 @@ class MergeProcessor:
         if sm is not None:
             await sm.trigger_reset_to_queued(error_message=str(error))
         await self.queue_manager.update_mr_state(
+            self.settings.gitlab_project_id,
             mr_iid,
             "queued",
             processing_attempts=attempts,
@@ -355,6 +359,7 @@ class MergeProcessor:
             # Reset attempts on entering testing — MR made progress (rebase succeeded).
             # Zycling protection during pipeline wait is handled by pipeline_timeout_seconds.
             await self.queue_manager.update_mr_state(
+                self.settings.gitlab_project_id,
                 ctx.mr_iid,
                 "testing",
                 processing_attempts=0,
@@ -438,7 +443,7 @@ class MergeProcessor:
         sm = ctx.state_machine
 
         # Get expected SHA from queue item for race condition detection
-        queue_item = await self.queue_manager.get_queue_item(mr_iid)
+        queue_item = await self.queue_manager.get_queue_item(self.settings.gitlab_project_id, mr_iid)
         expected_sha = queue_item.expected_sha if queue_item else None
 
         log.info("Executing merge", mr_iid=mr_iid, expected_sha=expected_sha[:8] if expected_sha else None)
@@ -510,6 +515,7 @@ class MergeProcessor:
                 state=current,
             )
             await self.queue_manager.complete_mr(
+                self.settings.gitlab_project_id,
                 mr_iid,
                 status="failed",
                 failure_reason=error_message,
@@ -528,13 +534,14 @@ class MergeProcessor:
         Sends a single warning per MR (tracked via stale_warning_sent field).
         """
         warning_hours = self.settings.stale_mr_warning_hours
-        stale_items = await self.queue_manager.get_stale_mrs(warning_hours)
+        stale_items = await self.queue_manager.get_stale_mrs(self.settings.gitlab_project_id, warning_hours)
 
         for item in stale_items:
             # Only warn once (check is already done in SQL query, but double-check here)
             if not item.stale_warning_sent:
                 try:
                     sm = await self.state_machine_factory(
+                        self.settings.gitlab_project_id,
                         mr_iid=item.mr_iid,
                         notifier=self.notifier,
                         queue_manager=self.queue_manager,
@@ -543,7 +550,7 @@ class MergeProcessor:
                         position_notifier=self.position_notifier,
                     )
                     await sm.notify_stale_warning(warning_hours=warning_hours)
-                    await self.queue_manager.mark_stale_warning_sent(item.mr_iid)
+                    await self.queue_manager.mark_stale_warning_sent(self.settings.gitlab_project_id, item.mr_iid)
                     log.info(
                         "Stale MR warning sent",
                         mr_iid=item.mr_iid,
@@ -584,7 +591,7 @@ class MergeProcessor:
         log.info("Checking for interrupted MRs")
 
         try:
-            active_items = await self.queue_manager.get_active_queue()
+            active_items = await self.queue_manager.get_active_queue(self.settings.gitlab_project_id)
         except Exception as e:
             log.warning("Failed to get active queue during recovery", error=str(e))
             return
@@ -602,12 +609,17 @@ class MergeProcessor:
 
                 if mr.state == "merged":
                     # Already merged - move to history
-                    await self.queue_manager.complete_mr(item.mr_iid, status="merged")
+                    await self.queue_manager.complete_mr(
+                        self.settings.gitlab_project_id,
+                        item.mr_iid,
+                        status="merged",
+                    )
                     log.info("MR was already merged", mr_iid=item.mr_iid)
 
                 elif mr.state != "opened":
                     # MR closed - move to history as removed
                     await self.queue_manager.complete_mr(
+                        self.settings.gitlab_project_id,
                         item.mr_iid,
                         status="removed",
                         failure_reason="closed_during_recovery",
@@ -617,6 +629,7 @@ class MergeProcessor:
                 elif self.settings.queue_label not in mr.labels and self.settings.hotfix_label not in mr.labels:
                     # Label removed - mark as removed (orphaned entry cleanup)
                     await self.queue_manager.complete_mr(
+                        self.settings.gitlab_project_id,
                         item.mr_iid,
                         status="removed",
                         failure_reason="label_removed",
@@ -625,7 +638,11 @@ class MergeProcessor:
 
                 elif item.state in ("rebasing", "testing", "merging"):
                     # Reset intermediate states to queued for re-processing
-                    await self.queue_manager.update_mr_state(item.mr_iid, "queued")
+                    await self.queue_manager.update_mr_state(
+                        self.settings.gitlab_project_id,
+                        item.mr_iid,
+                        "queued",
+                    )
                     log.info(
                         "Reset MR to queued",
                         mr_iid=item.mr_iid,
@@ -642,6 +659,7 @@ class MergeProcessor:
 
             except GitLabNotFoundError:
                 await self.queue_manager.complete_mr(
+                    self.settings.gitlab_project_id,
                     item.mr_iid,
                     status="removed",
                     failure_reason="not_found",
@@ -700,7 +718,7 @@ class MergeProcessor:
             return
 
         # Get current queue IIDs
-        active_items = await self.queue_manager.get_active_queue()
+        active_items = await self.queue_manager.get_active_queue(self.settings.gitlab_project_id)
         queued_iids = {item.mr_iid for item in active_items}
 
         # Add missing MRs to queue
@@ -708,7 +726,7 @@ class MergeProcessor:
         for mr in gitlab_mrs:
             if mr.iid not in queued_iids:
                 is_hotfix = self.settings.hotfix_label in mr.labels
-                await self.queue_manager.add_to_queue(mr, is_hotfix=is_hotfix)
+                await self.queue_manager.add_to_queue(self.settings.gitlab_project_id, mr, is_hotfix=is_hotfix)
                 log.info(
                     "Added missing MR to queue",
                     mr_iid=mr.iid,
@@ -733,8 +751,8 @@ class MergeProcessor:
             return
 
         try:
-            queue_items = await self.queue_manager.get_active_queue()
-            queue_stats = await self.queue_manager.get_queue_stats()
+            queue_items = await self.queue_manager.get_active_queue(self.settings.gitlab_project_id)
+            queue_stats = await self.queue_manager.get_queue_stats(self.settings.gitlab_project_id)
 
             # Convert queue items to dicts for WebSocket
             queue_data = []

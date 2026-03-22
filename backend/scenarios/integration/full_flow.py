@@ -57,13 +57,14 @@ async def full_flow_with_failures_and_recovery():
             mr_400 = _make_mr(400, "Flaky Pipeline", "flaky123")
             mr_402 = _make_mr(402, "Conflict MR", "conflict123")
 
-            await queue.add_to_queue(mr_400, is_hotfix=False)
-            await queue.add_to_queue(mr_402, is_hotfix=False)
+            settings_pid = FakeSettings().gitlab_project_id
+            await queue.add_to_queue(settings_pid, mr_400, is_hotfix=False)
+            await queue.add_to_queue(settings_pid, mr_402, is_hotfix=False)
 
             # Per-MR state machines
             state_machines: dict[int, FakeStateMachine] = {}
 
-            async def sm_factory(mr_iid: int, **_: Any) -> FakeStateMachine:
+            async def sm_factory(project_id: int, mr_iid: int, **_: Any) -> FakeStateMachine:
                 sm = FakeStateMachine(current_state=FakeCurrentState(id="queued"))
                 state_machines[mr_iid] = sm
                 return sm
@@ -115,12 +116,12 @@ async def full_flow_with_failures_and_recovery():
         with when("system handles various failure scenarios"):
             results: list[tuple[int, ProcessingResult]] = []
 
-            queue_item = await queue.get_next_mr()
+            queue_item = await queue.get_next_mr(settings_pid)
             assert queue_item is not None and queue_item.mr_iid == 400
             result_400 = await processor_400._process_mr(queue_item)
             results.append((400, result_400))
 
-            queue_item = await queue.get_next_mr()
+            queue_item = await queue.get_next_mr(settings_pid)
             assert queue_item is not None and queue_item.mr_iid == 402
             result_402 = await processor_402._process_mr(queue_item)
             results.append((402, result_402))

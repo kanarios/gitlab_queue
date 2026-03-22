@@ -22,7 +22,7 @@ class Scenario(vedro.Scenario):
         )
 
     async def when_notify_initial_position_is_called_for_missing_mr(self):
-        await self.position_notifier.notify_initial_position(self.mr_iid)
+        await self.position_notifier.notify_initial_position(99999, self.mr_iid)
 
     def then_notify_is_not_called(self):
         self.notifier.notify.assert_not_called()

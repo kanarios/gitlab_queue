@@ -28,8 +28,8 @@ class Scenario(vedro.Scenario):
             (5, "timeout"),
         ]:
             mr = create_test_mr(iid=iid, title=f"MR {iid}")
-            await self.queue.add_to_queue(mr)
-            await self.queue.complete_mr(iid, status=status)
+            await self.queue.add_to_queue(99999, mr)
+            await self.queue.complete_mr(99999, iid, status=status)
 
     async def when_recent_history_is_retrieved(self):
         self.history = await self.queue.get_recent_history(limit=10)

@@ -370,7 +370,7 @@ async def concurrent_add_and_remove():
 
             # If MR is in queue, it should not be in 'removed' state
             for item in queue_items:
-                item_state = await queue.get_mr_state(item.mr_iid)
+                item_state = await queue.get_mr_state(settings.gitlab_project_id, item.mr_iid)
                 assert item_state is not None
                 assert item_state["status"] != "removed", "Active queue item should not be 'removed'"
 
@@ -383,6 +383,7 @@ async def concurrent_processing_doesnt_duplicate():
         with given("multiple readers accessing queue position simultaneously"):
             queue = QueueManager(db)
             await queue.ensure_schema()
+            settings = created_test_settings()
 
             # Pre-populate queue with 5 MRs
             for i in range(1, 6):
@@ -398,7 +399,7 @@ async def concurrent_processing_doesnt_duplicate():
                     merge_status="can_be_merged",
                     web_url=f"https://gitlab.com/test/project/-/merge_requests/{i}",
                 )
-                await queue.add_to_queue(test_mr, is_hotfix=False)
+                await queue.add_to_queue(settings.gitlab_project_id, test_mr, is_hotfix=False)
 
         # No mocks needed - pure database operations
         with when("multiple concurrent position queries"):
@@ -406,7 +407,7 @@ async def concurrent_processing_doesnt_duplicate():
             async def get_positions():
                 positions = {}
                 for i in range(1, 6):
-                    pos = await queue.get_queue_position(i)
+                    pos = await queue.get_queue_position(settings.gitlab_project_id, i)
                     positions[i] = pos
                 return positions
 

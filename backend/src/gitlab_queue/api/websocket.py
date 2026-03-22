@@ -285,8 +285,9 @@ async def websocket_queue_updates(websocket: WebSocket) -> None:
     try:
         # Send initial queue state
         queue_manager = state.queue_manager
-        queue_items = await queue_manager.get_active_queue()
-        stats = await queue_manager.get_queue_stats()
+        project_id = state.settings.gitlab_project_id
+        queue_items = await queue_manager.get_active_queue(project_id)
+        stats = await queue_manager.get_queue_stats(project_id)
 
         # Convert queue items to dicts
         queue_data = []

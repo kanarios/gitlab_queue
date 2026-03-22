@@ -20,7 +20,7 @@ class Scenario(vedro.Scenario):
         )
 
     async def when_capture_queue_positions_is_called(self):
-        self.positions = await self.position_notifier.capture_queue_positions()
+        self.positions = await self.position_notifier.capture_queue_positions(99999)
 
     def then_only_queued_mrs_are_captured(self):
         assert 101 in self.positions

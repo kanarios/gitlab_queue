@@ -23,17 +23,18 @@ class FakePositionNotifier:
     notify_after_completion_calls: list[dict[str, Any]] = field(default_factory=list)
     notify_after_add_calls: list[dict[str, Any]] = field(default_factory=list)
 
-    async def notify_initial_position(self, mr_iid: int) -> None:
+    async def notify_initial_position(self, project_id: int, mr_iid: int) -> None:
         self.notify_initial_calls.append(mr_iid)
         if self.notify_initial_error is not None:
             raise self.notify_initial_error
 
-    async def capture_queue_positions(self) -> dict[int, int]:
+    async def capture_queue_positions(self, project_id: int) -> dict[int, int]:
         self.capture_calls.append(None)
         return self.captured_positions
 
     async def notify_affected_mrs_after_completion(
         self,
+        project_id: int,
         completed_mr_iid: int,
         positions_before: dict[int, int],
         old_total: int,
@@ -48,6 +49,7 @@ class FakePositionNotifier:
 
     async def notify_affected_mrs_after_mr_added(
         self,
+        project_id: int,
         added_mr_iid: int,
         positions_before: dict[int, int],
         old_total: int,

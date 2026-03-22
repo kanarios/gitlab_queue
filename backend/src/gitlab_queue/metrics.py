@@ -88,7 +88,7 @@ def get_metrics_output() -> bytes:
     return generate_latest()
 
 
-async def update_queue_metrics(queue_manager: QueueManager) -> None:
+async def update_queue_metrics(queue_manager: QueueManager, project_id: int) -> None:
     """Update queue length metrics from queue manager.
 
     Fetches current queue stats and updates the QUEUE_LENGTH gauge
@@ -96,8 +96,9 @@ async def update_queue_metrics(queue_manager: QueueManager) -> None:
 
     Args:
         queue_manager: Queue manager instance to get stats from.
+        project_id: GitLab project ID.
     """
-    stats = await queue_manager.get_queue_stats()
+    stats = await queue_manager.get_queue_stats(project_id)
     for status, count in stats.items():
         QUEUE_LENGTH.labels(status=status).set(count)
 

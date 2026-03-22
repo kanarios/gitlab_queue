@@ -37,6 +37,7 @@ async def process_mr_with_async_rebase():
         processor.gitlab_client.latest_pipeline_response = pipeline
 
         ctx = ProcessingContext(
+            project_id=99999,
             mr_iid=43,
             state_machine=sm,
             start_time=datetime.now(UTC),

@@ -34,7 +34,7 @@ class Scenario(vedro.Scenario):
         )
 
     async def when_capture_queue_positions_is_called(self):
-        self.positions = await self.position_notifier.capture_queue_positions()
+        self.positions = await self.position_notifier.capture_queue_positions(99999)
 
     def then_mr_in_excluded_state_is_not_captured(self):
         assert 102 not in self.positions

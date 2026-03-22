@@ -216,7 +216,7 @@ class QueueScheduler:
         gitlab_mr_iids = {mr.iid for mr in gitlab_mrs}
 
         # Get current queue state from database
-        queue_items = await self.queue_manager.get_active_queue()
+        queue_items = await self.queue_manager.get_active_queue(self.settings.gitlab_project_id)
         stats.mrs_in_queue = len(queue_items)
 
         # Build set of MR IIDs from queue
@@ -283,7 +283,7 @@ class QueueScheduler:
             if item.mr_iid not in mrs_to_check:
                 continue
             if await self._should_remove_from_queue(item.mr_iid):
-                await self.queue_manager.remove_from_queue(item.mr_iid)
+                await self.queue_manager.remove_from_queue(self.settings.gitlab_project_id, item.mr_iid)
                 removed_count += 1
                 log.info("Removed orphaned MR from queue", mr_iid=item.mr_iid)
 
@@ -298,7 +298,7 @@ class QueueScheduler:
         if self._websocket_manager:
             await self._broadcast_queue_update()
 
-        updated_queue = await self.queue_manager.get_active_queue()
+        updated_queue = await self.queue_manager.get_active_queue(self.settings.gitlab_project_id)
         stats.mrs_in_queue = len(updated_queue)
 
     async def _broadcast_queue_update(self) -> None:
@@ -307,8 +307,8 @@ class QueueScheduler:
             return
 
         try:
-            queue_items = await self.queue_manager.get_active_queue()
-            queue_stats = await self.queue_manager.get_queue_stats()
+            queue_items = await self.queue_manager.get_active_queue(self.settings.gitlab_project_id)
+            queue_stats = await self.queue_manager.get_queue_stats(self.settings.gitlab_project_id)
 
             # Convert queue items to dicts for WebSocket
             queue_data = []
@@ -354,7 +354,7 @@ class QueueScheduler:
         # Check if hotfix label is present
         is_hotfix = self.settings.hotfix_label in mr.labels
 
-        await self.queue_manager.add_to_queue(mr, is_hotfix=is_hotfix)
+        await self.queue_manager.add_to_queue(self.settings.gitlab_project_id, mr, is_hotfix=is_hotfix)
         log.info(
             "Added MR to queue via polling fallback",
             mr_iid=mr.iid,

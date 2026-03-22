@@ -108,6 +108,7 @@ class PipelineHandler:
         retried_job_names = list(dict.fromkeys(j.name for j in jobs_to_retry))
 
         await self.queue_manager.update_mr_state(
+            ctx.project_id,
             ctx.mr_iid,
             "testing",
             retried_jobs=updated,
@@ -189,6 +190,7 @@ class PipelineHandler:
         # Persist partial progress so successfully retried jobs are not retried again
         if succeeded_job_names:
             await self.queue_manager.update_mr_state(
+                ctx.project_id,
                 mr_iid,
                 "testing",
                 retried_jobs=updated,
@@ -355,7 +357,7 @@ class PipelineHandler:
 
     async def _init_pipeline_wait_state(self, ctx: ProcessingContext) -> PipelineWaitState:
         """Initialize mutable state for the pipeline wait loop."""
-        queue_item = await self.queue_manager.get_queue_item(ctx.mr_iid)
+        queue_item = await self.queue_manager.get_queue_item(ctx.project_id, ctx.mr_iid)
         retried_jobs: dict[str, int] = queue_item.retried_jobs if queue_item else {}
 
         return create_pipeline_wait_state(
@@ -407,6 +409,7 @@ class PipelineHandler:
             return None
         if stale_check == StaleCheckResult.SWITCHED:
             await self.queue_manager.update_mr_state(
+                ctx.project_id,
                 mr_iid,
                 "testing",
                 pipeline_id=pipeline.id,
@@ -447,7 +450,9 @@ class PipelineHandler:
             return outcome.result
         if outcome.should_reset and outcome.context is not None:
             state.rebase_ctx = outcome.context
-            await self.queue_manager.update_mr_state(mr_iid, "testing", retried_jobs={})
+            await self.queue_manager.update_mr_state(
+                self.settings.gitlab_project_id, mr_iid, "testing", retried_jobs={}
+            )
             state.retried_jobs = {}
             state.start_time = datetime.now(UTC)
             return None  # Skip current pipeline, wait for new one after rebase
@@ -467,7 +472,7 @@ class PipelineHandler:
         tracked pipeline is dead (canceled/failed/canceling), force-switch
         to the newer pipeline. This handles wrong pipeline binding after rebase.
         """
-        queue_item = await self.queue_manager.get_queue_item(mr_iid)
+        queue_item = await self.queue_manager.get_queue_item(self.settings.gitlab_project_id, mr_iid)
         if not (queue_item and queue_item.pipeline_id is not None and pipeline.id > queue_item.pipeline_id):
             return
 
@@ -484,6 +489,7 @@ class PipelineHandler:
             new_sha=pipeline.sha,
         )
         await self.queue_manager.update_mr_state(
+            self.settings.gitlab_project_id,
             mr_iid,
             "testing",
             pipeline_id=pipeline.id,
@@ -585,7 +591,7 @@ class PipelineHandler:
         Returns:
             StaleCheckResult indicating what to do with this pipeline.
         """
-        queue_item = await self.queue_manager.get_queue_item(mr_iid)
+        queue_item = await self.queue_manager.get_queue_item(self.settings.gitlab_project_id, mr_iid)
         if queue_item is None:
             return StaleCheckResult.OK
 
@@ -634,7 +640,7 @@ class PipelineHandler:
         Returns:
             True if a replacement was found and state was updated.
         """
-        queue_item = await self.queue_manager.get_queue_item(mr_iid)
+        queue_item = await self.queue_manager.get_queue_item(self.settings.gitlab_project_id, mr_iid)
         if not (queue_item and queue_item.expected_sha):
             return False
 
@@ -659,6 +665,7 @@ class PipelineHandler:
             new_status=best.status,
         )
         await self.queue_manager.update_mr_state(
+            self.settings.gitlab_project_id,
             mr_iid,
             "testing",
             pipeline_id=best.id,
@@ -700,7 +707,7 @@ class PipelineHandler:
 
         if pipeline.status == "success":
             # Validate SHA before processing success to prevent acting on stale pipeline
-            queue_item = await self.queue_manager.get_queue_item(mr_iid)
+            queue_item = await self.queue_manager.get_queue_item(ctx.project_id, mr_iid)
             if (
                 queue_item
                 and queue_item.expected_sha
@@ -774,7 +781,7 @@ class PipelineHandler:
         retried_jobs = dict(retried_jobs)
 
         # Sync retried_jobs with DB (race condition protection, similar to old retry_count sync)
-        queue_item = await self.queue_manager.get_queue_item(mr_iid)
+        queue_item = await self.queue_manager.get_queue_item(ctx.project_id, mr_iid)
         if queue_item and queue_item.retried_jobs:
             for job_name, count in queue_item.retried_jobs.items():
                 retried_jobs[job_name] = max(retried_jobs.get(job_name, 0), count)

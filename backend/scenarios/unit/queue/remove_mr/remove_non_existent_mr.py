@@ -21,7 +21,7 @@ class Scenario(vedro.Scenario):
 
         The stored value will indicate whether the removal succeeded (`True`) or failed (`False`).
         """
-        self.result = await self.queue.remove_from_queue(999)
+        self.result = await self.queue.remove_from_queue(99999, 999)
 
     def then_result_should_be_false(self):
         """
