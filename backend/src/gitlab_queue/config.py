@@ -13,8 +13,10 @@ Example:
 from __future__ import annotations
 
 import hmac
+import json
 import os
 import warnings
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 from urllib.parse import urlparse
@@ -161,6 +163,29 @@ def _to_cors_origins_list(value: str | list[str]) -> list[str]:
     return origins
 
 
+@dataclass(frozen=True)
+class ProjectConfig:
+    """Per-project configuration for multi-project deployments.
+
+    Each project has its own GitLab token, project_id, and queue settings.
+    Created either from GITLAB_QUEUE_PROJECTS JSON env var or from
+    legacy single-project settings for backward compatibility.
+
+    Attributes:
+        project_id: GitLab project ID.
+        token: GitLab access token for this project.
+        target_branch: Branch MRs target (e.g., 'master', 'main').
+        queue_label: Label that triggers queue addition.
+        hotfix_label: Label for hotfix priority.
+    """
+
+    project_id: int
+    token: Secret
+    target_branch: str = "master"
+    queue_label: str = "merge_queue"
+    hotfix_label: str = "hotfix"
+
+
 @environ.config(prefix="GITLAB_QUEUE")
 class Settings:
     """Application configuration loaded from environment variables.
@@ -259,9 +284,100 @@ class Settings:
     dashboard_enabled: bool = bool_var(default=True)
     cors_origins: list[str] = var(default="http://localhost:5173", converter=_to_cors_origins_list)
 
+    # Multi-project (optional JSON, overrides single-project fields above)
+    projects_json: str | None = var(name="projects", default=None)
+
     # Monitoring
     log_level: LogLevel = var(default="INFO", converter=_to_log_level)
     log_format: LogFormat = var(default="json", converter=_to_log_format)
+
+    @property
+    def projects(self) -> list[ProjectConfig]:
+        """Return per-project configurations.
+
+        If GITLAB_QUEUE_PROJECTS is set (JSON array), parses it into ProjectConfig list.
+        Otherwise, creates a single ProjectConfig from legacy single-project fields.
+        """
+        if self.projects_json is not None:
+            return _parse_projects_json(self.projects_json)
+        return [
+            ProjectConfig(
+                project_id=self.gitlab_project_id,
+                token=self.gitlab_token,
+                target_branch=self.target_branch,
+                queue_label=self.queue_label,
+                hotfix_label=self.hotfix_label,
+            )
+        ]
+
+
+def _parse_projects_json(raw: str) -> list[ProjectConfig]:
+    """Parse GITLAB_QUEUE_PROJECTS JSON into list of ProjectConfig.
+
+    Expected format:
+        [
+            {"project_id": 123, "token": "glpat-aaa"},
+            {"project_id": 456, "token": "glpat-bbb", "target_branch": "main"}
+        ]
+
+    Raises:
+        ValueError: If JSON is invalid, empty, or contains duplicate project_ids.
+    """
+    data = _decode_projects_json(raw)
+    configs: list[ProjectConfig] = []
+    seen_ids: set[int] = set()
+
+    for entry in data:
+        config = _parse_project_entry(entry, seen_ids)
+        configs.append(config)
+
+    return configs
+
+
+def _decode_projects_json(raw: str) -> list[dict[str, Any]]:
+    """Decode and validate top-level JSON structure."""
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        msg = f"GITLAB_QUEUE_PROJECTS is not valid JSON: {e}"
+        raise ValueError(msg) from None
+
+    if not isinstance(data, list) or not data:
+        msg = "GITLAB_QUEUE_PROJECTS must be a non-empty JSON array"
+        raise ValueError(msg)
+
+    return data
+
+
+def _parse_project_entry(entry: Any, seen_ids: set[int]) -> ProjectConfig:
+    """Validate a single project entry and return ProjectConfig."""
+    if not isinstance(entry, dict):
+        msg = f"Each project entry must be a JSON object, got: {type(entry).__name__}"
+        raise ValueError(msg)
+
+    project_id = entry.get("project_id")
+    token = entry.get("token")
+
+    if project_id is None or token is None:
+        msg = "Each project entry must have 'project_id' and 'token' fields"
+        raise ValueError(msg)
+
+    if not isinstance(project_id, int) or project_id <= 0:
+        msg = f"project_id must be a positive integer, got: {project_id}"
+        raise ValueError(msg)
+
+    if project_id in seen_ids:
+        msg = f"Duplicate project_id: {project_id}"
+        raise ValueError(msg)
+    seen_ids.add(project_id)
+
+    return ProjectConfig(
+        project_id=project_id,
+        token=Secret(token),
+        target_branch=entry.get("target_branch", "master"),
+        queue_label=entry.get("queue_label", "merge_queue"),
+        hotfix_label=entry.get("hotfix_label", "hotfix"),
+    )
 
 
 def _mask_database_url(self: Settings) -> str:
@@ -522,6 +638,15 @@ def _validate_cors_settings(settings: Settings, errors: list[str]) -> None:
             errors.append(f"Invalid CORS origin '{origin}': must start with http:// or https://")
 
 
+def _validate_projects_settings(settings: Settings, errors: list[str]) -> None:
+    """Validate multi-project configuration if provided."""
+    if settings.projects_json is not None:
+        try:
+            _ = settings.projects  # triggers _parse_projects_json
+        except ValueError as e:
+            errors.append(str(e))
+
+
 def _validate_settings(settings: Settings) -> None:
     """Validate settings for logical consistency and valid ranges.
 
@@ -543,6 +668,7 @@ def _validate_settings(settings: Settings) -> None:
     _validate_security_settings(settings, errors)
     _validate_webhook_server_settings(settings, errors)
     _validate_cors_settings(settings, errors)
+    _validate_projects_settings(settings, errors)
 
     if errors:
         raise ConfigurationError("Configuration validation failed:\n  - " + "\n  - ".join(errors))
@@ -593,6 +719,7 @@ __all__: list[str] = [
     "ConfigurationError",
     "LogFormat",
     "LogLevel",
+    "ProjectConfig",
     "Secret",
     "Settings",
     "load_settings",
