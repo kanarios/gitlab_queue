@@ -27,9 +27,10 @@ import uvicorn
 from gitlab_queue import __version__
 from gitlab_queue.api.websocket import WebSocketManager
 from gitlab_queue.clients.gitlab import GitLabAPIError, GitLabCircuitOpenError, GitLabClient
-from gitlab_queue.config import ConfigurationError, load_settings
+from gitlab_queue.config import ConfigurationError, ProjectConfig, load_settings
 from gitlab_queue.core.notifier import MRNotifier
 from gitlab_queue.core.processor import MergeProcessor, create_processor
+from gitlab_queue.core.project_components import ProjectComponents
 from gitlab_queue.core.queue import QueueManager
 from gitlab_queue.core.queue_position_notifier import QueuePositionNotifier
 from gitlab_queue.core.scheduler import QueueScheduler, create_scheduler
@@ -62,47 +63,70 @@ class Application:
     """Application container holding all initialized components.
 
     Provides structured access to components and cleanup coordination.
+    Supports multi-project deployments via project_components dict.
     """
 
     settings: Settings
     database: Database
-    gitlab_client: GitLabClient
     queue_manager: QueueManager
-    notifier: MRNotifier
-    position_notifier: QueuePositionNotifier
-    processor: MergeProcessor
-    scheduler: QueueScheduler
+    project_components: dict[int, ProjectComponents]
     retry_manager: WebhookRetryManager
     retry_processor: WebhookRetryProcessor
     analytics_processor: AnalyticsJobProcessor
     shutdown_manager: ShutdownManager
     health: ApplicationHealth
 
+    # Backward compat: single-project accessors for code that hasn't migrated yet
+    @property
+    def gitlab_client(self) -> GitLabClient:
+        """Return the first project's GitLab client (single-project compat)."""
+        return next(iter(self.project_components.values())).gitlab_client
 
-async def verify_gitlab_access(client: GitLabClient, settings: Settings) -> None:
-    """Verify GitLab token has required permissions.
+    @property
+    def notifier(self) -> MRNotifier:
+        """Return the first project's notifier (single-project compat)."""
+        return next(iter(self.project_components.values())).notifier
+
+    @property
+    def position_notifier(self) -> QueuePositionNotifier:
+        """Return the first project's position notifier (single-project compat)."""
+        return next(iter(self.project_components.values())).position_notifier
+
+    @property
+    def processor(self) -> MergeProcessor:
+        """Return the first project's processor (single-project compat)."""
+        return next(iter(self.project_components.values())).processor
+
+    @property
+    def scheduler(self) -> QueueScheduler:
+        """Return the first project's scheduler (single-project compat)."""
+        return next(iter(self.project_components.values())).scheduler
+
+
+async def verify_gitlab_access(client: GitLabClient, project_config: ProjectConfig) -> None:
+    """Verify GitLab token has required permissions for a project.
 
     Performs a test API call to ensure the token is valid and has
     access to the configured project.
 
     Args:
         client: Initialized GitLab client.
-        settings: Settings with project ID.
+        project_config: Per-project configuration.
 
     Raises:
         GitLabAPIError: If verification fails.
     """
     log.debug(
         "Verifying GitLab access",
-        project_id=settings.gitlab_project_id,
+        project_id=project_config.project_id,
     )
 
     # Try to list MRs with the queue label - this verifies read access
-    mrs = await client.list_mrs_with_label(settings.queue_label)
+    mrs = await client.list_mrs_with_label(project_config.queue_label)
 
     log.info(
         "GitLab access verified",
-        project_id=settings.gitlab_project_id,
+        project_id=project_config.project_id,
         mrs_with_label=len(mrs),
     )
 
@@ -166,8 +190,12 @@ async def create_application(settings: Settings) -> Application:
     Components are initialized in dependency order:
     1. Shutdown manager (always first for cleanup registration)
     2. Database (retries indefinitely until available)
-    3. GitLab client (may start in degraded mode if unavailable)
-    4. Queue manager and other components
+    3. Per-project GitLab clients, processors, schedulers
+    4. Shared components (retry manager, analytics)
+
+    Supports multi-project deployments: creates separate components
+    per project (GitLabClient, processor, scheduler) while sharing
+    database and queue_manager.
 
     Args:
         settings: Validated application settings.
@@ -179,11 +207,12 @@ async def create_application(settings: Settings) -> Application:
         asyncio.CancelledError: If shutdown requested during database retry.
         GitLabAPIError: Only if startup_gitlab_required=True and GitLab fails.
     """
+    project_configs = settings.projects
     log.info(
         "Initializing application",
         version=__version__,
-        project_id=settings.gitlab_project_id,
-        target_branch=settings.target_branch,
+        project_count=len(project_configs),
+        project_ids=[p.project_id for p in project_configs],
     )
 
     # Initialize health tracking
@@ -204,58 +233,29 @@ async def create_application(settings: Settings) -> Application:
     # Set database for FastAPI dependency injection
     set_database(database)
 
-    # 3. Initialize GitLab client
-    gitlab_client = GitLabClient(settings)
-    shutdown_manager.register_component("gitlab_client", gitlab_client.close)
-
-    # 4. Verify GitLab access (may fail if degraded mode allowed)
-    gitlab_verified = False
-    try:
-        await verify_gitlab_access(gitlab_client, settings)
-        gitlab_verified = True
-        health.gitlab = GitLabHealth.from_circuit_breaker(gitlab_client.circuit_breaker)
-    except (GitLabAPIError, GitLabCircuitOpenError) as e:
-        if settings.startup_gitlab_required:
-            raise
-        log.warning(
-            "GitLab verification failed, starting in degraded mode",
-            error=str(e),
-        )
-        health.gitlab = GitLabHealth(
-            status=ComponentStatus.UNHEALTHY,
-            circuit_state="unknown",
-            failure_count=0,
-        )
-
-    # 5. Run database migrations (creates all tables via Alembic)
+    # 3. Run database migrations (creates all tables via Alembic)
     await run_migrations(settings.database_url)
 
-    # 6. Initialize queue manager
+    # 4. Initialize shared queue manager
     queue_manager = QueueManager(db=database)
 
-    # 7. Initialize notifier
-    notifier = MRNotifier(gitlab_client=gitlab_client, settings=settings)
+    # 5. Initialize per-project components
+    project_components: dict[int, ProjectComponents] = {}
+    gitlab_verified = False
 
-    # 8. Initialize position notifier
-    position_notifier = QueuePositionNotifier(notifier=notifier, queue_manager=queue_manager)
+    for project_config in project_configs:
+        pc = await _create_project_components(
+            project_config=project_config,
+            settings=settings,
+            queue_manager=queue_manager,
+            shutdown_manager=shutdown_manager,
+            health=health,
+        )
+        project_components[project_config.project_id] = pc
+        if health.gitlab and health.gitlab.status == ComponentStatus.HEALTHY:
+            gitlab_verified = True
 
-    # 9. Create processor
-    processor = create_processor(
-        gitlab_client=gitlab_client,
-        queue_manager=queue_manager,
-        notifier=notifier,
-        settings=settings,
-        position_notifier=position_notifier,
-    )
-
-    # 10. Create scheduler for polling fallback
-    scheduler = create_scheduler(
-        gitlab_client=gitlab_client,
-        queue_manager=queue_manager,
-        settings=settings,
-    )
-
-    # 11. Initialize webhook retry manager (tables created by migrations)
+    # 6. Initialize webhook retry manager (tables created by migrations)
     retry_manager = WebhookRetryManager(
         db=database,
         max_attempts=settings.webhook_retry_max_attempts,
@@ -263,17 +263,18 @@ async def create_application(settings: Settings) -> Application:
         max_delay_seconds=settings.webhook_retry_max_delay_seconds,
     )
 
-    # 12. Create webhook retry processor
+    # 7. Create webhook retry processor (uses first project's components for now)
+    first_pc = next(iter(project_components.values()))
     retry_processor = create_retry_processor(
         retry_manager=retry_manager,
         settings=settings,
-        gitlab_client=gitlab_client,
+        gitlab_client=first_pc.gitlab_client,
         queue_manager=queue_manager,
-        notifier=notifier,
-        position_notifier=position_notifier,
+        notifier=first_pc.notifier,
+        position_notifier=first_pc.position_notifier,
     )
 
-    # 13. Create analytics job processor
+    # 8. Create analytics job processor
     analytics_processor = create_analytics_processor(
         database=database,
         settings=settings,
@@ -285,17 +286,88 @@ async def create_application(settings: Settings) -> Application:
     return Application(
         settings=settings,
         database=database,
-        gitlab_client=gitlab_client,
         queue_manager=queue_manager,
-        notifier=notifier,
-        position_notifier=position_notifier,
-        processor=processor,
-        scheduler=scheduler,
+        project_components=project_components,
         retry_manager=retry_manager,
         retry_processor=retry_processor,
         analytics_processor=analytics_processor,
         shutdown_manager=shutdown_manager,
         health=health,
+    )
+
+
+async def _create_project_components(
+    *,
+    project_config: ProjectConfig,
+    settings: Settings,
+    queue_manager: QueueManager,
+    shutdown_manager: ShutdownManager,
+    health: ApplicationHealth,
+) -> ProjectComponents:
+    """Create per-project components (GitLabClient, processor, scheduler).
+
+    Args:
+        project_config: Per-project configuration.
+        settings: Global application settings.
+        queue_manager: Shared queue manager.
+        shutdown_manager: For registering cleanup handlers.
+        health: Application health tracker.
+
+    Returns:
+        ProjectComponents for this project.
+    """
+    pid = project_config.project_id
+    log.info("Initializing project components", project_id=pid)
+
+    # Create per-project GitLab client
+    gitlab_client = GitLabClient.for_project(project_config, settings)
+    shutdown_manager.register_component(f"gitlab_client_p{pid}", gitlab_client.close)
+
+    # Verify GitLab access
+    try:
+        await verify_gitlab_access(gitlab_client, project_config)
+        health.gitlab = GitLabHealth.from_circuit_breaker(gitlab_client.circuit_breaker)
+    except (GitLabAPIError, GitLabCircuitOpenError) as e:
+        if settings.startup_gitlab_required:
+            raise
+        log.warning(
+            "GitLab verification failed for project, starting in degraded mode",
+            project_id=pid,
+            error=str(e),
+        )
+        health.gitlab = GitLabHealth(
+            status=ComponentStatus.UNHEALTHY,
+            circuit_state="unknown",
+            failure_count=0,
+        )
+
+    # Create per-project notifier and position notifier
+    notifier = MRNotifier(gitlab_client=gitlab_client, settings=settings)
+    position_notifier = QueuePositionNotifier(notifier=notifier, queue_manager=queue_manager)
+
+    # Create per-project processor and scheduler
+    processor = create_processor(
+        gitlab_client=gitlab_client,
+        queue_manager=queue_manager,
+        notifier=notifier,
+        settings=settings,
+        position_notifier=position_notifier,
+    )
+    scheduler = create_scheduler(
+        gitlab_client=gitlab_client,
+        queue_manager=queue_manager,
+        settings=settings,
+    )
+
+    log.info("Project components initialized", project_id=pid)
+
+    return ProjectComponents(
+        config=project_config,
+        gitlab_client=gitlab_client,
+        notifier=notifier,
+        position_notifier=position_notifier,
+        processor=processor,
+        scheduler=scheduler,
     )
 
 
@@ -337,18 +409,21 @@ def _create_webhook_server(app: Application) -> tuple[uvicorn.Server, asyncio.Ta
     """
     websocket_manager = WebSocketManager()
 
-    # Connect scheduler, processor, and retry_processor to WebSocket manager for real-time updates
-    app.scheduler.set_websocket_manager(websocket_manager)
-    app.processor.set_websocket_manager(websocket_manager)
+    # Connect all per-project processors/schedulers to WebSocket manager
+    for pc in app.project_components.values():
+        pc.processor.set_websocket_manager(websocket_manager)
+        pc.scheduler.set_websocket_manager(websocket_manager)
     app.retry_processor.set_websocket_manager(websocket_manager)
 
+    # Use first project's components for WebhookAppState (PR 4 will add full multi-project routing)
+    first_pc = next(iter(app.project_components.values()))
     webhook_state = WebhookAppState(
         settings=app.settings,
         database=app.database,
-        gitlab_client=app.gitlab_client,
+        gitlab_client=first_pc.gitlab_client,
         queue_manager=app.queue_manager,
-        notifier=app.notifier,
-        position_notifier=app.position_notifier,
+        notifier=first_pc.notifier,
+        position_notifier=first_pc.position_notifier,
         retry_manager=app.retry_manager,
         health=app.health,
         websocket_manager=websocket_manager,
@@ -399,12 +474,13 @@ async def run_application(app: Application) -> int:
             uvicorn_server, webhook_server_task = _create_webhook_server(app)
             app.shutdown_manager.register_component("webhook_server", uvicorn_server.shutdown)
 
-        # Start all background processors (after WebSocket manager is set)
-        processor_task = asyncio.create_task(app.processor.run())
+        # Start per-project processors and schedulers
+        project_tasks: list[tuple[str, asyncio.Task[None]]] = []
+        for pid, pc in app.project_components.items():
+            log.info("Starting processor and scheduler", project_id=pid)
+            project_tasks.append((f"Processor(p{pid})", asyncio.create_task(pc.processor.run())))
+            project_tasks.append((f"Scheduler(p{pid})", asyncio.create_task(pc.scheduler.run())))
         app.health.processor_running = True
-
-        log.info("Starting queue scheduler for polling fallback")
-        scheduler_task = asyncio.create_task(app.scheduler.run())
 
         log.info("Starting webhook retry processor")
         retry_processor_task = asyncio.create_task(app.retry_processor.run())
@@ -417,14 +493,15 @@ async def run_application(app: Application) -> int:
         log.info("Shutdown initiated", reason=reason.value)
 
         # Signal all processors to stop
-        app.processor.request_shutdown()
-        app.scheduler.request_shutdown()
+        for pc in app.project_components.values():
+            pc.processor.request_shutdown()
+            pc.scheduler.request_shutdown()
         app.retry_processor.request_shutdown()
         app.analytics_processor.request_shutdown()
 
         # Stop all tasks gracefully
-        await _stop_task_gracefully(processor_task, "Processor", app.shutdown_manager.shutdown_timeout)
-        await _stop_task_gracefully(scheduler_task, "Scheduler")
+        for name, task in project_tasks:
+            await _stop_task_gracefully(task, name, app.shutdown_manager.shutdown_timeout)
         await _stop_task_gracefully(retry_processor_task, "Retry processor")
         await _stop_task_gracefully(analytics_processor_task, "Analytics processor")
 

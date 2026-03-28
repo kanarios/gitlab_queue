@@ -43,7 +43,7 @@ from gitlab_queue.utils.retry import log_after_retry, log_before_retry
 if TYPE_CHECKING:
     from types import TracebackType
 
-    from gitlab_queue.config import Settings
+    from gitlab_queue.config import ProjectConfig, Settings
     from gitlab_queue.models.mr import MergeRequest, Note
     from gitlab_queue.models.pipeline import Job, Pipeline
 
@@ -109,15 +109,15 @@ def _sanitize_response_body(body: dict[str, Any] | str | None) -> dict[str, Any]
     def redact_dict(d: dict[str, Any]) -> dict[str, Any]:
         result: dict[str, Any] = {}
         for key, value in d.items():
-            key_lower = key.lower()
-            if key_lower in _SENSITIVE_KEYS:
-                result[key] = "***"
-            elif isinstance(value, dict):
-                result[key] = redact_dict(value)
-            elif isinstance(value, list):
-                result[key] = [redact_dict(item) if isinstance(item, dict) else item for item in value]
-            else:
-                result[key] = value
+            match value:
+                case _ if key.lower() in _SENSITIVE_KEYS:
+                    result[key] = "***"
+                case dict():
+                    result[key] = redact_dict(value)
+                case list():
+                    result[key] = [redact_dict(item) if isinstance(item, dict) else item for item in value]
+                case _:
+                    result[key] = value
         return result
 
     return redact_dict(body)
@@ -313,15 +313,67 @@ class GitLabClient:
             transport: Optional custom transport for testing. If None, uses default.
             sleep_fn: Optional async sleep function for testing. Defaults to asyncio.sleep.
         """
+        self._init_common(
+            settings=settings,
+            project_id=settings.gitlab_project_id,
+            token=settings.gitlab_token.get_secret_value(),
+            circuit_breaker_name="gitlab_api",
+            transport=transport,
+            sleep_fn=sleep_fn,
+        )
+
+    @classmethod
+    def for_project(
+        cls,
+        project_config: ProjectConfig,
+        settings: Settings,
+        transport: httpx.AsyncBaseTransport | None = None,
+        *,
+        sleep_fn: Any | None = None,
+    ) -> GitLabClient:
+        """Create a GitLabClient for a specific project.
+
+        Uses project-specific token and project_id from ProjectConfig,
+        and global settings (gitlab_url, api_max_retries, circuit_breaker, etc.)
+        from Settings.
+
+        Args:
+            project_config: Per-project configuration (project_id, token).
+            settings: Global application settings.
+            transport: Optional custom transport for testing.
+            sleep_fn: Optional async sleep function for testing.
+
+        Returns:
+            GitLabClient configured for the specified project.
+        """
+        instance = cls.__new__(cls)
+        instance._init_common(
+            settings=settings,
+            project_id=project_config.project_id,
+            token=project_config.token.get_secret_value(),
+            circuit_breaker_name=f"gitlab_api_p{project_config.project_id}",
+            transport=transport,
+            sleep_fn=sleep_fn,
+        )
+        return instance
+
+    def _init_common(
+        self,
+        *,
+        settings: Settings,
+        project_id: int,
+        token: str,
+        circuit_breaker_name: str,
+        transport: httpx.AsyncBaseTransport | None,
+        sleep_fn: Any | None,
+    ) -> None:
+        """Shared initialization for __init__ and for_project."""
         self._sleep_fn = sleep_fn or asyncio.sleep
         self._settings = settings
         self._gitlab_url = settings.gitlab_url.rstrip("/")
         self._base_url = f"{self._gitlab_url}/api/v4"
-        self._project_id = settings.gitlab_project_id
+        self._project_id = project_id
         self._max_retries = settings.api_max_retries
-
-        # Get the actual token value for headers
-        token = settings.gitlab_token.get_secret_value()
 
         self._client = httpx.AsyncClient(
             base_url=self._base_url,
@@ -334,14 +386,9 @@ class GitLabClient:
             transport=transport,
         )
 
-        # Initialize circuit breaker for API protection
-        self._circuit_breaker = create_circuit_breaker(settings, name="gitlab_api")
-
-        # Initialize rate limit tracking
+        self._circuit_breaker = create_circuit_breaker(settings, name=circuit_breaker_name)
         self._rate_limit_state = RateLimitState()
         self._rate_limit_lock = asyncio.Lock()
-
-        # Cached project web URL (fetched lazily on first use)
         self._project_web_url: str | None = None
         self._project_web_url_lock = asyncio.Lock()
 
