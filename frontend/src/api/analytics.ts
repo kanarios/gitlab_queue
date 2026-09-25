@@ -57,10 +57,11 @@ export interface HourlyParams {
  * ```
  */
 export async function getSummary(
+  projectId: number,
   params: AnalyticsParams = {}
 ): Promise<ApiResult<AnalyticsSummary>> {
   const { signal, ...queryParams } = params;
-  const url = buildUrl('/api/analytics/summary', queryParams);
+  const url = buildUrl(`/api/projects/${projectId}/analytics/summary`, queryParams);
   return apiFetch<AnalyticsSummary>(url, { signal });
 }
 
@@ -84,10 +85,11 @@ export async function getSummary(
  * ```
  */
 export async function getHourly(
+  projectId: number,
   params: HourlyParams = {}
 ): Promise<ApiResult<HourlyAnalyticsResponse>> {
   const { signal, ...queryParams } = params;
-  const url = buildUrl('/api/analytics/hourly', queryParams);
+  const url = buildUrl(`/api/projects/${projectId}/analytics/hourly`, queryParams);
   return apiFetch<HourlyAnalyticsResponse>(url, { signal });
 }
 
@@ -114,10 +116,11 @@ export async function getHourly(
  * ```
  */
 export async function getOutcomes(
+  projectId: number,
   params: AnalyticsParams = {}
 ): Promise<ApiResult<OutcomesResponse>> {
   const { signal, ...queryParams } = params;
-  const url = buildUrl('/api/analytics/outcomes', queryParams);
+  const url = buildUrl(`/api/projects/${projectId}/analytics/outcomes`, queryParams);
   return apiFetch<OutcomesResponse>(url, { signal });
 }
 
@@ -142,9 +145,10 @@ export async function getOutcomes(
  * ```
  */
 export async function getFailureReasons(
+  projectId: number,
   params: AnalyticsParams = {}
 ): Promise<ApiResult<FailureReasonsResponse>> {
   const { signal, ...queryParams } = params;
-  const url = buildUrl('/api/analytics/failure-reasons', queryParams);
+  const url = buildUrl(`/api/projects/${projectId}/analytics/failure-reasons`, queryParams);
   return apiFetch<FailureReasonsResponse>(url, { signal });
 }

@@ -111,6 +111,7 @@ class ApplicationHealth:
 
     database: ComponentStatus = ComponentStatus.UNKNOWN
     gitlab: GitLabHealth | None = None
+    gitlab_by_project: dict[int, GitLabHealth] = field(default_factory=dict)
     processor_running: bool = False
     webhook_server_running: bool = False
 
@@ -128,7 +129,10 @@ class ApplicationHealth:
             return ApplicationMode.UNHEALTHY
 
         # GitLab unhealthy = degraded mode (can still queue events)
-        if self.gitlab and self.gitlab.status == ComponentStatus.UNHEALTHY:
+        gitlab_health = list(self.gitlab_by_project.values())
+        if self.gitlab is not None and not gitlab_health:
+            gitlab_health.append(self.gitlab)
+        if any(item.status in {ComponentStatus.DEGRADED, ComponentStatus.UNHEALTHY} for item in gitlab_health):
             return ApplicationMode.DEGRADED
 
         return ApplicationMode.NORMAL
@@ -165,6 +169,10 @@ class ApplicationHealth:
             result["gitlab"] = self.gitlab.to_dict()
         else:
             result["gitlab"] = {"status": ComponentStatus.UNKNOWN.value}
+
+        result["gitlab_projects"] = {
+            str(project_id): project_health.to_dict() for project_id, project_health in self.gitlab_by_project.items()
+        }
 
         return result
 

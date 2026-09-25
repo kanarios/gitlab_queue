@@ -1,41 +1,38 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { getProjectConfig } from '../api/config';
-
-const RETRY_DELAYS = [5000, 15000, 30000, 60000];
+import { useProject } from '../projects/ProjectContext';
 
 export function useProjectConfig(): { projectWebUrl: string | null } {
-  const [projectWebUrl, setProjectWebUrl] = useState<string | null>(null);
+  const { selectedProject } = useProject();
+  const [projectWebUrl, setProjectWebUrl] = useState<string | null>(
+    selectedProject?.web_url || null
+  );
 
   useEffect(() => {
+    const projectId = selectedProject?.project_id;
+    const listedUrl = selectedProject?.web_url || null;
+    setProjectWebUrl(listedUrl);
+    if (!projectId || listedUrl) return;
+
     const controller = new AbortController();
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let retryTimeout: ReturnType<typeof setTimeout> | null = null;
 
-    async function fetchWithRetries() {
-      for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
-        const result = await getProjectConfig(controller.signal);
-        if (result.success) {
-          setProjectWebUrl(result.data.project_web_url);
-          return;
-        }
-        if (controller.signal.aborted) return;
-        if (attempt >= RETRY_DELAYS.length) return;
-
-        await new Promise<void>((resolve) => {
-          timeoutId = setTimeout(resolve, RETRY_DELAYS[attempt]);
-        });
-        if (controller.signal.aborted) return;
-      }
-    }
-
-    fetchWithRetries();
-
-    return () => {
-      controller.abort();
-      if (timeoutId !== null) {
-        clearTimeout(timeoutId);
+    const loadConfig = async () => {
+      const result = await getProjectConfig(projectId, controller.signal);
+      if (controller.signal.aborted) return;
+      if (result.success) {
+        setProjectWebUrl(result.data.project_web_url);
+      } else {
+        retryTimeout = setTimeout(() => void loadConfig(), 30_000);
       }
     };
-  }, []);
+
+    void loadConfig();
+    return () => {
+      controller.abort();
+      if (retryTimeout) clearTimeout(retryTimeout);
+    };
+  }, [selectedProject]);
 
   return { projectWebUrl };
 }

@@ -109,16 +109,17 @@ describe('api/websocket', () => {
 
   describe('connect', () => {
     it('does not connect when no token exists', () => {
-      manager.connect();
+      manager.connect(1);
       expect(manager.getState()).toBe('error');
     });
 
     it('connects with token as query parameter', () => {
       setToken('test-token');
-      manager.connect();
+      manager.connect(1);
 
       expect(manager.getState()).toBe('connecting');
       expect(getCurrentWebSocket()?.url).toContain('token=test-token');
+      expect(getCurrentWebSocket()?.url).toContain('/ws/projects/1/queue');
 
       // Trigger the async open
       vi.runAllTimers();
@@ -128,11 +129,11 @@ describe('api/websocket', () => {
 
     it('does not create duplicate connections', () => {
       setToken('test-token');
-      manager.connect();
+      manager.connect(1);
       vi.runAllTimers();
 
       const initialState = manager.getState();
-      manager.connect();
+      manager.connect(1);
 
       expect(manager.getState()).toBe(initialState);
     });
@@ -141,7 +142,7 @@ describe('api/websocket', () => {
   describe('disconnect', () => {
     it('disconnects and sets state to disconnected', () => {
       setToken('test-token');
-      manager.connect();
+      manager.connect(1);
       vi.runAllTimers();
 
       manager.disconnect();
@@ -151,7 +152,7 @@ describe('api/websocket', () => {
 
     it('clears reconnection timeout', () => {
       setToken('test-token');
-      manager.connect();
+      manager.connect(1);
       vi.runAllTimers();
 
       // Simulate close to trigger reconnect scheduling
@@ -168,13 +169,13 @@ describe('api/websocket', () => {
   describe('reconnect', () => {
     it('disconnects and reconnects', () => {
       setToken('test-token');
-      manager.connect();
+      manager.connect(1);
       vi.runAllTimers();
 
       const stateChanges: string[] = [];
       manager.onStateChange((state) => stateChanges.push(state));
 
-      manager.reconnect();
+      manager.reconnect(1);
       vi.runAllTimers();
 
       expect(stateChanges).toContain('disconnected');
@@ -194,7 +195,7 @@ describe('api/websocket', () => {
       const stateChanges: string[] = [];
       manager.onStateChange((state) => stateChanges.push(state));
 
-      manager.connect();
+      manager.connect(1);
       vi.runAllTimers();
 
       expect(stateChanges).toEqual(['connecting', 'connected']);
@@ -210,7 +211,7 @@ describe('api/websocket', () => {
 
       unsubscribe();
 
-      manager.connect();
+      manager.connect(1);
       vi.runAllTimers();
 
       expect(stateChanges).toEqual([]);
@@ -220,7 +221,7 @@ describe('api/websocket', () => {
   describe('event handling', () => {
     it('dispatches queue:updated events to listeners', () => {
       setToken('test-token');
-      manager.connect();
+      manager.connect(1);
       vi.runAllTimers();
 
       const receivedData: unknown[] = [];
@@ -228,16 +229,16 @@ describe('api/websocket', () => {
 
       getCurrentWebSocket()?.simulateMessage({
         type: 'queue:updated',
-        data: { queue: [], stats: { total: 0 } },
+        data: { project_id: 1, queue: [], stats: { queued: 0, rebasing: 0, testing: 0, merging: 0 } },
       });
 
       expect(receivedData).toHaveLength(1);
-      expect(receivedData[0]).toEqual({ queue: [], stats: { total: 0 } });
+      expect(receivedData[0]).toEqual({ project_id: 1, queue: [], stats: { queued: 0, rebasing: 0, testing: 0, merging: 0 } });
     });
 
     it('dispatches mr:status_changed events to listeners', () => {
       setToken('test-token');
-      manager.connect();
+      manager.connect(1);
       vi.runAllTimers();
 
       const receivedData: unknown[] = [];
@@ -245,20 +246,21 @@ describe('api/websocket', () => {
 
       getCurrentWebSocket()?.simulateMessage({
         type: 'mr:status_changed',
-        data: { iid: 42, old_status: 'queued', new_status: 'rebasing' },
+        data: { project_id: 1, iid: 42, oldStatus: 'queued', newStatus: 'rebasing' },
       });
 
       expect(receivedData).toHaveLength(1);
       expect(receivedData[0]).toEqual({
+        project_id: 1,
         iid: 42,
-        old_status: 'queued',
-        new_status: 'rebasing',
+        oldStatus: 'queued',
+        newStatus: 'rebasing',
       });
     });
 
     it('dispatches mr:completed events to listeners', () => {
       setToken('test-token');
-      manager.connect();
+      manager.connect(1);
       vi.runAllTimers();
 
       const receivedData: unknown[] = [];
@@ -266,20 +268,22 @@ describe('api/websocket', () => {
 
       getCurrentWebSocket()?.simulateMessage({
         type: 'mr:completed',
-        data: { iid: 42, status: 'merged', finished_at: '2025-01-01T12:00:00Z' },
+        data: { project_id: 1, iid: 42, status: 'merged', finishedAt: '2025-01-01T12:00:00Z', failureReason: null },
       });
 
       expect(receivedData).toHaveLength(1);
       expect(receivedData[0]).toEqual({
+        project_id: 1,
         iid: 42,
         status: 'merged',
-        finished_at: '2025-01-01T12:00:00Z',
+        finishedAt: '2025-01-01T12:00:00Z',
+        failureReason: null,
       });
     });
 
     it('allows multiple listeners for same event type', () => {
       setToken('test-token');
-      manager.connect();
+      manager.connect(1);
       vi.runAllTimers();
 
       const received1: unknown[] = [];
@@ -289,7 +293,7 @@ describe('api/websocket', () => {
 
       getCurrentWebSocket()?.simulateMessage({
         type: 'queue:updated',
-        data: { queue: [] },
+        data: { project_id: 1, queue: [], stats: { queued: 0, rebasing: 0, testing: 0, merging: 0 } },
       });
 
       expect(received1).toHaveLength(1);
@@ -298,7 +302,7 @@ describe('api/websocket', () => {
 
     it('allows unsubscribing from events', () => {
       setToken('test-token');
-      manager.connect();
+      manager.connect(1);
       vi.runAllTimers();
 
       const receivedData: unknown[] = [];
@@ -310,7 +314,7 @@ describe('api/websocket', () => {
 
       getCurrentWebSocket()?.simulateMessage({
         type: 'queue:updated',
-        data: { queue: [] },
+        data: { project_id: 1, queue: [], stats: { queued: 0, rebasing: 0, testing: 0, merging: 0 } },
       });
 
       expect(receivedData).toHaveLength(0);
@@ -318,7 +322,7 @@ describe('api/websocket', () => {
 
     it('ignores invalid JSON messages', () => {
       setToken('test-token');
-      manager.connect();
+      manager.connect(1);
       vi.runAllTimers();
 
       const receivedData: unknown[] = [];
@@ -336,7 +340,7 @@ describe('api/websocket', () => {
   describe('reconnection', () => {
     it('schedules reconnect on abnormal close', () => {
       setToken('test-token');
-      manager.connect();
+      manager.connect(1);
       vi.runAllTimers();
 
       const stateChanges: string[] = [];
@@ -354,7 +358,7 @@ describe('api/websocket', () => {
 
     it('uses exponential backoff for reconnects', () => {
       setToken('test-token');
-      manager.connect();
+      manager.connect(1);
       vi.runAllTimers();
 
       expect(manager.getState()).toBe('connected');
@@ -377,7 +381,7 @@ describe('api/websocket', () => {
 
     it('caps reconnect delay at 30 seconds', () => {
       setToken('test-token');
-      manager.connect();
+      manager.connect(1);
       vi.runAllTimers();
 
       // Simulate multiple failures to get to max backoff
@@ -395,7 +399,7 @@ describe('api/websocket', () => {
 
     it('does not reconnect after intentional disconnect', () => {
       setToken('test-token');
-      manager.connect();
+      manager.connect(1);
       vi.runAllTimers();
 
       manager.disconnect();
@@ -406,12 +410,29 @@ describe('api/websocket', () => {
       expect(manager.getState()).toBe('disconnected');
     });
 
-    it('does not reconnect on auth error (1008)', () => {
+    it('keeps the session on project access denial (1008)', () => {
       setToken('test-token');
-      manager.connect();
+      manager.connect(1);
       vi.runAllTimers();
 
-      getCurrentWebSocket()?.simulateClose(1008); // Policy violation (auth error)
+      getCurrentWebSocket()?.simulateClose(1008, 'Project access denied');
+
+      expect(manager.getState()).toBe('error');
+      expect(localStorage.getItem('gitlab_queue_token')).toBe('test-token');
+      expect(window.location.href).toBe('http://localhost:3000');
+
+      vi.advanceTimersByTime(60000);
+      expect(manager.getState()).toBe('error');
+      expect(localStorage.getItem('gitlab_queue_token')).toBe('test-token');
+      expect(window.location.href).toBe('http://localhost:3000');
+    });
+
+    it('clears the session and redirects on invalid token (1008)', () => {
+      setToken('test-token');
+      manager.connect(1);
+      vi.runAllTimers();
+
+      getCurrentWebSocket()?.simulateClose(1008, 'Invalid token');
 
       // Should set error state
       expect(manager.getState()).toBe('error');
@@ -429,7 +450,7 @@ describe('api/websocket', () => {
 
     it('resets reconnect attempts on successful connection', () => {
       setToken('test-token');
-      manager.connect();
+      manager.connect(1);
       vi.runAllTimers();
 
       // Simulate failure and reconnect
@@ -456,7 +477,7 @@ describe('api/websocket', () => {
   describe('error handling', () => {
     it('sets state to error on WebSocket error', () => {
       setToken('test-token');
-      manager.connect();
+      manager.connect(1);
       vi.runAllTimers();
 
       getCurrentWebSocket()?.simulateError();

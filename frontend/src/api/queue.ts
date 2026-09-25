@@ -29,8 +29,16 @@ import type { MergeRequest } from '../types';
  * }
  * ```
  */
-export async function getQueue(signal?: AbortSignal): Promise<ApiResult<MergeRequest[]>> {
-  return apiFetch<MergeRequest[]>('/api/queue', { signal });
+export async function getQueue(
+  projectId: number,
+  signal?: AbortSignal
+): Promise<ApiResult<MergeRequest[]>> {
+  const result = await apiFetch<{ items: MergeRequest[]; count: number }>(
+    `/api/projects/${projectId}/queue/active`,
+    { signal }
+  );
+  if (!result.success) return result;
+  return { success: true, data: result.data.items };
 }
 
 /**
@@ -48,11 +56,14 @@ export async function getQueue(signal?: AbortSignal): Promise<ApiResult<MergeReq
  * ```typescript
  * const result = await getQueueStats();
  * if (result.success) {
- *   console.log(`Queue: ${result.data.queue_length} MRs`);
- *   console.log(`Processing: ${result.data.processing_count}`);
+ *   console.log(`Queue: ${result.data.current.total} MRs`);
+ *   console.log(`Merged this week: ${result.data.historical.merged_count}`);
  * }
  * ```
  */
-export async function getQueueStats(signal?: AbortSignal): Promise<ApiResult<QueueStats>> {
-  return apiFetch<QueueStats>('/api/queue/stats', { signal });
+export async function getQueueStats(
+  projectId: number,
+  signal?: AbortSignal
+): Promise<ApiResult<QueueStats>> {
+  return apiFetch<QueueStats>(`/api/projects/${projectId}/queue/stats`, { signal });
 }

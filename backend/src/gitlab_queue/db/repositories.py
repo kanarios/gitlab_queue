@@ -134,8 +134,9 @@ class MergeRequestRepository:
     currently being processed.
     """
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, project_id: int = 0) -> None:
         self._session = session
+        self._project_id = project_id
 
     # =========================================================================
     # Read Operations
@@ -150,7 +151,10 @@ class MergeRequestRepository:
         Returns:
             MergeRequestModel if found, None otherwise.
         """
-        stmt = select(MergeRequestModel).where(MergeRequestModel.iid == iid)
+        stmt = select(MergeRequestModel).where(
+            MergeRequestModel.project_id == self._project_id,
+            MergeRequestModel.iid == iid,
+        )
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -161,7 +165,10 @@ class MergeRequestRepository:
         """
         stmt = (
             select(MergeRequestModel)
-            .where(MergeRequestModel.status.in_(ACTIVE_STATES))
+            .where(
+                MergeRequestModel.project_id == self._project_id,
+                MergeRequestModel.status.in_(ACTIVE_STATES),
+            )
             .order_by(MergeRequestModel.is_hotfix.desc(), MergeRequestModel.queued_at.asc())
         )
         result = await self._session.execute(stmt)
@@ -174,7 +181,7 @@ class MergeRequestRepository:
         """
         stmt = (
             select(MergeRequestModel)
-            .where(MergeRequestModel.status == "queued")
+            .where(MergeRequestModel.project_id == self._project_id, MergeRequestModel.status == "queued")
             .order_by(MergeRequestModel.is_hotfix.desc(), MergeRequestModel.queued_at.asc())
             .limit(1)
         )
@@ -183,13 +190,23 @@ class MergeRequestRepository:
 
     async def get_by_status(self, status: str) -> Sequence[MergeRequestModel]:
         """Get all MRs with a specific status."""
-        stmt = select(MergeRequestModel).where(MergeRequestModel.status == status)
+        stmt = select(MergeRequestModel).where(
+            MergeRequestModel.project_id == self._project_id,
+            MergeRequestModel.status == status,
+        )
         result = await self._session.execute(stmt)
         return result.scalars().all()
 
     async def count_active(self) -> int:
         """Count MRs in active queue states."""
-        stmt = select(func.count()).select_from(MergeRequestModel).where(MergeRequestModel.status.in_(ACTIVE_STATES))
+        stmt = (
+            select(func.count())
+            .select_from(MergeRequestModel)
+            .where(
+                MergeRequestModel.project_id == self._project_id,
+                MergeRequestModel.status.in_(ACTIVE_STATES),
+            )
+        )
         result = await self._session.execute(stmt)
         return result.scalar() or 0
 
@@ -201,7 +218,10 @@ class MergeRequestRepository:
         """
         stmt = (
             select(MergeRequestModel.status, func.count())
-            .where(MergeRequestModel.status.in_(ACTIVE_STATES))
+            .where(
+                MergeRequestModel.project_id == self._project_id,
+                MergeRequestModel.status.in_(ACTIVE_STATES),
+            )
             .group_by(MergeRequestModel.status)
         )
         result = await self._session.execute(stmt)
@@ -225,6 +245,7 @@ class MergeRequestRepository:
             .where(
                 and_(
                     MergeRequestModel.status.in_(ACTIVE_STATES),
+                    MergeRequestModel.project_id == self._project_id,
                     MergeRequestModel.stale_warning_sent == 0,
                     MergeRequestModel.queued_at < threshold_str,
                 )
@@ -251,6 +272,7 @@ class MergeRequestRepository:
             .where(
                 and_(
                     MergeRequestModel.status.in_(ACTIVE_STATES),
+                    MergeRequestModel.project_id == self._project_id,
                     # Hotfixes come first, then by queued_at
                     (
                         (MergeRequestModel.is_hotfix > mr.is_hotfix)
@@ -269,6 +291,9 @@ class MergeRequestRepository:
 
     async def add(self, mr: MergeRequestModel) -> MergeRequestModel:
         """Add new MR to the queue."""
+        if mr.project_id not in (None, 0, self._project_id):
+            raise ValueError(f"Cannot add MR from project {mr.project_id} to repository for project {self._project_id}")
+        mr.project_id = self._project_id
         self._session.add(mr)
         await self._session.flush()
         return mr
@@ -293,6 +318,7 @@ class MergeRequestRepository:
             return existing
 
         mr = MergeRequestModel(
+            project_id=self._project_id,
             iid=iid,
             title=title,
             author_name=author_name,
@@ -479,8 +505,9 @@ class HistoryRepository:
     Retention: 1 year.
     """
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, project_id: int = 0) -> None:
         self._session = session
+        self._project_id = project_id
 
     async def get_history(
         self,
@@ -508,7 +535,7 @@ class HistoryRepository:
         offset = (page - 1) * per_page
 
         # Build filter conditions
-        conditions = []
+        conditions = [MergeRequestHistoryModel.project_id == self._project_id]
 
         if status_filter:
             conditions.append(MergeRequestHistoryModel.status == status_filter)
@@ -564,13 +591,21 @@ class HistoryRepository:
         Returns:
             MergeRequestHistoryModel if found, None otherwise.
         """
-        stmt = select(MergeRequestHistoryModel).where(MergeRequestHistoryModel.iid == iid)
+        stmt = select(MergeRequestHistoryModel).where(
+            MergeRequestHistoryModel.project_id == self._project_id,
+            MergeRequestHistoryModel.iid == iid,
+        )
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
 
     async def get_recent(self, limit: int = 10) -> Sequence[MergeRequestHistoryModel]:
         """Get most recent history entries."""
-        stmt = select(MergeRequestHistoryModel).order_by(MergeRequestHistoryModel.finished_at.desc()).limit(limit)
+        stmt = (
+            select(MergeRequestHistoryModel)
+            .where(MergeRequestHistoryModel.project_id == self._project_id)
+            .order_by(MergeRequestHistoryModel.finished_at.desc())
+            .limit(limit)
+        )
         result = await self._session.execute(stmt)
         return result.scalars().all()
 
@@ -605,6 +640,7 @@ class HistoryRepository:
             and_(
                 MergeRequestHistoryModel.finished_at >= date_from_str,
                 MergeRequestHistoryModel.finished_at <= date_to_str,
+                MergeRequestHistoryModel.project_id == self._project_id,
             )
         )
 
@@ -655,6 +691,7 @@ class HistoryRepository:
             and_(
                 MergeRequestHistoryModel.finished_at >= hour_ago.isoformat(),
                 MergeRequestHistoryModel.finished_at <= now.isoformat(),
+                MergeRequestHistoryModel.project_id == self._project_id,
             )
         )
 
@@ -680,7 +717,10 @@ class HistoryRepository:
         cutoff = datetime.now(UTC) - timedelta(days=retention_days)
         cutoff_str = cutoff.isoformat()
 
-        stmt = delete(MergeRequestHistoryModel).where(MergeRequestHistoryModel.finished_at < cutoff_str)
+        stmt = delete(MergeRequestHistoryModel).where(
+            MergeRequestHistoryModel.project_id == self._project_id,
+            MergeRequestHistoryModel.finished_at < cutoff_str,
+        )
         result = await self._session.execute(stmt)
         await self._session.flush()
 
@@ -699,8 +739,9 @@ class AnalyticsRepository:
     Handles snapshots, aggregation, and metrics retrieval.
     """
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, project_id: int = 0) -> None:
         self._session = session
+        self._project_id = project_id
 
     async def save_hourly_snapshot(
         self,
@@ -718,6 +759,7 @@ class AnalyticsRepository:
         timestamp = now.replace(minute=0, second=0, microsecond=0).isoformat()
 
         snapshot = AnalyticsHourlyModel(
+            project_id=self._project_id,
             timestamp=timestamp,
             queue_depth=queue_depth,
             processed_count=processed_count,
@@ -742,7 +784,10 @@ class AnalyticsRepository:
             AnalyticsDailyModel if created, None if already exists.
         """
         # Check if already aggregated
-        existing_stmt = select(AnalyticsDailyModel).where(AnalyticsDailyModel.date == target_date.isoformat())
+        existing_stmt = select(AnalyticsDailyModel).where(
+            AnalyticsDailyModel.project_id == self._project_id,
+            AnalyticsDailyModel.date == target_date.isoformat(),
+        )
         existing_result = await self._session.execute(existing_stmt)
         if existing_result.scalar_one_or_none():
             log.debug("Daily stats already exist", date=target_date.isoformat())
@@ -766,6 +811,7 @@ class AnalyticsRepository:
             and_(
                 MergeRequestHistoryModel.finished_at >= date_start,
                 MergeRequestHistoryModel.finished_at <= date_end,
+                MergeRequestHistoryModel.project_id == self._project_id,
             )
         )
 
@@ -777,6 +823,7 @@ class AnalyticsRepository:
             and_(
                 AnalyticsHourlyModel.timestamp >= date_start,
                 AnalyticsHourlyModel.timestamp <= date_end,
+                AnalyticsHourlyModel.project_id == self._project_id,
             )
         )
         hourly_result = await self._session.execute(hourly_stmt)
@@ -784,6 +831,7 @@ class AnalyticsRepository:
 
         # Create daily record
         daily = AnalyticsDailyModel(
+            project_id=self._project_id,
             date=target_date.isoformat(),
             total_processed=history_row.total or 0,
             success_count=history_row.success or 0,
@@ -821,7 +869,12 @@ class AnalyticsRepository:
 
         # Get current queue count
         queue_stmt = (
-            select(func.count()).select_from(MergeRequestModel).where(MergeRequestModel.status.in_(ACTIVE_STATES))
+            select(func.count())
+            .select_from(MergeRequestModel)
+            .where(
+                MergeRequestModel.project_id == self._project_id,
+                MergeRequestModel.status.in_(ACTIVE_STATES),
+            )
         )
         queue_result = await self._session.execute(queue_stmt)
         total_in_queue = queue_result.scalar() or 0
@@ -840,7 +893,10 @@ class AnalyticsRepository:
             ).label("failed"),
             func.avg(MergeRequestHistoryModel.wait_time_seconds).label("avg_wait"),
             func.avg(MergeRequestHistoryModel.processing_time_seconds).label("avg_processing"),
-        ).where(MergeRequestHistoryModel.finished_at >= period_start_str)
+        ).where(
+            MergeRequestHistoryModel.project_id == self._project_id,
+            MergeRequestHistoryModel.finished_at >= period_start_str,
+        )
 
         history_result = await self._session.execute(history_stmt)
         history_row = history_result.one()
@@ -854,7 +910,10 @@ class AnalyticsRepository:
         hourly_start = (now - timedelta(hours=24)).isoformat()
         hourly_stmt = (
             select(AnalyticsHourlyModel)
-            .where(AnalyticsHourlyModel.timestamp >= hourly_start)
+            .where(
+                AnalyticsHourlyModel.project_id == self._project_id,
+                AnalyticsHourlyModel.timestamp >= hourly_start,
+            )
             .order_by(AnalyticsHourlyModel.timestamp.asc())
         )
         hourly_result = await self._session.execute(hourly_stmt)
@@ -873,7 +932,10 @@ class AnalyticsRepository:
         daily_start = (now - timedelta(days=7)).date().isoformat()
         daily_stmt = (
             select(AnalyticsDailyModel)
-            .where(AnalyticsDailyModel.date >= daily_start)
+            .where(
+                AnalyticsDailyModel.project_id == self._project_id,
+                AnalyticsDailyModel.date >= daily_start,
+            )
             .order_by(AnalyticsDailyModel.date.asc())
         )
         daily_result = await self._session.execute(daily_stmt)
@@ -905,7 +967,10 @@ class AnalyticsRepository:
         cutoff = datetime.now(UTC) - timedelta(days=retention_days)
         cutoff_str = cutoff.isoformat()
 
-        stmt = delete(AnalyticsHourlyModel).where(AnalyticsHourlyModel.timestamp < cutoff_str)
+        stmt = delete(AnalyticsHourlyModel).where(
+            AnalyticsHourlyModel.project_id == self._project_id,
+            AnalyticsHourlyModel.timestamp < cutoff_str,
+        )
         result = await self._session.execute(stmt)
         await self._session.flush()
 
@@ -921,6 +986,7 @@ class AnalyticsRepository:
             and_(
                 AnalyticsHourlyModel.timestamp >= date_start,
                 AnalyticsHourlyModel.timestamp <= date_end,
+                AnalyticsHourlyModel.project_id == self._project_id,
             )
         )
         result = await self._session.execute(stmt)
@@ -954,15 +1020,18 @@ class UnitOfWork:
         self,
         db: Database,
         auto_commit: bool = False,
+        project_id: int = 0,
     ) -> None:
         """Initialize Unit of Work.
 
         Args:
             db: Database instance for session management.
             auto_commit: If True, auto-commit on successful exit.
+            project_id: GitLab project that all repositories in this unit of work access.
         """
         self._db = db
         self._auto_commit = auto_commit
+        self._project_id = project_id
         self._session: AsyncSession | None = None
         self._session_context: Any = None
 
@@ -1006,21 +1075,21 @@ class UnitOfWork:
     def merge_requests(self) -> MergeRequestRepository:
         """Get MergeRequest repository."""
         if self._merge_requests is None:
-            self._merge_requests = MergeRequestRepository(self.session)
+            self._merge_requests = MergeRequestRepository(self.session, project_id=self._project_id)
         return self._merge_requests
 
     @property
     def history(self) -> HistoryRepository:
         """Get History repository."""
         if self._history is None:
-            self._history = HistoryRepository(self.session)
+            self._history = HistoryRepository(self.session, project_id=self._project_id)
         return self._history
 
     @property
     def analytics(self) -> AnalyticsRepository:
         """Get Analytics repository."""
         if self._analytics is None:
-            self._analytics = AnalyticsRepository(self.session)
+            self._analytics = AnalyticsRepository(self.session, project_id=self._project_id)
         return self._analytics
 
     async def commit(self) -> None:

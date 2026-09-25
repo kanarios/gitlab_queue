@@ -12,7 +12,7 @@
 
 **Stop fighting rebase wars. Let the bot handle the queue.**
 
-[Demo](#-demo) • [Quick Start](#-quick-start) • [Features](#-features) • [Dashboard](#-dashboard) • [Documentation](#-documentation)
+[Demo](#-demo) • [Quick Start](#-quick-start) • [Features](#-features) • [Multi-project](#-multi-project-support) • [Dashboard](#-dashboard) • [Documentation](#-documentation)
 
 </div>
 
@@ -163,6 +163,21 @@ Developer                      Bot                           GitLab
 | **History & Search** | Full merge history with filtering |
 | **Analytics Dashboard** | Throughput, success rate, queue depth trends |
 | **Dark Mode** | Easy on the eyes |
+
+### 🌐 Multi-project Support
+
+Run one bot instance for multiple GitLab projects. Each project has its own queue,
+GitLab token, project settings, API and WebSocket data, analytics, and webhook
+retry/DLQ records. The webhook URL and secret, GitLab base URL, and deployment are
+shared. Existing single-project installations can keep using the legacy token and
+project ID variables.
+
+```bash
+export GITLAB_QUEUE_PROJECTS='[{"project_id":123,"token":"glpat-project-one"},{"project_id":456,"token":"glpat-project-two"}]'
+```
+
+See the [Configuration Reference](#configuration-reference) for per-project
+options and single-project migration details.
 
 ### 🔐 Security
 
@@ -347,6 +362,10 @@ curl -fsSL https://raw.githubusercontent.com/kanarios/gitlab_queue/main/install.
 # Or using flags
 curl -fsSL .../install.sh | bash -s -- \
   --token glpat-xxx --project-id 12345 --no-dashboard --auto-start
+
+# Multi-project mode (JSON kept on one line)
+export GITLAB_PROJECTS='[{"project_id":123,"token":"glpat-one"},{"project_id":456,"token":"glpat-two"}]'
+curl -fsSL .../install.sh | bash -s -- --no-dashboard --auto-start
 ```
 
 <details>
@@ -354,8 +373,9 @@ curl -fsSL .../install.sh | bash -s -- \
 
 | Flag | Environment Variable | Default | Description |
 |------|---------------------|---------|-------------|
-| `--token` | `GITLAB_TOKEN` | - | GitLab Personal Access Token (required) |
-| `--project-id` | `GITLAB_PROJECT_ID` | - | GitLab Project ID (required) |
+| `--projects-json` | `GITLAB_PROJECTS` | - | Multi-project JSON array; replaces token/project ID at runtime |
+| `--token` | `GITLAB_TOKEN` | - | GitLab token, required in legacy single-project mode |
+| `--project-id` | `GITLAB_PROJECT_ID` | - | Legacy project ID, or migration hint when used with multi-project JSON |
 | `--webhook-secret` | `WEBHOOK_SECRET` | auto-generated | Webhook signature secret |
 | `--gitlab-url` | `GITLAB_URL` | `https://gitlab.com` | GitLab instance URL |
 | `--target-branch` | `TARGET_BRANCH` | `master` | Target branch for merges |
@@ -410,6 +430,7 @@ deploy-merge-queue:
 
 </details>
 
+<a id="configuration-reference"></a>
 <details>
 <summary><strong>📋 Configuration Reference</strong></summary>
 
@@ -417,10 +438,30 @@ deploy-merge-queue:
 
 | Variable | Description |
 |----------|-------------|
-| `GITLAB_QUEUE_GITLAB_TOKEN` | GitLab personal access token with `api` scope |
-| `GITLAB_QUEUE_GITLAB_PROJECT_ID` | GitLab project ID (positive integer) |
+| `GITLAB_QUEUE_PROJECTS` | Multi-project JSON array; each item requires `project_id` and an `api`-scope `token` |
+| `GITLAB_QUEUE_GITLAB_TOKEN` | Legacy single-project token; required only when `GITLAB_QUEUE_PROJECTS` is unset |
+| `GITLAB_QUEUE_GITLAB_PROJECT_ID` | Legacy single-project ID; required only when `GITLAB_QUEUE_PROJECTS` is unset |
 | `GITLAB_QUEUE_JWT_SECRET` | JWT signing secret (min 64 chars) |
 | `GITLAB_QUEUE_WEBHOOK_SECRET` | Webhook signature secret |
+
+Use either `GITLAB_QUEUE_PROJECTS` or the two legacy single-project variables. Example:
+
+```bash
+export GITLAB_QUEUE_PROJECTS='[
+  {"project_id": 123, "token": "glpat-project-one", "target_branch": "main"},
+  {"project_id": 456, "token": "glpat-project-two", "queue_label": "merge_queue", "hotfix_label": "hotfix"}
+]'
+```
+
+All projects share the webhook secret and GitLab base URL, while queue processing,
+retry/DLQ records, analytics, API responses and dashboard WebSockets are scoped by
+project. Configure the same webhook URL and secret in every listed GitLab project.
+
+When upgrading an existing single-project database directly to multiple projects,
+keep `GITLAB_QUEUE_GITLAB_PROJECT_ID` set to the former project ID for the first
+migration run. The migration uses it only to assign existing queue, history,
+analytics and retry rows; it must also appear in `GITLAB_QUEUE_PROJECTS`. If the
+owner cannot be determined safely, startup stops instead of hiding legacy rows.
 
 ### GitLab Connection
 
@@ -512,17 +553,19 @@ deploy-merge-queue:
 
 1. Go to GitLab → User Settings → Access Tokens
 2. Create token with `api` scope
-3. Set `GITLAB_QUEUE_GITLAB_TOKEN` to the token value
+3. For legacy single-project mode, set `GITLAB_QUEUE_GITLAB_TOKEN` to the token value.
+   For multi-project mode, put each project's token in its `GITLAB_QUEUE_PROJECTS` entry.
 
 ### 2. Find Project ID
 
 1. Go to your project → Settings → General
 2. Project ID is shown at the top
-3. Set `GITLAB_QUEUE_GITLAB_PROJECT_ID` to this value
+3. For legacy single-project mode, set `GITLAB_QUEUE_GITLAB_PROJECT_ID` to this value.
+   For multi-project mode, put each ID in the corresponding `GITLAB_QUEUE_PROJECTS` entry.
 
 ### 3. Configure Webhook
 
-1. Go to your project → Settings → Webhooks
+1. Go to each configured project → Settings → Webhooks
 2. Add new webhook:
    - **URL**: `https://your-bot-domain.com/webhooks/gitlab`
    - **Secret token**: Same value as `GITLAB_QUEUE_WEBHOOK_SECRET`
@@ -573,7 +616,7 @@ kind: Deployment
 metadata:
   name: gitlab-queue
 spec:
-  replicas: 1  # Single instance per project
+  replicas: 1  # Single active instance per deployment
   template:
     spec:
       containers:
@@ -796,7 +839,7 @@ Headers:
 
 | Decision | Rationale |
 |----------|-----------|
-| **Single project per instance** | Isolation, security, simpler config |
+| **Multiple projects per instance** | Project-scoped queues and access with shared deployment infrastructure |
 | **SQLite storage** | Zero dependencies, single file backup |
 | **Webhook-primary, polling-fallback** | Real-time + reliability |
 | **Non-interrupting hotfix** | Hotfix priority without wasting current work |
@@ -922,6 +965,17 @@ python -m gitlab_queue
 ---
 
 ## 🤝 Contributing
+
+### Changelog automation
+
+Merged pull requests are collected in [CHANGELOG.md](CHANGELOG.md). The
+`Update Changelog` workflow creates or updates a pull request from
+`automation/changelog` after a merge into `main`. It needs a GitHub App installed
+on this repository with **Contents** and **Pull requests** read/write access.
+Add the App ID and private key as repository Actions secrets named
+`CHANGELOG_APP_ID` and `CHANGELOG_APP_PRIVATE_KEY`. The changelog pull request
+uses the normal CI and branch protection rules; enabling repository auto-merge
+also lets it merge automatically once those checks pass.
 
 ### Development Setup
 

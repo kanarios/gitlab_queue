@@ -61,6 +61,7 @@ class PaginationSchema:
 class HistoryItemSchema:
     """History item schema for a completed MR."""
 
+    project_id: int
     mr_iid: int
     title: str
     author: AuthorSchema
@@ -182,6 +183,7 @@ def _build_history_item_schema(item: QueueItem) -> HistoryItemSchema:
         )
 
     return HistoryItemSchema(
+        project_id=item.project_id,
         mr_iid=item.mr_iid,
         title=item.title,
         author=AuthorSchema(

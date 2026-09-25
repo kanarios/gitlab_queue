@@ -21,7 +21,12 @@ class FailingWebSocketManager:
 
     broadcast_attempted: bool = False
 
-    async def broadcast_queue_updated(self, queue: list[dict[str, Any]], stats: dict[str, Any]) -> None:
+    async def broadcast_queue_updated(
+        self,
+        queue: list[dict[str, Any]],
+        stats: dict[str, Any],
+        project_id: int | None = None,
+    ) -> None:
         self.broadcast_attempted = True
         raise Exception("WebSocket connection lost")
 

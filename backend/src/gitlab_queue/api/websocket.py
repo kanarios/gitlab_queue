@@ -22,6 +22,7 @@ from gitlab_queue.auth.jwt_handler import (
     InvalidTokenError,
     TokenExpiredError,
     decode_token,
+    get_authorized_project_ids,
 )
 from gitlab_queue.utils.logging import get_logger
 
@@ -63,6 +64,7 @@ class WebSocketManager:
     def __init__(self) -> None:
         """Initialize the WebSocket manager with empty connections."""
         self._connections: set[WebSocket] = set()
+        self._project_connections: dict[int, set[WebSocket]] = {}
 
     @property
     def connection_count(self) -> int:
@@ -74,6 +76,7 @@ class WebSocketManager:
         websocket: WebSocket,
         token: str | None,
         settings: Settings,
+        project_id: int | None = None,
     ) -> bool:
         """Validate token and accept WebSocket connection.
 
@@ -92,12 +95,23 @@ class WebSocketManager:
 
         try:
             payload = decode_token(token, settings)
+            if project_id is not None and project_id not in get_authorized_project_ids(payload):
+                log.warning(
+                    "WebSocket connection rejected: project access denied",
+                    project_id=project_id,
+                    user_id=payload.get("sub"),
+                )
+                await websocket.close(code=1008, reason="Project access denied")
+                return False
             await websocket.accept()
             self._connections.add(websocket)
+            if project_id is not None:
+                self._project_connections.setdefault(project_id, set()).add(websocket)
             log.info(
                 "WebSocket connection accepted",
                 user_id=payload.get("sub"),
                 username=payload.get("username"),
+                project_id=project_id,
                 total_connections=len(self._connections),
             )
             return True
@@ -117,12 +131,19 @@ class WebSocketManager:
             websocket: The WebSocket connection to remove.
         """
         self._connections.discard(websocket)
+        empty_projects: list[int] = []
+        for project_id, connections in self._project_connections.items():
+            connections.discard(websocket)
+            if not connections:
+                empty_projects.append(project_id)
+        for project_id in empty_projects:
+            del self._project_connections[project_id]
         log.debug(
             "WebSocket disconnected",
             total_connections=len(self._connections),
         )
 
-    async def broadcast(self, message: dict[str, Any]) -> None:
+    async def broadcast(self, message: dict[str, Any], project_id: int | None = None) -> None:
         """Broadcast a message to all connected clients.
 
         Handles disconnected clients gracefully by removing them
@@ -131,12 +152,13 @@ class WebSocketManager:
         Args:
             message: JSON-serializable message to send.
         """
-        if not self._connections:
+        connections = self._connections if project_id is None else self._project_connections.get(project_id, set())
+        if not connections:
             return
 
         disconnected: set[WebSocket] = set()
 
-        for websocket in self._connections:
+        for websocket in set(connections):
             try:
                 await websocket.send_json(message)
             except Exception as e:
@@ -144,7 +166,8 @@ class WebSocketManager:
                 disconnected.add(websocket)
 
         # Remove disconnected clients
-        self._connections -= disconnected
+        for websocket in disconnected:
+            await self.disconnect(websocket)
 
         if disconnected:
             log.debug(
@@ -157,6 +180,7 @@ class WebSocketManager:
         self,
         queue: list[dict[str, Any]],
         stats: dict[str, Any],
+        project_id: int | None = None,
     ) -> None:
         """Broadcast full queue state update to all clients.
 
@@ -168,10 +192,12 @@ class WebSocketManager:
             {
                 "type": "queue:updated",
                 "data": {
+                    "project_id": project_id,
                     "queue": queue,
                     "stats": stats,
                 },
-            }
+            },
+            project_id,
         )
 
     async def broadcast_mr_status_changed(
@@ -179,6 +205,7 @@ class WebSocketManager:
         mr_iid: int,
         old_status: str,
         new_status: str,
+        project_id: int | None = None,
     ) -> None:
         """Broadcast MR status change to all clients.
 
@@ -197,11 +224,13 @@ class WebSocketManager:
             {
                 "type": "mr:status_changed",
                 "data": {
+                    "project_id": project_id,
                     "iid": mr_iid,
                     "oldStatus": old_status,
                     "newStatus": new_status,
                 },
-            }
+            },
+            project_id,
         )
 
     async def broadcast_mr_completed(
@@ -210,6 +239,7 @@ class WebSocketManager:
         status: str,
         finished_at: datetime | None = None,
         failure_reason: str | None = None,
+        project_id: int | None = None,
     ) -> None:
         """Broadcast MR completion event to all clients.
 
@@ -228,12 +258,14 @@ class WebSocketManager:
             {
                 "type": "mr:completed",
                 "data": {
+                    "project_id": project_id,
                     "iid": mr_iid,
                     "status": status,
                     "finishedAt": (finished_at or datetime.now(UTC)).isoformat(),
                     "failureReason": failure_reason,
                 },
-            }
+            },
+            project_id,
         )
 
 
@@ -272,20 +304,43 @@ async def websocket_queue_updates(websocket: WebSocket) -> None:
     from gitlab_queue.webhooks.router import WebhookAppState  # noqa: TC001
 
     state: WebhookAppState = websocket.app.state.webhook_state
-    manager = state.websocket_manager
-    settings = state.settings
+    configured_ids = (
+        sorted(state.project_components) if state.project_components else [state.settings.gitlab_project_id]
+    )
+    configured_ids = [project_id for project_id in configured_ids if project_id is not None]
+    if len(configured_ids) != 1:
+        await websocket.close(code=1008, reason="Project must be specified")
+        return
+    await _serve_project_queue(websocket, configured_ids[0])
 
-    # Extract token from query params
+
+@ws_router.websocket("/ws/projects/{project_id}/queue")
+async def websocket_project_queue_updates(websocket: WebSocket, project_id: int) -> None:
+    """Stream queue events for one configured and authorized project."""
+    from gitlab_queue.webhooks.router import WebhookAppState  # noqa: TC001
+
+    state: WebhookAppState = websocket.app.state.webhook_state
+    configured_ids = set(state.project_components) if state.project_components else {state.settings.gitlab_project_id}
+    if project_id not in configured_ids:
+        await websocket.close(code=1008, reason="Unknown project")
+        return
+    await _serve_project_queue(websocket, project_id)
+
+
+async def _serve_project_queue(websocket: WebSocket, project_id: int) -> None:
+    """Accept and serve a WebSocket scoped to one project."""
+    from gitlab_queue.webhooks.router import WebhookAppState  # noqa: TC001
+
+    state: WebhookAppState = websocket.app.state.webhook_state
+    manager = state.websocket_manager
     token = websocket.query_params.get("token")
 
-    # Validate and accept connection
-    if not await manager.connect(websocket, token, settings):
+    if not await manager.connect(websocket, token, state.settings, project_id):
         return
 
     try:
         # Send initial queue state
         queue_manager = state.queue_manager
-        project_id = state.settings.gitlab_project_id
         queue_items = await queue_manager.get_active_queue(project_id)
         stats = await queue_manager.get_queue_stats(project_id)
 
@@ -298,6 +353,7 @@ async def websocket_queue_updates(websocket: WebSocket) -> None:
             {
                 "type": "queue:updated",
                 "data": {
+                    "project_id": project_id,
                     "queue": queue_data,
                     "stats": stats,
                 },
@@ -329,6 +385,7 @@ def _queue_item_to_dict(item: QueueItem, position: int | None = None) -> dict[st
     """
     result: dict[str, Any] = {
         "mr_iid": item.mr_iid,
+        "project_id": item.project_id,
         "title": item.title,
         "author": {
             "name": item.author_name,

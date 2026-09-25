@@ -32,7 +32,7 @@ class Scenario(vedro.Scenario):
         )
         uow = FakeUnitOfWork(history=history_repo)
 
-        self.state.uow_factory = lambda db: uow
+        self.state.uow_factory = lambda db, project_id: uow
 
     def when_outcomes_endpoint_is_called(self):
         self.response = self.client.get(

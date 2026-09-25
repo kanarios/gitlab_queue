@@ -17,9 +17,11 @@ services:
     image: ghcr.io/kanarios/gitlab_queue-backend:latest
     container_name: gitlab-queue-backend
     environment:
-      # Required
-      GITLAB_QUEUE_GITLAB_TOKEN: ${GITLAB_QUEUE_GITLAB_TOKEN}
-      GITLAB_QUEUE_GITLAB_PROJECT_ID: ${GITLAB_QUEUE_GITLAB_PROJECT_ID}
+      # Project configuration: set PROJECTS for multi-project mode, or the two
+      # legacy variables for a single project.
+      GITLAB_QUEUE_PROJECTS: ${GITLAB_QUEUE_PROJECTS:-}
+      GITLAB_QUEUE_GITLAB_TOKEN: ${GITLAB_QUEUE_GITLAB_TOKEN:-}
+      GITLAB_QUEUE_GITLAB_PROJECT_ID: ${GITLAB_QUEUE_GITLAB_PROJECT_ID:-0}
       GITLAB_QUEUE_JWT_SECRET: ${GITLAB_QUEUE_JWT_SECRET}
       GITLAB_QUEUE_WEBHOOK_SECRET: ${GITLAB_QUEUE_WEBHOOK_SECRET}
       # Server settings

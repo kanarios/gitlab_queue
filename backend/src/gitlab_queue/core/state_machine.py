@@ -181,7 +181,7 @@ class MRStateMachine(StateMachine):
 
         # Broadcast WebSocket update
         if self.websocket_manager:
-            await self.websocket_manager.broadcast_mr_status_changed(self.mr_iid, "new", "queued")
+            await self.websocket_manager.broadcast_mr_status_changed(self.mr_iid, "new", "queued", self._project_id)
 
     async def on_enter_rebasing(self) -> None:
         """Called when MR starts rebasing."""
@@ -199,7 +199,9 @@ class MRStateMachine(StateMachine):
 
         # Broadcast WebSocket update
         if self.websocket_manager:
-            await self.websocket_manager.broadcast_mr_status_changed(self.mr_iid, "queued", "rebasing")
+            await self.websocket_manager.broadcast_mr_status_changed(
+                self.mr_iid, "queued", "rebasing", self._project_id
+            )
 
     async def on_enter_testing(self) -> None:
         """Called when pipeline starts after rebase."""
@@ -229,7 +231,9 @@ class MRStateMachine(StateMachine):
 
         # Broadcast WebSocket update
         if self.websocket_manager:
-            await self.websocket_manager.broadcast_mr_status_changed(self.mr_iid, "rebasing", "testing")
+            await self.websocket_manager.broadcast_mr_status_changed(
+                self.mr_iid, "rebasing", "testing", self._project_id
+            )
 
     async def on_enter_merging(self) -> None:
         """Called when pipeline passes and merge starts."""
@@ -248,7 +252,9 @@ class MRStateMachine(StateMachine):
 
         # Broadcast WebSocket update
         if self.websocket_manager:
-            await self.websocket_manager.broadcast_mr_status_changed(self.mr_iid, "testing", "merging")
+            await self.websocket_manager.broadcast_mr_status_changed(
+                self.mr_iid, "testing", "merging", self._project_id
+            )
 
     async def on_enter_merged(self) -> None:
         """Called when MR is successfully merged."""
@@ -275,6 +281,7 @@ class MRStateMachine(StateMachine):
                 self.mr_iid,
                 "merged",
                 finished_at=now,
+                project_id=self._project_id,
             )
 
         positions_before, old_total = await self._capture_queue_positions_if_enabled()
@@ -355,6 +362,7 @@ class MRStateMachine(StateMachine):
                 "failed",
                 finished_at=datetime.now(UTC),
                 failure_reason=error_message,
+                project_id=self._project_id,
             )
 
         positions_before, old_total = await self._capture_queue_positions_if_enabled()
@@ -436,6 +444,7 @@ class MRStateMachine(StateMachine):
                 self.mr_iid,
                 ws_status,
                 finished_at=datetime.now(UTC),
+                project_id=self._project_id,
             )
 
         positions_before, old_total = await self._capture_queue_positions_if_enabled()

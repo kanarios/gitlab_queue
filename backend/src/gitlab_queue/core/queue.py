@@ -453,7 +453,7 @@ class QueueManager:
 
         item = self._row_to_queue_item(row)
         self._cache.invalidate()  # Invalidate cache after queue modification
-        OPERATIONS_TOTAL.labels(type="add", status="success").inc()
+        OPERATIONS_TOTAL.labels(project_id=str(project_id), type="add", status="success").inc()
         log.info(
             "MR added to queue",
             mr_iid=mr.iid,
@@ -487,7 +487,7 @@ class QueueManager:
 
         if changed:
             self._cache.invalidate()  # Invalidate cache after queue modification
-            OPERATIONS_TOTAL.labels(type="remove", status="success").inc()
+            OPERATIONS_TOTAL.labels(project_id=str(project_id), type="remove", status="success").inc()
             log.info("MR removed from queue", mr_iid=mr_iid)
         else:
             log.debug("MR not removed (already removed or not found)", mr_iid=mr_iid)
@@ -742,7 +742,7 @@ class QueueManager:
 
         if changed:
             self._cache.invalidate()  # Invalidate cache after state change
-            OPERATIONS_TOTAL.labels(type="update", status="success").inc()
+            OPERATIONS_TOTAL.labels(project_id=str(project_id), type="update", status="success").inc()
             log.info("MR state updated", mr_iid=mr_iid, new_state=state)
         else:
             log.warning("MR not found for state update", mr_iid=mr_iid)
@@ -793,7 +793,7 @@ class QueueManager:
 
         if changed:
             self._cache.invalidate()
-            OPERATIONS_TOTAL.labels(type="update", status="success").inc()
+            OPERATIONS_TOTAL.labels(project_id=str(project_id), type="update", status="success").inc()
             log.info(
                 "MR hotfix status updated",
                 mr_iid=mr_iid,
@@ -910,7 +910,7 @@ class QueueManager:
             return False
 
         self._cache.invalidate()
-        OPERATIONS_TOTAL.labels(type="complete", status="success").inc()
+        OPERATIONS_TOTAL.labels(project_id=str(project_id), type="complete", status="success").inc()
         log.info(
             "MR completed and moved to history",
             mr_iid=mr_iid,

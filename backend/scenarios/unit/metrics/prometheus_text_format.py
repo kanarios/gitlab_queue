@@ -73,9 +73,9 @@ class Scenario2(vedro.Scenario):
 
     def then_queue_length_gauges_should_be_set(self):
         output = get_metrics_output().decode("utf-8")
-        assert 'merge_queue_length{status="queued"} 3.0' in output
-        assert 'merge_queue_length{status="processing"} 1.0' in output
-        assert 'merge_queue_length{status="merged"} 5.0' in output
+        assert 'merge_queue_length{project_id="99999",status="queued"} 3.0' in output
+        assert 'merge_queue_length{project_id="99999",status="processing"} 1.0' in output
+        assert 'merge_queue_length{project_id="99999",status="merged"} 5.0' in output
 
 
 class Scenario3(vedro.Scenario):
@@ -88,15 +88,15 @@ class Scenario3(vedro.Scenario):
         )
 
     def when_gitlab_metrics_are_updated(self):
-        update_gitlab_metrics(self.gitlab_client)
+        update_gitlab_metrics(self.gitlab_client, project_id=99999)
 
     def then_rate_limit_metric_should_be_set(self):
         output = get_metrics_output().decode("utf-8")
-        assert "merge_queue_rate_limit_remaining" in output
+        assert 'merge_queue_rate_limit_remaining{project_id="99999"} 950.0' in output
 
     def and_circuit_breaker_metric_should_be_set(self):
         output = get_metrics_output().decode("utf-8")
-        assert "merge_queue_circuit_breaker_state" in output
+        assert 'merge_queue_circuit_breaker_state{project_id="99999"} 0.0' in output
 
 
 class Scenario4(vedro.Scenario):
@@ -109,7 +109,7 @@ class Scenario4(vedro.Scenario):
         )
 
     def when_gitlab_metrics_are_updated(self):
-        update_gitlab_metrics(self.gitlab_client)
+        update_gitlab_metrics(self.gitlab_client, project_id=99999)
 
     def then_no_error_should_be_raised(self):
         pass  # If we got here, no error was raised

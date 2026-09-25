@@ -23,7 +23,7 @@ class Scenario(vedro.Scenario):
 
         # Create app with uow_factory DI
         self.app, self.state = created_test_app()
-        self.state.uow_factory = lambda db: uow
+        self.state.uow_factory = lambda db, project_id: uow
         self.client = TestClient(self.app, raise_server_exceptions=False)
         self.token = created_test_jwt(self.state.settings)
         self.headers = {"Authorization": f"Bearer {self.token}"}

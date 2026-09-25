@@ -26,8 +26,22 @@ describe('api/analytics', () => {
   });
 
   describe('getSummary', () => {
+    it('uses the selected project in the analytics path', async () => {
+      let requestPath = '';
+      server.use(
+        http.get('/api/projects/:projectId/analytics/summary', ({ request }) => {
+          requestPath = new URL(request.url).pathname;
+          return HttpResponse.json(mockAnalyticsSummary);
+        })
+      );
+
+      await getSummary(81);
+
+      expect(requestPath).toBe('/api/projects/81/analytics/summary');
+    });
+
     it('returns summary data', async () => {
-      const result = await getSummary();
+      const result = await getSummary(1);
 
       expect(result.success).toBe(true);
       if (result.success) {
@@ -37,7 +51,7 @@ describe('api/analytics', () => {
 
     it('returns error on server error', async () => {
       server.use(
-        http.get('/api/analytics/summary', () => {
+        http.get('/api/projects/1/analytics/summary', () => {
           return HttpResponse.json(
             { detail: 'Internal server error' },
             { status: 500 }
@@ -45,7 +59,7 @@ describe('api/analytics', () => {
         })
       );
 
-      const result = await getSummary();
+      const result = await getSummary(1);
 
       expect(result.success).toBe(false);
       if (!result.success) {
@@ -56,7 +70,7 @@ describe('api/analytics', () => {
 
   describe('getHourly', () => {
     it('returns hourly data', async () => {
-      const result = await getHourly();
+      const result = await getHourly(1);
 
       expect(result.success).toBe(true);
       if (result.success) {
@@ -67,21 +81,21 @@ describe('api/analytics', () => {
     it('passes hours parameter', async () => {
       let capturedHours: string | null = null;
       server.use(
-        http.get('/api/analytics/hourly', ({ request }) => {
+        http.get('/api/projects/1/analytics/hourly', ({ request }) => {
           const url = new URL(request.url);
           capturedHours = url.searchParams.get('hours');
           return HttpResponse.json([]);
         })
       );
 
-      await getHourly({ hours: 48 });
+      await getHourly(1, { hours: 48 });
 
       expect(capturedHours).toBe('48');
     });
 
     it('returns error on server error', async () => {
       server.use(
-        http.get('/api/analytics/hourly', () => {
+        http.get('/api/projects/1/analytics/hourly', () => {
           return HttpResponse.json(
             { detail: 'Internal server error' },
             { status: 500 }
@@ -89,7 +103,7 @@ describe('api/analytics', () => {
         })
       );
 
-      const result = await getHourly();
+      const result = await getHourly(1);
 
       expect(result.success).toBe(false);
       if (!result.success) {
@@ -100,7 +114,7 @@ describe('api/analytics', () => {
 
   describe('getOutcomes', () => {
     it('returns outcomes data', async () => {
-      const result = await getOutcomes();
+      const result = await getOutcomes(1);
 
       expect(result.success).toBe(true);
       if (result.success) {
@@ -110,7 +124,7 @@ describe('api/analytics', () => {
 
     it('returns error on server error', async () => {
       server.use(
-        http.get('/api/analytics/outcomes', () => {
+        http.get('/api/projects/1/analytics/outcomes', () => {
           return HttpResponse.json(
             { detail: 'Internal server error' },
             { status: 500 }
@@ -118,7 +132,7 @@ describe('api/analytics', () => {
         })
       );
 
-      const result = await getOutcomes();
+      const result = await getOutcomes(1);
 
       expect(result.success).toBe(false);
       if (!result.success) {
@@ -129,7 +143,7 @@ describe('api/analytics', () => {
 
   describe('getFailureReasons', () => {
     it('returns failure reasons data', async () => {
-      const result = await getFailureReasons();
+      const result = await getFailureReasons(1);
 
       expect(result.success).toBe(true);
       if (result.success) {
@@ -139,7 +153,7 @@ describe('api/analytics', () => {
 
     it('returns error on server error', async () => {
       server.use(
-        http.get('/api/analytics/failure-reasons', () => {
+        http.get('/api/projects/1/analytics/failure-reasons', () => {
           return HttpResponse.json(
             { detail: 'Internal server error' },
             { status: 500 }
@@ -147,7 +161,7 @@ describe('api/analytics', () => {
         })
       );
 
-      const result = await getFailureReasons();
+      const result = await getFailureReasons(1);
 
       expect(result.success).toBe(false);
       if (!result.success) {

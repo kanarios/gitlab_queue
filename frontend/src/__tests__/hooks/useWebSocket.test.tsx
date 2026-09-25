@@ -66,7 +66,7 @@ describe('hooks/useWebSocket', () => {
 
   describe('initial state', () => {
     it('returns initial disconnected state', () => {
-      const { result } = renderHook(() => useWebSocket());
+      const { result } = renderHook(() => useWebSocket(null));
 
       expect(result.current.state).toBe('disconnected');
       expect(result.current.queue).toEqual([]);
@@ -76,13 +76,13 @@ describe('hooks/useWebSocket', () => {
     it('connects when token exists', () => {
       setToken('test-token');
 
-      renderHook(() => useWebSocket());
+      renderHook(() => useWebSocket(1));
 
-      expect(mockWsManager.connect).toHaveBeenCalled();
+      expect(mockWsManager.connect).toHaveBeenCalledWith(1);
     });
 
     it('does not connect when no token', () => {
-      renderHook(() => useWebSocket());
+      renderHook(() => useWebSocket(1));
 
       expect(mockWsManager.connect).not.toHaveBeenCalled();
     });
@@ -90,7 +90,7 @@ describe('hooks/useWebSocket', () => {
 
   describe('state updates', () => {
     it('updates state when connection state changes', () => {
-      const { result } = renderHook(() => useWebSocket());
+      const { result } = renderHook(() => useWebSocket(1));
 
       act(() => {
         stateChangeCallback?.('connecting');
@@ -108,7 +108,7 @@ describe('hooks/useWebSocket', () => {
 
   describe('queue:updated event', () => {
     it('updates queue and stats on queue:updated event', () => {
-      const { result } = renderHook(() => useWebSocket());
+      const { result } = renderHook(() => useWebSocket(1));
 
       const mockQueue: MergeRequest[] = [
         {
@@ -136,7 +136,7 @@ describe('hooks/useWebSocket', () => {
 
       const callback = eventCallbacks.get('queue:updated');
       act(() => {
-        callback?.({ queue: mockQueue, stats: mockStats });
+        callback?.({ project_id: 1, queue: mockQueue, stats: mockStats });
       });
 
       expect(result.current.queue).toEqual(mockQueue);
@@ -146,7 +146,7 @@ describe('hooks/useWebSocket', () => {
 
   describe('mr:status_changed event', () => {
     it('updates MR status on mr:status_changed event', () => {
-      const { result } = renderHook(() => useWebSocket());
+      const { result } = renderHook(() => useWebSocket(1));
 
       // First, set up queue with an MR
       const mockQueue: MergeRequest[] = [
@@ -168,7 +168,7 @@ describe('hooks/useWebSocket', () => {
 
       const queueCallback = eventCallbacks.get('queue:updated');
       act(() => {
-        queueCallback?.({ queue: mockQueue, stats: null });
+        queueCallback?.({ project_id: 1, queue: mockQueue, stats: null });
       });
 
       expect(result.current.queue[0].status).toBe('queued');
@@ -176,14 +176,14 @@ describe('hooks/useWebSocket', () => {
       // Now update the status
       const statusCallback = eventCallbacks.get('mr:status_changed');
       act(() => {
-        statusCallback?.({ iid: 42, oldStatus: 'queued', newStatus: 'rebasing' });
+        statusCallback?.({ project_id: 1, iid: 42, oldStatus: 'queued', newStatus: 'rebasing' });
       });
 
       expect(result.current.queue[0].status).toBe('rebasing');
     });
 
     it('does not update non-matching MR', () => {
-      const { result } = renderHook(() => useWebSocket());
+      const { result } = renderHook(() => useWebSocket(1));
 
       const mockQueue: MergeRequest[] = [
         {
@@ -204,13 +204,13 @@ describe('hooks/useWebSocket', () => {
 
       const queueCallback = eventCallbacks.get('queue:updated');
       act(() => {
-        queueCallback?.({ queue: mockQueue, stats: null });
+        queueCallback?.({ project_id: 1, queue: mockQueue, stats: null });
       });
 
       // Try to update different MR
       const statusCallback = eventCallbacks.get('mr:status_changed');
       act(() => {
-        statusCallback?.({ iid: 99, oldStatus: 'queued', newStatus: 'rebasing' });
+        statusCallback?.({ project_id: 1, iid: 99, oldStatus: 'queued', newStatus: 'rebasing' });
       });
 
       // Original MR should be unchanged
@@ -220,7 +220,7 @@ describe('hooks/useWebSocket', () => {
 
   describe('mr:completed event', () => {
     it('removes MR from queue on mr:completed event', () => {
-      const { result } = renderHook(() => useWebSocket());
+      const { result } = renderHook(() => useWebSocket(1));
 
       const mockQueue: MergeRequest[] = [
         {
@@ -255,7 +255,7 @@ describe('hooks/useWebSocket', () => {
 
       const queueCallback = eventCallbacks.get('queue:updated');
       act(() => {
-        queueCallback?.({ queue: mockQueue, stats: null });
+        queueCallback?.({ project_id: 1, queue: mockQueue, stats: null });
       });
 
       expect(result.current.queue).toHaveLength(2);
@@ -264,6 +264,7 @@ describe('hooks/useWebSocket', () => {
       const completedCallback = eventCallbacks.get('mr:completed');
       act(() => {
         completedCallback?.({
+          project_id: 1,
           iid: 42,
           status: 'merged',
           finishedAt: '2025-01-01T12:00:00Z',
@@ -278,13 +279,59 @@ describe('hooks/useWebSocket', () => {
 
   describe('reconnect', () => {
     it('provides reconnect function', () => {
-      const { result } = renderHook(() => useWebSocket());
+      const { result } = renderHook(() => useWebSocket(1));
 
       act(() => {
         result.current.reconnect();
       });
 
-      expect(mockWsManager.reconnect).toHaveBeenCalled();
+      expect(mockWsManager.reconnect).toHaveBeenCalledWith(1);
+    });
+
+    it('disconnects and clears queue state before connecting to the next project', () => {
+      setToken('test-token');
+      const { result, rerender } = renderHook(
+        ({ projectId }) => useWebSocket(projectId),
+        { initialProps: { projectId: 1 as number | null } }
+      );
+      const firstProjectQueue = eventCallbacks.get('queue:updated');
+
+      act(() => {
+        firstProjectQueue?.({
+          project_id: 1,
+          queue: [{
+            mr_iid: 42,
+            title: 'Project one MR',
+            author: { name: 'Test', username: 'test', avatar_url: null },
+            status: 'queued',
+            labels: [],
+            is_hotfix: false,
+            queued_at: '2025-01-01T10:00:00Z',
+            started_at: null,
+            finished_at: null,
+            target_branch: 'main',
+            pipeline: null,
+            failure_reason: null,
+          }],
+          stats: { queued: 1, rebasing: 0, testing: 0, merging: 0 },
+        });
+      });
+      expect(result.current.queue).toHaveLength(1);
+
+      rerender({ projectId: 2 });
+
+      expect(mockWsManager.disconnect).toHaveBeenCalled();
+      expect(mockWsManager.connect).toHaveBeenLastCalledWith(2);
+      expect(result.current.queue).toEqual([]);
+      const secondProjectQueue = eventCallbacks.get('queue:updated');
+      act(() => {
+        secondProjectQueue?.({
+          project_id: 1,
+          queue: [],
+          stats: { queued: 0, rebasing: 0, testing: 0, merging: 0 },
+        });
+      });
+      expect(result.current.queue).toEqual([]);
     });
   });
 
@@ -303,7 +350,7 @@ describe('hooks/useWebSocket', () => {
         return vi.fn();
       });
 
-      const { unmount } = renderHook(() => useWebSocket());
+      const { unmount } = renderHook(() => useWebSocket(1));
 
       unmount();
 

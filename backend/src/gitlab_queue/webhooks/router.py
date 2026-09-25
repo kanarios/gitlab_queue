@@ -21,7 +21,13 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import Response
 
-from gitlab_queue.api.routes import analytics_router, config_router, history_router
+from gitlab_queue.api.project_access import authorized_project_ids_from_user, resolve_request_project
+from gitlab_queue.api.routes import (
+    analytics_router,
+    config_router,
+    history_router,
+    projects_router,
+)
 from gitlab_queue.api.websocket import WebSocketManager, ws_router
 from gitlab_queue.auth.middleware import AuthenticationMiddleware
 from gitlab_queue.auth.routes import auth_router
@@ -34,20 +40,21 @@ from gitlab_queue.metrics import (
     update_gitlab_metrics,
     update_queue_metrics,
 )
-from gitlab_queue.models.events import MergeRequestEvent, PipelineEvent, validate_webhook_token
+from gitlab_queue.models.events import MergeRequestEvent, NoteEvent, PipelineEvent, validate_webhook_token
 from gitlab_queue.models.retorts import parse_webhook_event
 from gitlab_queue.utils.logging import LogContext, generate_request_id, get_logger
 from gitlab_queue.webhooks.handlers import MRWebhookHandler, PipelineWebhookHandler, WebhookHandler
 from gitlab_queue.webhooks.retry_manager import DLQItemNotFoundError
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable
+    from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 
     import httpx
 
     from gitlab_queue.clients.gitlab import GitLabClient
     from gitlab_queue.config import Settings
     from gitlab_queue.core.notifier import MRNotifier
+    from gitlab_queue.core.project_components import ProjectComponents
     from gitlab_queue.core.queue import QueueManager
     from gitlab_queue.core.queue_position_notifier import QueuePositionNotifier
     from gitlab_queue.db import UnitOfWork
@@ -96,7 +103,8 @@ class WebhookAppState:
         default=None
     )
     oauth_transport: httpx.AsyncBaseTransport | None = field(default=None)
-    uow_factory: Callable[[Database], UnitOfWork] | None = field(default=None)
+    uow_factory: Callable[[Database, int], UnitOfWork] | None = field(default=None)
+    project_components: Mapping[int, ProjectComponents] | None = field(default=None)
 
 
 # =============================================================================
@@ -182,6 +190,42 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
 health_router = APIRouter(tags=["health"])
 
 
+def _refresh_gitlab_health(state: WebhookAppState) -> dict[int, GitLabHealth]:
+    """Refresh per-project circuit-breaker health and the legacy aggregate field."""
+    if state.project_components:
+        health_by_project = {}
+        for project_id, components in state.project_components.items():
+            if components.gitlab_client.project_access_verified:
+                components.health = GitLabHealth.from_circuit_breaker(components.gitlab_client.circuit_breaker)
+            elif components.gitlab_client.last_request_succeeded is False:
+                components.health = GitLabHealth(
+                    status=ComponentStatus.UNHEALTHY,
+                    circuit_state=components.gitlab_client.circuit_breaker.state.value,
+                    failure_count=components.gitlab_client.circuit_breaker.failure_count,
+                )
+            health_by_project[project_id] = components.health
+    elif state.settings.gitlab_project_id is not None:
+        health_by_project = {
+            state.settings.gitlab_project_id: GitLabHealth.from_circuit_breaker(state.gitlab_client.circuit_breaker)
+        }
+    else:
+        health_by_project = {}
+
+    state.health.gitlab_by_project = health_by_project
+    severity = {
+        ComponentStatus.HEALTHY: 0,
+        ComponentStatus.UNKNOWN: 1,
+        ComponentStatus.DEGRADED: 2,
+        ComponentStatus.UNHEALTHY: 3,
+    }
+    state.health.gitlab = max(
+        health_by_project.values(),
+        key=lambda project_health: severity[project_health.status],
+        default=None,
+    )
+    return health_by_project
+
+
 @health_router.get("/health")
 async def health(request: Request) -> dict[str, Any]:
     """Liveness probe endpoint.
@@ -198,14 +242,17 @@ async def health(request: Request) -> dict[str, Any]:
     """
     state: WebhookAppState = request.app.state.webhook_state
 
-    # Update GitLab health from circuit breaker
-    if state.gitlab_client and state.gitlab_client.circuit_breaker:
-        state.health.gitlab = GitLabHealth.from_circuit_breaker(state.gitlab_client.circuit_breaker)
+    _refresh_gitlab_health(state)
 
     return {
         "status": "healthy",
         "mode": state.health.mode.value,
-        "components": state.health.to_dict(),
+        "components": {
+            "database": state.health.database.value,
+            "gitlab": state.health.gitlab.status.value if state.health.gitlab else "unknown",
+            "processor_running": state.health.processor_running,
+            "webhook_server_running": state.health.webhook_server_running,
+        },
     }
 
 
@@ -234,14 +281,8 @@ async def ready(request: Request) -> JSONResponse | dict[str, Any]:
     state.health.database = ComponentStatus.HEALTHY if db_status.connected else ComponentStatus.UNHEALTHY
 
     # Update GitLab health from circuit breaker
-    gitlab_info: dict[str, Any] | None = None
-    if state.gitlab_client and state.gitlab_client.circuit_breaker:
-        state.health.gitlab = GitLabHealth.from_circuit_breaker(state.gitlab_client.circuit_breaker)
-        gitlab_info = {
-            "status": state.health.gitlab.status.value,
-            "circuit_state": state.health.gitlab.circuit_state,
-            "retry_after_seconds": state.health.gitlab.retry_after_seconds,
-        }
+    _refresh_gitlab_health(state)
+    gitlab_info = state.health.gitlab.to_dict() if state.health.gitlab else None
 
     if not db_status.connected:
         log.warning(
@@ -290,44 +331,78 @@ async def health_detailed(request: Request) -> dict[str, Any]:
 
     # Database health
     db_status = await state.database.health_check()
+    authorized_ids = authorized_project_ids_from_user(getattr(request.state, "user", None))
 
-    # GitLab health from circuit breaker
-    cb = state.gitlab_client.circuit_breaker
-    gitlab_health = GitLabHealth.from_circuit_breaker(cb)
+    _refresh_gitlab_health(state)
+    if state.project_components:
+        project_sources = [
+            (project_id, components.config, components.gitlab_client, components.health)
+            for project_id, components in state.project_components.items()
+            if project_id in authorized_ids
+        ]
+    else:
+        project_sources = []
+        if state.settings.gitlab_project_id in authorized_ids:
+            project_sources.append(
+                (
+                    state.settings.gitlab_project_id,
+                    state.settings.projects[0],
+                    state.gitlab_client,
+                    state.health.gitlab or GitLabHealth.from_circuit_breaker(state.gitlab_client.circuit_breaker),
+                )
+            )
 
-    # Rate limit state
-    rate_limit = state.gitlab_client.rate_limit_state
+    projects: dict[str, Any] = {}
+    for project_id, project_config, gitlab_client, project_health in project_sources:
+        cb = gitlab_client.circuit_breaker
+        gitlab_health = project_health or GitLabHealth.from_circuit_breaker(cb)
+        rate_limit = gitlab_client.rate_limit_state
+        projects[str(project_id)] = {
+            "config": {
+                "project_id": project_id,
+                "target_branch": project_config.target_branch,
+                "queue_label": project_config.queue_label,
+                "hotfix_label": project_config.hotfix_label,
+            },
+            "gitlab": {
+                "status": gitlab_health.status.value,
+                "circuit_breaker": {
+                    "state": cb.state.value,
+                    "failure_count": cb.failure_count,
+                    "failure_threshold": cb.failure_threshold,
+                    "half_open_timeout_seconds": cb.half_open_timeout,
+                    "retry_after_seconds": gitlab_health.retry_after_seconds,
+                },
+                "rate_limit": {
+                    "limit": rate_limit.limit,
+                    "remaining": rate_limit.remaining,
+                    "usage_ratio": rate_limit.usage_ratio,
+                    "seconds_until_reset": rate_limit.seconds_until_reset,
+                },
+            },
+        }
+
+    legacy_project = next(iter(projects.values()), None)
+    legacy_config = {}
+    if legacy_project:
+        legacy_config = {
+            "gitlab_project_id": legacy_project["config"]["project_id"],
+            "target_branch": legacy_project["config"]["target_branch"],
+            "queue_label": legacy_project["config"]["queue_label"],
+            "hotfix_label": legacy_project["config"]["hotfix_label"],
+        }
 
     return {
         "status": "ok",
         "mode": state.health.mode.value,
-        "config": {
-            "gitlab_project_id": state.settings.gitlab_project_id,
-            "target_branch": state.settings.target_branch,
-            "queue_label": state.settings.queue_label,
-            "hotfix_label": state.settings.hotfix_label,
-        },
+        "projects": projects,
+        "config": legacy_config,
+        "gitlab": legacy_project["gitlab"] if legacy_project else {},
         "database": {
             "connected": db_status.connected,
             "wal_mode_enabled": db_status.wal_mode_enabled,
             "foreign_keys_enabled": db_status.foreign_keys_enabled,
             "error": db_status.error,
-        },
-        "gitlab": {
-            "status": gitlab_health.status.value,
-            "circuit_breaker": {
-                "state": cb.state.value,
-                "failure_count": cb.failure_count,
-                "failure_threshold": cb.failure_threshold,
-                "half_open_timeout_seconds": cb.half_open_timeout,
-                "retry_after_seconds": gitlab_health.retry_after_seconds,
-            },
-            "rate_limit": {
-                "limit": rate_limit.limit,
-                "remaining": rate_limit.remaining,
-                "usage_ratio": rate_limit.usage_ratio,
-                "seconds_until_reset": rate_limit.seconds_until_reset,
-            },
         },
         "processor_running": state.health.processor_running,
         "webhook_server_running": state.health.webhook_server_running,
@@ -349,9 +424,13 @@ async def metrics(request: Request) -> Response:
     """
     state: WebhookAppState = request.app.state.webhook_state
 
-    # Update current metrics from application state
-    await update_queue_metrics(state.queue_manager, state.settings.gitlab_project_id)
-    update_gitlab_metrics(state.gitlab_client)
+    if state.project_components:
+        for project_id, components in state.project_components.items():
+            await update_queue_metrics(state.queue_manager, project_id)
+            update_gitlab_metrics(components.gitlab_client, project_id)
+    elif state.settings.gitlab_project_id is not None:
+        await update_queue_metrics(state.queue_manager, state.settings.gitlab_project_id)
+        update_gitlab_metrics(state.gitlab_client, state.settings.gitlab_project_id)
 
     return Response(
         content=get_metrics_output(),
@@ -376,23 +455,35 @@ async def _route_webhook_event(
         state: Webhook application state.
         event: Parsed webhook event.
     """
+    components = state.project_components.get(event.project_id) if state.project_components else None
+    if components is None:
+        handler_settings: Any = state.settings
+        gitlab_client = state.gitlab_client
+        notifier = state.notifier
+        position_notifier = state.position_notifier
+    else:
+        handler_settings = components.settings
+        gitlab_client = components.gitlab_client
+        notifier = components.notifier
+        position_notifier = components.position_notifier
+
     if isinstance(event, MergeRequestEvent):
         handler = MRWebhookHandler(
-            settings=state.settings,
-            gitlab_client=state.gitlab_client,
+            settings=handler_settings,
+            gitlab_client=gitlab_client,
             queue_manager=state.queue_manager,
-            notifier=state.notifier,
-            position_notifier=state.position_notifier,
+            notifier=notifier,
+            position_notifier=position_notifier,
             websocket_manager=state.websocket_manager,
         )
         await handler.handle(event)
     elif isinstance(event, PipelineEvent):
         pipeline_handler = PipelineWebhookHandler(
-            settings=state.settings,
-            gitlab_client=state.gitlab_client,
+            settings=handler_settings,
+            gitlab_client=gitlab_client,
             queue_manager=state.queue_manager,
-            notifier=state.notifier,
-            position_notifier=state.position_notifier,
+            notifier=notifier,
+            position_notifier=position_notifier,
             websocket_manager=state.websocket_manager,
         )
         await pipeline_handler.handle(event)
@@ -434,24 +525,26 @@ async def handle_gitlab_webhook(
     _validate_webhook_request(state, x_gitlab_token)
 
     payload = await request.json()
-
-    try:
-        event = parse_webhook_event(payload)
-    except (ValueError, KeyError) as e:
-        log.warning(
-            "Failed to parse webhook event",
-            error=str(e),
-            object_kind=payload.get("object_kind"),
+    raw_project_id = payload.get("project", {}).get("id")
+    configured_ids = set(state.project_components) if state.project_components else {state.settings.gitlab_project_id}
+    if raw_project_id not in configured_ids:
+        log.debug(
+            "Webhook payload for unconfigured project ignored",
+            event_project_id=raw_project_id,
+            configured_project_ids=sorted(project_id for project_id in configured_ids if project_id is not None),
         )
-        try:
-            retry_id = await state.retry_manager.add_to_retry_queue(
-                event_type=payload.get("object_kind", "unknown"),
-                payload=payload,
-                error=str(e),
-            )
-            return {"status": "queued_for_retry", "retry_id": str(retry_id)}
-        except Exception:
-            return {"status": "error", "reason": "parse_failed"}
+        return {
+            "status": "ignored",
+            "reason": ("project_id_mismatch" if len(configured_ids) == 1 else "project_not_configured"),
+            "details": {
+                "event_project_id": raw_project_id,
+                "configured_project_ids": sorted(project_id for project_id in configured_ids if project_id is not None),
+            },
+        }
+
+    event, parse_error_response = await _parse_webhook_event_or_queue(state, payload, raw_project_id)
+    if parse_error_response is not None:
+        return parse_error_response
 
     if event is None:
         log.debug("Unknown event type ignored", object_kind=payload.get("object_kind"))
@@ -461,18 +554,18 @@ async def handle_gitlab_webhook(
             "details": {"object_kind": payload.get("object_kind")},
         }
 
-    if event.project_id != state.settings.gitlab_project_id:
+    if event.project_id not in configured_ids:
         log.debug(
-            "Event for different project ignored",
+            "Event for unconfigured project ignored",
             event_project_id=event.project_id,
-            configured_project_id=state.settings.gitlab_project_id,
+            configured_project_ids=sorted(project_id for project_id in configured_ids if project_id is not None),
         )
         return {
             "status": "ignored",
-            "reason": "project_id_mismatch",
+            "reason": ("project_id_mismatch" if len(configured_ids) == 1 else "project_not_configured"),
             "details": {
                 "event_project_id": event.project_id,
-                "configured_project_id": state.settings.gitlab_project_id,
+                "configured_project_ids": sorted(project_id for project_id in configured_ids if project_id is not None),
             },
         }
 
@@ -522,6 +615,7 @@ async def handle_gitlab_webhook(
                 event_type=event.object_kind,
                 payload=payload,
                 error=str(e),
+                project_id=event.project_id,
             )
             log.info(
                 "Failed event added to retry queue",
@@ -539,6 +633,34 @@ async def handle_gitlab_webhook(
     return {"status": "ok"}
 
 
+async def _parse_webhook_event_or_queue(
+    state: WebhookAppState,
+    payload: dict[str, Any],
+    raw_project_id: Any,
+) -> tuple[MergeRequestEvent | PipelineEvent | NoteEvent | None, dict[str, Any] | None]:
+    """Parse a webhook payload, queuing malformed events for retry."""
+    try:
+        event = parse_webhook_event(payload)
+    except (ValueError, KeyError) as e:
+        log.warning(
+            "Failed to parse webhook event",
+            error=str(e),
+            object_kind=payload.get("object_kind"),
+        )
+        try:
+            retry_id = await state.retry_manager.add_to_retry_queue(
+                event_type=payload.get("object_kind", "unknown"),
+                payload=payload,
+                error=str(e),
+                project_id=raw_project_id,
+            )
+            return None, {"status": "queued_for_retry", "retry_id": str(retry_id)}
+        except Exception:
+            return None, {"status": "error", "reason": "parse_failed"}
+
+    return event, None
+
+
 # =============================================================================
 # DLQ API Router
 # =============================================================================
@@ -547,6 +669,7 @@ dlq_router = APIRouter(prefix="/api/dlq", tags=["dlq"])
 
 
 @dlq_router.get("")
+@projects_router.get("/{project_id}/dlq")
 async def list_dlq_entries(
     request: Request,
     limit: int = 50,
@@ -565,13 +688,15 @@ async def list_dlq_entries(
         Dict with items list and stats.
     """
     state: WebhookAppState = request.app.state.webhook_state
+    project_id = resolve_request_project(request, state)
 
     items = await state.retry_manager.get_dlq_entries(
         limit=limit,
         offset=offset,
         event_type=event_type,
+        project_id=project_id,
     )
-    stats = await state.retry_manager.get_dlq_stats()
+    stats = await state.retry_manager.get_dlq_stats(project_id=project_id)
 
     return {
         "items": [_dlq_item_to_dict(item) for item in items],
@@ -584,6 +709,7 @@ async def list_dlq_entries(
 
 
 @dlq_router.get("/stats")
+@projects_router.get("/{project_id}/dlq/stats")
 async def get_dlq_stats(request: Request) -> dict[str, Any]:
     """Get DLQ statistics.
 
@@ -594,11 +720,13 @@ async def get_dlq_stats(request: Request) -> dict[str, Any]:
         DLQ statistics dict.
     """
     state: WebhookAppState = request.app.state.webhook_state
-    stats = await state.retry_manager.get_dlq_stats()
+    project_id = resolve_request_project(request, state)
+    stats = await state.retry_manager.get_dlq_stats(project_id=project_id)
     return _dlq_stats_to_dict(stats)
 
 
 @dlq_router.get("/{entry_id}")
+@projects_router.get("/{project_id}/dlq/{entry_id}")
 async def get_dlq_entry(request: Request, entry_id: int) -> dict[str, Any]:
     """Get a single DLQ entry by ID.
 
@@ -613,15 +741,17 @@ async def get_dlq_entry(request: Request, entry_id: int) -> dict[str, Any]:
         HTTPException: 404 if entry not found.
     """
     state: WebhookAppState = request.app.state.webhook_state
+    project_id = resolve_request_project(request, state)
 
     try:
-        item = await state.retry_manager.get_dlq_entry(entry_id)
+        item = await state.retry_manager.get_dlq_entry(entry_id, project_id=project_id)
         return _dlq_item_to_dict(item)
     except DLQItemNotFoundError:
         raise HTTPException(status_code=404, detail=f"DLQ entry {entry_id} not found")
 
 
 @dlq_router.delete("/{entry_id}")
+@projects_router.delete("/{project_id}/dlq/{entry_id}")
 async def delete_dlq_entry(request: Request, entry_id: int) -> dict[str, str]:
     """Delete a DLQ entry.
 
@@ -636,8 +766,9 @@ async def delete_dlq_entry(request: Request, entry_id: int) -> dict[str, str]:
         HTTPException: 404 if entry not found.
     """
     state: WebhookAppState = request.app.state.webhook_state
+    project_id = resolve_request_project(request, state)
 
-    deleted = await state.retry_manager.delete_dlq_entry(entry_id)
+    deleted = await state.retry_manager.delete_dlq_entry(entry_id, project_id=project_id)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"DLQ entry {entry_id} not found")
 
@@ -645,6 +776,7 @@ async def delete_dlq_entry(request: Request, entry_id: int) -> dict[str, str]:
 
 
 @dlq_router.post("/{entry_id}/retry")
+@projects_router.post("/{project_id}/dlq/{entry_id}/retry")
 async def retry_dlq_entry(request: Request, entry_id: int) -> dict[str, Any]:
     """Move a DLQ entry back to retry queue for another attempt.
 
@@ -659,9 +791,10 @@ async def retry_dlq_entry(request: Request, entry_id: int) -> dict[str, Any]:
         HTTPException: 404 if entry not found.
     """
     state: WebhookAppState = request.app.state.webhook_state
+    project_id = resolve_request_project(request, state)
 
     try:
-        retry_id = await state.retry_manager.retry_dlq_entry(entry_id)
+        retry_id = await state.retry_manager.retry_dlq_entry(entry_id, project_id=project_id)
         log.info(
             "DLQ entry moved to retry queue",
             dlq_entry_id=entry_id,
@@ -680,6 +813,7 @@ def _dlq_item_to_dict(item: DLQItem) -> dict[str, Any]:
     """Convert DLQItem to dict for JSON response."""
     return {
         "id": item.id,
+        "project_id": item.project_id,
         "event_type": item.event_type,
         "payload": item.payload,
         "attempt_count": item.attempt_count,
@@ -706,6 +840,7 @@ queue_router = APIRouter(prefix="/api/queue", tags=["queue"])
 
 
 @queue_router.get("")
+@projects_router.get("/{project_id}/queue")
 async def get_queue_status(request: Request) -> dict[str, Any]:
     """Get complete queue status for dashboard.
 
@@ -721,7 +856,7 @@ async def get_queue_status(request: Request) -> dict[str, Any]:
     state: WebhookAppState = request.app.state.webhook_state
     queue_manager = state.queue_manager
 
-    project_id = state.settings.gitlab_project_id
+    project_id = resolve_request_project(request, state)
     active_queue = await queue_manager.get_active_queue(project_id)
     recent_history = await queue_manager.get_recent_history(limit=10, project_id=project_id)
     dashboard_stats = await queue_manager.get_dashboard_stats(days=7, project_id=project_id)
@@ -735,6 +870,7 @@ async def get_queue_status(request: Request) -> dict[str, Any]:
 
 
 @queue_router.get("/active")
+@projects_router.get("/{project_id}/queue/active")
 async def get_active_queue(request: Request) -> dict[str, Any]:
     """Get only the active queue items.
 
@@ -749,7 +885,7 @@ async def get_active_queue(request: Request) -> dict[str, Any]:
     state: WebhookAppState = request.app.state.webhook_state
     queue_manager = state.queue_manager
 
-    project_id = state.settings.gitlab_project_id
+    project_id = resolve_request_project(request, state)
     active_queue = await queue_manager.get_active_queue(project_id)
 
     return {
@@ -759,6 +895,7 @@ async def get_active_queue(request: Request) -> dict[str, Any]:
 
 
 @queue_router.get("/stats")
+@projects_router.get("/{project_id}/queue/stats")
 async def get_queue_statistics(request: Request) -> dict[str, Any]:
     """Get queue statistics only.
 
@@ -771,7 +908,7 @@ async def get_queue_statistics(request: Request) -> dict[str, Any]:
     state: WebhookAppState = request.app.state.webhook_state
     queue_manager = state.queue_manager
 
-    project_id = state.settings.gitlab_project_id
+    project_id = resolve_request_project(request, state)
     dashboard_stats = await queue_manager.get_dashboard_stats(days=7, project_id=project_id)
     current_stats = await queue_manager.get_queue_stats(project_id)
 
@@ -779,6 +916,7 @@ async def get_queue_statistics(request: Request) -> dict[str, Any]:
 
 
 @queue_router.get("/{mr_iid}")
+@projects_router.get("/{project_id}/queue/{mr_iid}")
 async def get_queue_item(request: Request, mr_iid: int) -> dict[str, Any]:
     """Get a specific MR's queue status.
 
@@ -795,7 +933,7 @@ async def get_queue_item(request: Request, mr_iid: int) -> dict[str, Any]:
     state: WebhookAppState = request.app.state.webhook_state
     queue_manager = state.queue_manager
 
-    project_id = state.settings.gitlab_project_id
+    project_id = resolve_request_project(request, state)
     item = await queue_manager.get_queue_item(project_id, mr_iid)
     if item is None:
         raise HTTPException(status_code=404, detail=f"MR !{mr_iid} not found in queue")
@@ -817,6 +955,7 @@ def _queue_item_to_dict(item: QueueItem, position: int | None = None) -> dict[st
     """
     result: dict[str, Any] = {
         "mr_iid": item.mr_iid,
+        "project_id": item.project_id,
         "title": item.title,
         "author": {
             "name": item.author_name,
@@ -952,6 +1091,7 @@ def create_webhook_app(state: WebhookAppState) -> FastAPI:
     app.include_router(history_router)
     app.include_router(analytics_router)
     app.include_router(config_router)
+    app.include_router(projects_router)
     app.include_router(auth_router)
     app.include_router(ws_router)
 
@@ -974,6 +1114,7 @@ __all__: list[str] = [
     "dlq_router",
     "health_router",
     "history_router",
+    "projects_router",
     "queue_router",
     "webhook_router",
     "ws_router",

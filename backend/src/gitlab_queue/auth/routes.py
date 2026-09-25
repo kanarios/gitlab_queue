@@ -13,6 +13,7 @@ Example:
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlencode
@@ -26,6 +27,7 @@ from gitlab_queue.auth.jwt_handler import (
     TokenExpiredError,
     create_access_token,
     decode_token,
+    get_authorized_project_ids,
 )
 from gitlab_queue.auth.oauth import get_oauth_config, validate_project_access
 from gitlab_queue.utils.logging import get_logger
@@ -180,34 +182,44 @@ async def exchange_token(
         transport=app_state.oauth_transport,
     )
 
-    # Validate project access
-    has_access = await validate_project_access(
-        gitlab_url=app_state.settings.gitlab_url,
-        access_token=access_token,
-        project_id=app_state.settings.gitlab_project_id,
-        transport=app_state.oauth_transport,
+    project_ids = [project.project_id for project in app_state.settings.projects]
+    access_results = await asyncio.gather(
+        *(
+            validate_project_access(
+                gitlab_url=app_state.settings.gitlab_url,
+                access_token=access_token,
+                project_id=project_id,
+                transport=app_state.oauth_transport,
+            )
+            for project_id in project_ids
+        )
     )
+    authorized_project_ids = [
+        project_id for project_id, has_access in zip(project_ids, access_results, strict=True) if has_access
+    ]
 
-    if not has_access:
+    if not authorized_project_ids:
         log.warning(
-            "User denied access - no project membership",
+            "User denied access - no configured project membership",
             user_id=user_info.get("id"),
             username=user_info.get("username"),
-            project_id=app_state.settings.gitlab_project_id,
+            configured_project_ids=project_ids,
         )
         raise HTTPException(
             status_code=403,
-            detail="Access denied: you don't have access to this project",
+            detail="Access denied: you don't have access to any configured project",
         )
 
-    user_info["project_id"] = app_state.settings.gitlab_project_id
+    user_info["project_ids"] = authorized_project_ids
+    # Legacy claim remains populated only for a singleton authorization set.
+    user_info["project_id"] = authorized_project_ids[0] if len(authorized_project_ids) == 1 else None
     jwt_token = create_access_token(user_info, app_state.settings)
 
     log.info(
         "User authenticated successfully",
         user_id=user_info.get("id"),
         username=user_info.get("username"),
-        project_id=app_state.settings.gitlab_project_id,
+        project_ids=authorized_project_ids,
     )
 
     response = JSONResponse(
@@ -287,6 +299,7 @@ async def get_current_user(request: Request) -> dict[str, Any]:
         "name": payload.get("name"),
         "email": payload.get("email"),
         "avatar_url": payload.get("avatar_url"),
+        "project_ids": sorted(get_authorized_project_ids(payload)),
     }
 
 

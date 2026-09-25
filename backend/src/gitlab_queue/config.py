@@ -13,14 +13,19 @@ Example:
 from __future__ import annotations
 
 import hmac
+import json
 import os
 import warnings
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 import environ
 from environ import bool_var, var
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 # Minimum length for JWT secret (256 bits / 8 = 32 bytes, hex-encoded = 64 chars)
 JWT_SECRET_MIN_LENGTH = 64
@@ -113,15 +118,19 @@ class Secret:
         return len(object.__getattribute__(self, "_secret_value"))
 
 
-def _to_secret(value: str) -> Secret:
+def _to_secret(value: str | Secret) -> Secret:
     """Convert string to Secret."""
+    if isinstance(value, Secret):
+        return value
     return Secret(value)
 
 
-def _to_optional_secret(value: str | None) -> Secret | None:
+def _to_optional_secret(value: str | Secret | None) -> Secret | None:
     """Convert string to Secret or return None."""
     if value is None:
         return None
+    if isinstance(value, Secret):
+        return value
     return Secret(value)
 
 
@@ -161,6 +170,42 @@ def _to_cors_origins_list(value: str | list[str]) -> list[str]:
     return origins
 
 
+@dataclass(frozen=True)
+class ProjectConfig:
+    """Per-project configuration for multi-project deployments.
+
+    Each project has its own GitLab token, project_id, and queue settings.
+    Created either from GITLAB_QUEUE_PROJECTS JSON env var or from
+    legacy single-project settings for backward compatibility.
+
+    Attributes:
+        project_id: GitLab project ID.
+        token: GitLab access token for this project.
+        target_branch: Branch MRs target (e.g., 'master', 'main').
+        queue_label: Label that triggers queue addition.
+        hotfix_label: Label for hotfix priority.
+    """
+
+    project_id: int
+    token: Secret
+    target_branch: str = "master"
+    queue_label: str = "merge_queue"
+    hotfix_label: str = "hotfix"
+
+    def __post_init__(self) -> None:
+        """Reject invalid values even when constructed outside JSON parsing."""
+        if type(self.project_id) is not int or self.project_id <= 0:
+            raise ValueError(f"project_id must be a positive integer, got: {self.project_id!r}")
+
+        if not isinstance(self.token, Secret) or not self.token.get_secret_value().strip():
+            raise ValueError("token must be a non-empty Secret")
+
+        for field_name in ("target_branch", "queue_label", "hotfix_label"):
+            value = getattr(self, field_name)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{field_name} must be a non-empty string")
+
+
 @environ.config(prefix="GITLAB_QUEUE")
 class Settings:
     """Application configuration loaded from environment variables.
@@ -168,10 +213,11 @@ class Settings:
     All environment variables are prefixed with GITLAB_QUEUE_.
 
     Required variables (application will not start without these):
-        GITLAB_QUEUE_GITLAB_TOKEN: GitLab personal access token with 'api' scope
-        GITLAB_QUEUE_GITLAB_PROJECT_ID: GitLab project ID (positive integer)
         GITLAB_QUEUE_JWT_SECRET: Secret key for JWT token signing
             (minimum 64 characters, generate with: openssl rand -hex 64)
+
+    GitLab project configuration must use either GITLAB_QUEUE_PROJECTS or both
+    GITLAB_QUEUE_GITLAB_TOKEN and GITLAB_QUEUE_GITLAB_PROJECT_ID.
 
     All other variables have sensible defaults and are optional.
 
@@ -182,8 +228,8 @@ class Settings:
 
     # GitLab Connection
     gitlab_url: str = var(default="https://gitlab.com")
-    gitlab_token: Secret = var(converter=_to_secret)  # Required
-    gitlab_project_id: int = var(converter=int)  # Required
+    gitlab_token: Secret = var(default="", converter=_to_secret)
+    gitlab_project_id: int = var(default=0, converter=int)
 
     # Target Branch
     target_branch: str = var(default="master")
@@ -259,9 +305,146 @@ class Settings:
     dashboard_enabled: bool = bool_var(default=True)
     cors_origins: list[str] = var(default="http://localhost:5173", converter=_to_cors_origins_list)
 
+    # Multi-project (optional JSON, overrides single-project fields above)
+    projects_json: str | None = var(name="GITLAB_QUEUE_PROJECTS", default=None)
+
     # Monitoring
     log_level: LogLevel = var(default="INFO", converter=_to_log_level)
     log_format: LogFormat = var(default="json", converter=_to_log_format)
+
+    @property
+    def projects(self) -> list[ProjectConfig]:
+        """Return per-project configurations.
+
+        If GITLAB_QUEUE_PROJECTS is set (JSON array), parses it into ProjectConfig list.
+        Otherwise, creates a single ProjectConfig from legacy single-project fields.
+        """
+        if self.projects_json is not None and self.projects_json.strip():
+            return _parse_projects_json(
+                self.projects_json,
+                target_branch=self.target_branch,
+                queue_label=self.queue_label,
+                hotfix_label=self.hotfix_label,
+            )
+        return [
+            ProjectConfig(
+                project_id=self.gitlab_project_id,
+                token=self.gitlab_token,
+                target_branch=self.target_branch,
+                queue_label=self.queue_label,
+                hotfix_label=self.hotfix_label,
+            )
+        ]
+
+
+def _parse_projects_json(
+    raw: str,
+    *,
+    target_branch: str = "master",
+    queue_label: str = "merge_queue",
+    hotfix_label: str = "hotfix",
+) -> list[ProjectConfig]:
+    """Parse GITLAB_QUEUE_PROJECTS JSON into list of ProjectConfig.
+
+    Expected format:
+        [
+            {"project_id": 123, "token": "glpat-aaa"},
+            {"project_id": 456, "token": "glpat-bbb", "target_branch": "main"}
+        ]
+
+    Raises:
+        ValueError: If JSON is invalid, empty, or contains duplicate project_ids.
+    """
+    data = _decode_projects_json(raw)
+    configs: list[ProjectConfig] = []
+    seen_ids: set[int] = set()
+
+    for entry in data:
+        config = _parse_project_entry(
+            entry,
+            seen_ids,
+            target_branch,
+            queue_label,
+            hotfix_label,
+        )
+        configs.append(config)
+
+    return configs
+
+
+def _decode_projects_json(raw: str) -> list[dict[str, Any]]:
+    """Decode and validate top-level JSON structure."""
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        msg = f"GITLAB_QUEUE_PROJECTS is not valid JSON: {e}"
+        raise ValueError(msg) from None
+
+    if not isinstance(data, list) or not data:
+        msg = "GITLAB_QUEUE_PROJECTS must be a non-empty JSON array"
+        raise ValueError(msg)
+
+    return data
+
+
+def _parse_project_entry(
+    entry: Any,
+    seen_ids: set[int],
+    default_target_branch: str,
+    default_queue_label: str,
+    default_hotfix_label: str,
+) -> ProjectConfig:
+    """Validate a single project entry and return ProjectConfig."""
+    entry = _validate_project_entry_shape(entry)
+    project_id, token = _validate_project_entry_values(entry)
+
+    if project_id in seen_ids:
+        msg = f"Duplicate project_id: {project_id}"
+        raise ValueError(msg)
+    seen_ids.add(project_id)
+
+    return ProjectConfig(
+        project_id=project_id,
+        token=Secret(token),
+        target_branch=entry.get("target_branch", default_target_branch),
+        queue_label=entry.get("queue_label", default_queue_label),
+        hotfix_label=entry.get("hotfix_label", default_hotfix_label),
+    )
+
+
+def _validate_project_entry_shape(entry: Any) -> dict[str, Any]:
+    """Validate that a project entry is an object with only supported fields."""
+    if not isinstance(entry, dict):
+        msg = f"Each project entry must be a JSON object, got: {type(entry).__name__}"
+        raise ValueError(msg)
+
+    allowed_fields = {"project_id", "token", "target_branch", "queue_label", "hotfix_label"}
+    unknown_fields = sorted(set(entry) - allowed_fields)
+    if unknown_fields:
+        msg = f"Unknown project field(s): {', '.join(unknown_fields)}"
+        raise ValueError(msg)
+
+    return entry
+
+
+def _validate_project_entry_values(entry: dict[str, Any]) -> tuple[int, str]:
+    """Validate the required project ID and token values."""
+    project_id = entry.get("project_id")
+    token = entry.get("token")
+
+    if project_id is None or token is None:
+        msg = "Each project entry must have 'project_id' and 'token' fields"
+        raise ValueError(msg)
+
+    if type(project_id) is not int or project_id <= 0:
+        msg = f"project_id must be a positive integer, got: {project_id}"
+        raise ValueError(msg)
+
+    if not isinstance(token, str) or not token.strip():
+        msg = "token must be a non-empty string"
+        raise ValueError(msg)
+
+    return project_id, token
 
 
 def _mask_database_url(self: Settings) -> str:
@@ -360,8 +543,11 @@ def _validate_gitlab_settings(settings: Settings, errors: list[str]) -> None:
     """Validate GitLab connection settings."""
     if not settings.gitlab_url.startswith(("http://", "https://")):
         errors.append(f"gitlab_url must start with http:// or https://, got: {settings.gitlab_url}")
-    if settings.gitlab_project_id <= 0:
-        errors.append(f"gitlab_project_id must be a positive integer, got: {settings.gitlab_project_id}")
+    if settings.projects_json is None or not settings.projects_json.strip():
+        if settings.gitlab_project_id <= 0:
+            errors.append(f"gitlab_project_id must be a positive integer, got: {settings.gitlab_project_id}")
+        if not settings.gitlab_token.get_secret_value().strip():
+            errors.append("gitlab_token is required when GITLAB_QUEUE_PROJECTS is not set")
 
 
 def _validate_timing_settings(settings: Settings, errors: list[str]) -> None:
@@ -522,6 +708,15 @@ def _validate_cors_settings(settings: Settings, errors: list[str]) -> None:
             errors.append(f"Invalid CORS origin '{origin}': must start with http:// or https://")
 
 
+def _validate_projects_settings(settings: Settings, errors: list[str]) -> None:
+    """Validate multi-project configuration if provided."""
+    if settings.projects_json is not None and settings.projects_json.strip():
+        try:
+            _ = settings.projects  # triggers _parse_projects_json
+        except ValueError as e:
+            errors.append(str(e))
+
+
 def _validate_settings(settings: Settings) -> None:
     """Validate settings for logical consistency and valid ranges.
 
@@ -543,12 +738,13 @@ def _validate_settings(settings: Settings) -> None:
     _validate_security_settings(settings, errors)
     _validate_webhook_server_settings(settings, errors)
     _validate_cors_settings(settings, errors)
+    _validate_projects_settings(settings, errors)
 
     if errors:
         raise ConfigurationError("Configuration validation failed:\n  - " + "\n  - ".join(errors))
 
 
-def load_settings() -> Settings:
+def load_settings(env_vars: Mapping[str, str] | None = None) -> Settings:
     """Load and validate settings from environment variables.
 
     All environment variables are prefixed with GITLAB_QUEUE_.
@@ -574,7 +770,7 @@ def load_settings() -> Settings:
         >>> settings.gitlab_url
         'https://gitlab.com'
     """
-    env = dict(os.environ)
+    env = dict(os.environ if env_vars is None else env_vars)
     if "GITLAB_QUEUE_JOB_RETRY_COUNT" not in env and "GITLAB_QUEUE_PIPELINE_RETRY_COUNT" in env:
         env["GITLAB_QUEUE_JOB_RETRY_COUNT"] = env["GITLAB_QUEUE_PIPELINE_RETRY_COUNT"]
         warnings.warn(
@@ -593,6 +789,7 @@ __all__: list[str] = [
     "ConfigurationError",
     "LogFormat",
     "LogLevel",
+    "ProjectConfig",
     "Secret",
     "Settings",
     "load_settings",

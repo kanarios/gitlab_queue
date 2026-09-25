@@ -17,7 +17,7 @@ describe('api/queue', () => {
 
   describe('getQueue', () => {
     it('returns queue data', async () => {
-      const result = await getQueue();
+      const result = await getQueue(1);
 
       expect(result.success).toBe(true);
       if (result.success) {
@@ -27,12 +27,12 @@ describe('api/queue', () => {
 
     it('returns empty array for empty queue', async () => {
       server.use(
-        http.get('/api/queue', () => {
-          return HttpResponse.json([]);
+        http.get('/api/projects/1/queue/active', () => {
+          return HttpResponse.json({ items: [], count: 0 });
         })
       );
 
-      const result = await getQueue();
+      const result = await getQueue(1);
 
       expect(result.success).toBe(true);
       if (result.success) {
@@ -42,7 +42,7 @@ describe('api/queue', () => {
 
     it('returns error on server error', async () => {
       server.use(
-        http.get('/api/queue', () => {
+        http.get('/api/projects/1/queue/active', () => {
           return HttpResponse.json(
             { detail: 'Internal server error' },
             { status: 500 }
@@ -50,7 +50,7 @@ describe('api/queue', () => {
         })
       );
 
-      const result = await getQueue();
+      const result = await getQueue(1);
 
       expect(result.success).toBe(false);
       if (!result.success) {
@@ -61,7 +61,7 @@ describe('api/queue', () => {
 
   describe('getQueueStats', () => {
     it('returns queue stats', async () => {
-      const result = await getQueueStats();
+      const result = await getQueueStats(1);
 
       expect(result.success).toBe(true);
       if (result.success) {
@@ -71,7 +71,7 @@ describe('api/queue', () => {
 
     it('returns error on server error', async () => {
       server.use(
-        http.get('/api/queue/stats', () => {
+        http.get('/api/projects/1/queue/stats', () => {
           return HttpResponse.json(
             { detail: 'Internal server error' },
             { status: 500 }
@@ -79,7 +79,7 @@ describe('api/queue', () => {
         })
       );
 
-      const result = await getQueueStats();
+      const result = await getQueueStats(1);
 
       expect(result.success).toBe(false);
       if (!result.success) {

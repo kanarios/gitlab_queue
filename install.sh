@@ -21,6 +21,7 @@
 #     --auto-start
 #
 # Environment variables (for non-interactive mode):
+#   GITLAB_PROJECTS       - Multi-project JSON array (replaces TOKEN/PROJECT_ID)
 #   GITLAB_TOKEN          - GitLab Personal Access Token (required)
 #   GITLAB_PROJECT_ID     - GitLab Project ID (required)
 #   WEBHOOK_SECRET        - Webhook secret (auto-generated if not set)
@@ -235,6 +236,7 @@ usage() {
 Usage: $0 [OPTIONS]
 
 Options:
+    --projects-json JSON   Multi-project JSON array
     --token TOKEN           GitLab Personal Access Token
     --project-id ID         GitLab Project ID
     --webhook-secret SECRET Webhook secret (auto-generated if not provided)
@@ -252,7 +254,7 @@ Options:
     -h, --help              Show this help message
 
 Environment variables:
-    GITLAB_TOKEN, GITLAB_PROJECT_ID, WEBHOOK_SECRET, GITLAB_URL,
+    GITLAB_PROJECTS, GITLAB_TOKEN, GITLAB_PROJECT_ID, WEBHOOK_SECRET, GITLAB_URL,
     TARGET_BRANCH, QUEUE_LABEL, HOTFIX_LABEL, INSTALL_DIR,
     HTTP_PORT, HTTPS_PORT, INSTALL_DASHBOARD, AUTO_START,
     OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OAUTH_REDIRECT_URI
@@ -278,6 +280,10 @@ EOF
 parse_args() {
     while [[ $# -gt 0 ]]; do
         case $1 in
+            --projects-json)
+                GITLAB_PROJECTS="$2"
+                shift 2
+                ;;
             --token)
                 GITLAB_TOKEN="$2"
                 shift 2
@@ -453,40 +459,44 @@ main() {
     # GitLab configuration
     print_step "GitLab configuration..."
 
-    # Token
-    if [[ -z "$GITLAB_TOKEN" ]]; then
+    if [[ -n "$GITLAB_PROJECTS" ]]; then
+        print_success "Multi-project configuration provided"
+    else
+      # Token
+      if [[ -z "$GITLAB_TOKEN" ]]; then
         if is_interactive; then
             echo
             print_info "You need a GitLab Personal Access Token with 'api' scope."
             print_info "Create one at: GitLab -> User Settings -> Access Tokens"
             echo
         fi
-        GITLAB_TOKEN=$(prompt_secret "GitLab Token (glpat-...)")
-    fi
+          GITLAB_TOKEN=$(prompt_secret "GitLab Token (glpat-...)")
+      fi
     
-    if [[ -z "$GITLAB_TOKEN" ]]; then
+      if [[ -z "$GITLAB_TOKEN" ]]; then
         print_error "GitLab token is required"
         print_info "Set GITLAB_TOKEN environment variable or use --token flag"
         exit 1
-    fi
-    print_success "GitLab token configured"
+      fi
+      print_success "GitLab token configured"
 
     # Project ID
-    if [[ -z "$GITLAB_PROJECT_ID" ]]; then
+      if [[ -z "$GITLAB_PROJECT_ID" ]]; then
         if is_interactive; then
             echo
             print_info "Find your Project ID at: Your Project -> Settings -> General"
             echo
         fi
-        GITLAB_PROJECT_ID=$(prompt "GitLab Project ID" "")
-    fi
+          GITLAB_PROJECT_ID=$(prompt "GitLab Project ID" "")
+      fi
     
-    if [[ ! "$GITLAB_PROJECT_ID" =~ ^[0-9]+$ ]]; then
+      if [[ ! "$GITLAB_PROJECT_ID" =~ ^[0-9]+$ ]]; then
         print_error "Project ID must be a positive integer"
         print_info "Set GITLAB_PROJECT_ID environment variable or use --project-id flag"
         exit 1
+      fi
+      print_success "Project ID: $GITLAB_PROJECT_ID"
     fi
-    print_success "Project ID: $GITLAB_PROJECT_ID"
 
     # Other GitLab settings (use defaults in non-interactive)
     if is_interactive; then
@@ -557,6 +567,20 @@ main() {
     # Generate configuration files
     print_step "Generating configuration files..."
 
+    if [[ -n "$GITLAB_PROJECTS" ]]; then
+        PROJECTS_ENV="GITLAB_QUEUE_PROJECTS=$GITLAB_PROJECTS"
+        if [[ -n "$GITLAB_PROJECT_ID" ]]; then
+            LEGACY_PROJECT_ENV="# Migration hint for an existing single-project database
+GITLAB_QUEUE_GITLAB_PROJECT_ID=$GITLAB_PROJECT_ID"
+        else
+            LEGACY_PROJECT_ENV="# For an upgrade, set GITLAB_QUEUE_GITLAB_PROJECT_ID to the former project ID"
+        fi
+    else
+        PROJECTS_ENV="# GITLAB_QUEUE_PROJECTS="
+        LEGACY_PROJECT_ENV="GITLAB_QUEUE_GITLAB_TOKEN=$GITLAB_TOKEN
+GITLAB_QUEUE_GITLAB_PROJECT_ID=$GITLAB_PROJECT_ID"
+    fi
+
     # Generate .env file
     cat > .env << EOF
 # =============================================================================
@@ -565,8 +589,8 @@ main() {
 # =============================================================================
 
 # GitLab Connection
-GITLAB_QUEUE_GITLAB_TOKEN=$GITLAB_TOKEN
-GITLAB_QUEUE_GITLAB_PROJECT_ID=$GITLAB_PROJECT_ID
+$PROJECTS_ENV
+$LEGACY_PROJECT_ENV
 GITLAB_QUEUE_GITLAB_URL=$GITLAB_URL
 GITLAB_QUEUE_TARGET_BRANCH=$TARGET_BRANCH
 GITLAB_QUEUE_QUEUE_LABEL=$QUEUE_LABEL
@@ -730,7 +754,11 @@ EOF
     echo "Configuration Summary:"
     echo "  Installation directory: $(pwd)"
     echo "  GitLab URL:             $GITLAB_URL"
-    echo "  Project ID:             $GITLAB_PROJECT_ID"
+    if [[ -n "$GITLAB_PROJECTS" ]]; then
+        echo "  Projects:               multi-project JSON"
+    else
+        echo "  Project ID:             $GITLAB_PROJECT_ID"
+    fi
     echo "  Queue label:            $QUEUE_LABEL"
     echo "  Dashboard:              $([ "$INSTALL_DASHBOARD" == "true" ] && echo "Yes" || echo "No")"
     echo "  HTTP Port:              $HTTP_PORT"
