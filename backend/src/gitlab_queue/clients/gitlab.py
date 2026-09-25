@@ -718,7 +718,7 @@ class GitLabClient:
                 await self._circuit_breaker.record_failure(last_exc)
                 raise last_exc from e
             raise GitLabAPIError("Request failed after retries") from e
-        except GitLabAPIError:
+        except (GitLabAPIError, httpx.RequestError):
             self._last_request_succeeded = False
             raise
         self._last_request_succeeded = True

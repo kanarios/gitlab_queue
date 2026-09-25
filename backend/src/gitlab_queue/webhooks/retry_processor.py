@@ -112,6 +112,16 @@ class WebhookRetryProcessor:
             for project_id in self.project_components:
                 events.extend(await self.retry_manager.get_events_ready_for_retry(limit=10, project_id=project_id))
 
+            # Removed projects are excluded from normal dispatch so that
+            # configured projects retain their per-project retry budget.
+            # Move their ready rows to the DLQ below instead of replaying them.
+            events.extend(
+                await self.retry_manager.get_events_ready_for_retry(
+                    limit=10,
+                    excluded_project_ids=tuple(self.project_components),
+                )
+            )
+
         if not events:
             log.debug("No events ready for retry")
             return
@@ -142,6 +152,19 @@ class WebhookRetryProcessor:
             self._processing_count += 1
 
         try:
+            if self.project_components is not None and item.project_id not in self.project_components:
+                log.warning(
+                    "Moving retry item for unconfigured project to DLQ",
+                    retry_id=item.id,
+                    project_id=item.project_id,
+                )
+                await self.retry_manager.move_retry_to_dlq(
+                    item.id,
+                    "Project is no longer configured; automatic retry was stopped",
+                    project_id=item.project_id,
+                )
+                return
+
             # Parse the webhook event from stored payload
             parser = self.event_parser or parse_webhook_event
             event = parser(item.payload)
@@ -153,19 +176,10 @@ class WebhookRetryProcessor:
                 await self.retry_manager.mark_retry_failed(item.id, error_msg, project_id=item.project_id)
                 return
 
-            if self.project_components is not None:
-                if item.project_id not in self.project_components:
-                    log.warning(
-                        "Dropping retry item for unconfigured project",
-                        retry_id=item.id,
-                        project_id=item.project_id,
-                    )
-                    await self.retry_manager.mark_retry_success(item.id, project_id=item.project_id)
-                    return
-                if event.project_id != item.project_id:
-                    error_msg = "Stored project_id does not match webhook payload"
-                    await self.retry_manager.mark_retry_failed(item.id, error_msg, project_id=item.project_id)
-                    return
+            if self.project_components is not None and event.project_id != item.project_id:
+                error_msg = "Stored project_id does not match webhook payload"
+                await self.retry_manager.mark_retry_failed(item.id, error_msg, project_id=item.project_id)
+                return
 
             # Process based on event type
             if isinstance(event, MergeRequestEvent):

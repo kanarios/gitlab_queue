@@ -193,3 +193,33 @@ class AmbiguousMultiProjectScenario(vedro.Scenario):
             else:
                 os.environ[key] = value
         self._tmp_dir.cleanup()
+
+
+class MissingLegacyOwnerScenario(vedro.Scenario):
+    subject = "migration refuses to leave legacy project sentinel rows unassigned"
+
+    def given_populated_legacy_database_without_project_configuration(self):
+        self._tmp_dir = tempfile.TemporaryDirectory()
+        self._db_path = Path(self._tmp_dir.name) / "missing_legacy_owner.db"
+        self._db_url = f"sqlite+aiosqlite:///{self._db_path}"
+        self._previous_environment = {key: os.environ.get(key) for key in _ENV_KEYS}
+
+    async def when_migration_runs_without_a_resolvable_owner(self):
+        await _prepare_legacy_database(self._db_url, self._db_path)
+        os.environ["GITLAB_QUEUE_GITLAB_PROJECT_ID"] = ""
+        os.environ["GITLAB_QUEUE_PROJECTS"] = ""
+        with catched(RuntimeError) as self.migration_error:
+            await run_migrations(self._db_url)
+
+    def then_migration_error_identifies_unassigned_legacy_rows(self):
+        assert self.migration_error.type is RuntimeError
+        assert "project_id=0" in str(self.migration_error.value)
+        assert "GITLAB_QUEUE_GITLAB_PROJECT_ID" in str(self.migration_error.value)
+
+    def do_cleanup(self):
+        for key, value in self._previous_environment.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        self._tmp_dir.cleanup()

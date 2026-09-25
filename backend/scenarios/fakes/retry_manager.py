@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
+
     from gitlab_queue.models.retry import RetryQueueItem
 
 
@@ -25,6 +27,8 @@ class FakeRetryManager:
     # Call recording
     success_calls: list[int] = field(default_factory=list)
     failed_calls: list[dict[str, Any]] = field(default_factory=list)
+    dlq_calls: list[dict[str, Any]] = field(default_factory=list)
+    get_events_calls: list[dict[str, Any]] = field(default_factory=list)
     ensure_schema_calls: int = field(default=0)
 
     # Additional call recording
@@ -35,10 +39,27 @@ class FakeRetryManager:
     # Auto-increment ID for add_to_retry_queue
     _next_id: int = field(default=1)
 
-    async def get_events_ready_for_retry(self, limit: int = 10, project_id: int | None = None) -> list[RetryQueueItem]:
+    async def get_events_ready_for_retry(
+        self,
+        limit: int = 10,
+        project_id: int | None = None,
+        excluded_project_ids: Collection[int] | None = None,
+    ) -> list[RetryQueueItem]:
         if self.get_events_error:
             raise self.get_events_error
-        return self._ready_events[:limit]
+        self.get_events_calls.append(
+            {
+                "limit": limit,
+                "project_id": project_id,
+                "excluded_project_ids": tuple(excluded_project_ids) if excluded_project_ids is not None else None,
+            }
+        )
+        return [
+            item
+            for item in self._ready_events
+            if (project_id is None or item.project_id == project_id)
+            and (excluded_project_ids is None or item.project_id not in excluded_project_ids)
+        ][:limit]
 
     async def mark_retry_success(self, item_id: int, project_id: int | None = None) -> None:
         self.success_calls.append(item_id)
@@ -46,6 +67,9 @@ class FakeRetryManager:
     async def mark_retry_failed(self, item_id: int, error_message: str, project_id: int | None = None) -> bool:
         self.failed_calls.append({"item_id": item_id, "error_message": error_message})
         return self._dlq_on_fail
+
+    async def move_retry_to_dlq(self, item_id: int, error: str, project_id: int) -> None:
+        self.dlq_calls.append({"item_id": item_id, "error": error, "project_id": project_id})
 
     async def ensure_schema(self) -> None:
         self.ensure_schema_calls += 1

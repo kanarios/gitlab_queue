@@ -114,6 +114,11 @@ def _legacy_project_id() -> int | None:
     legacy_project_id = _positive_project_id(os.getenv("GITLAB_QUEUE_GITLAB_PROJECT_ID"))
     projects_json = (os.getenv("GITLAB_QUEUE_PROJECTS") or "").strip()
     if not projects_json:
+        if legacy_project_id is None and _has_unassigned_rows():
+            raise RuntimeError(
+                "Cannot migrate legacy project_id=0 rows without a valid project owner. "
+                "Set GITLAB_QUEUE_GITLAB_PROJECT_ID to the former single project ID."
+            )
         return legacy_project_id
 
     try:

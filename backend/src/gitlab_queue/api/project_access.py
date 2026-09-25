@@ -59,6 +59,16 @@ def resolve_project_id(
     return requested_project_id
 
 
+def resolve_request_project(request: Request, state: WebhookAppState) -> int:
+    """Resolve a route project parameter or the single-project legacy alias."""
+    raw_project_id = request.path_params.get("project_id")
+    try:
+        requested_project_id = int(raw_project_id) if raw_project_id is not None else None
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=404, detail="Project not found") from None
+    return resolve_project_id(request, state, requested_project_id)
+
+
 def resolve_project_components(
     state: WebhookAppState,
     project_id: int,
@@ -75,4 +85,5 @@ __all__ = [
     "configured_project_ids",
     "resolve_project_components",
     "resolve_project_id",
+    "resolve_request_project",
 ]

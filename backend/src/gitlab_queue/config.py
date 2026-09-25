@@ -320,7 +320,12 @@ class Settings:
         Otherwise, creates a single ProjectConfig from legacy single-project fields.
         """
         if self.projects_json is not None and self.projects_json.strip():
-            return _parse_projects_json(self.projects_json)
+            return _parse_projects_json(
+                self.projects_json,
+                target_branch=self.target_branch,
+                queue_label=self.queue_label,
+                hotfix_label=self.hotfix_label,
+            )
         return [
             ProjectConfig(
                 project_id=self.gitlab_project_id,
@@ -332,7 +337,13 @@ class Settings:
         ]
 
 
-def _parse_projects_json(raw: str) -> list[ProjectConfig]:
+def _parse_projects_json(
+    raw: str,
+    *,
+    target_branch: str = "master",
+    queue_label: str = "merge_queue",
+    hotfix_label: str = "hotfix",
+) -> list[ProjectConfig]:
     """Parse GITLAB_QUEUE_PROJECTS JSON into list of ProjectConfig.
 
     Expected format:
@@ -349,7 +360,13 @@ def _parse_projects_json(raw: str) -> list[ProjectConfig]:
     seen_ids: set[int] = set()
 
     for entry in data:
-        config = _parse_project_entry(entry, seen_ids)
+        config = _parse_project_entry(
+            entry,
+            seen_ids,
+            target_branch,
+            queue_label,
+            hotfix_label,
+        )
         configs.append(config)
 
     return configs
@@ -370,7 +387,13 @@ def _decode_projects_json(raw: str) -> list[dict[str, Any]]:
     return data
 
 
-def _parse_project_entry(entry: Any, seen_ids: set[int]) -> ProjectConfig:
+def _parse_project_entry(
+    entry: Any,
+    seen_ids: set[int],
+    default_target_branch: str,
+    default_queue_label: str,
+    default_hotfix_label: str,
+) -> ProjectConfig:
     """Validate a single project entry and return ProjectConfig."""
     entry = _validate_project_entry_shape(entry)
     project_id, token = _validate_project_entry_values(entry)
@@ -383,9 +406,9 @@ def _parse_project_entry(entry: Any, seen_ids: set[int]) -> ProjectConfig:
     return ProjectConfig(
         project_id=project_id,
         token=Secret(token),
-        target_branch=entry.get("target_branch", "master"),
-        queue_label=entry.get("queue_label", "merge_queue"),
-        hotfix_label=entry.get("hotfix_label", "hotfix"),
+        target_branch=entry.get("target_branch", default_target_branch),
+        queue_label=entry.get("queue_label", default_queue_label),
+        hotfix_label=entry.get("hotfix_label", default_hotfix_label),
     )
 
 

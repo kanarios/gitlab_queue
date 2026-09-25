@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 
 import vedro
 
-from scenarios.fakes import FakeWebSocketManager
+from scenarios.fakes import FakeSettings, FakeWebSocketManager
 
 from .._helpers import (
     create_mock_processor,
@@ -30,7 +30,7 @@ class Scenario(vedro.Scenario):
         self.item2.author_avatar = None
         self.item2.started_at = datetime.now(UTC)
 
-        self.processor = create_mock_processor()
+        self.processor = create_mock_processor(settings=FakeSettings(gitlab_project_id=99999))
         self.processor.queue_manager.add_item(self.item1)
         self.processor.queue_manager.add_item(self.item2)
         self.stats = {"total": 2, "merged_today": 0}
@@ -45,6 +45,9 @@ class Scenario(vedro.Scenario):
 
     def then_broadcast_queue_updated_was_called(self):
         assert len(self.websocket_manager.broadcast_calls) == 1
+
+    def and_broadcast_targets_the_processor_project(self):
+        assert self.websocket_manager.broadcast_project_ids == [99999]
 
     def and_queue_data_has_correct_count(self):
         call = self.websocket_manager.broadcast_calls[0]

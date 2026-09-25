@@ -75,6 +75,27 @@ class Scenario3(vedro.Scenario):
         assert self.mode == ApplicationMode.NORMAL
 
 
+class ScenarioDegradedProject(vedro.Scenario):
+    subject = "ApplicationHealth.mode returns DEGRADED when a project GitLab is degraded"
+
+    def given_healthy_database_and_degraded_project_gitlab(self):
+        self.health = ApplicationHealth()
+        self.health.database = ComponentStatus.HEALTHY
+        self.health.gitlab_by_project = {
+            123: GitLabHealth(
+                status=ComponentStatus.DEGRADED,
+                circuit_state="half_open",
+                failure_count=2,
+            )
+        }
+
+    def when_mode_is_checked(self):
+        self.mode = self.health.mode
+
+    def then_mode_is_degraded(self):
+        assert self.mode == ApplicationMode.DEGRADED
+
+
 class Scenario4(vedro.Scenario):
     subject = "ApplicationHealth.is_ready is False when webhook_server is not running"
 

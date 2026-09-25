@@ -12,7 +12,7 @@
 
 **Stop fighting rebase wars. Let the bot handle the queue.**
 
-[Demo](#-demo) • [Quick Start](#-quick-start) • [Features](#-features) • [Dashboard](#-dashboard) • [Documentation](#-documentation)
+[Demo](#-demo) • [Quick Start](#-quick-start) • [Features](#-features) • [Multi-project](#-multi-project-support) • [Dashboard](#-dashboard) • [Documentation](#-documentation)
 
 </div>
 
@@ -163,6 +163,21 @@ Developer                      Bot                           GitLab
 | **History & Search** | Full merge history with filtering |
 | **Analytics Dashboard** | Throughput, success rate, queue depth trends |
 | **Dark Mode** | Easy on the eyes |
+
+### 🌐 Multi-project Support
+
+Run one bot instance for multiple GitLab projects. Each project has its own queue,
+GitLab token, project settings, API and WebSocket data, analytics, and webhook
+retry/DLQ records. The webhook URL and secret, GitLab base URL, and deployment are
+shared. Existing single-project installations can keep using the legacy token and
+project ID variables.
+
+```bash
+export GITLAB_QUEUE_PROJECTS='[{"project_id":123,"token":"glpat-project-one"},{"project_id":456,"token":"glpat-project-two"}]'
+```
+
+See the [Configuration Reference](#configuration-reference) for per-project
+options and single-project migration details.
 
 ### 🔐 Security
 
@@ -415,6 +430,7 @@ deploy-merge-queue:
 
 </details>
 
+<a id="configuration-reference"></a>
 <details>
 <summary><strong>📋 Configuration Reference</strong></summary>
 
@@ -537,17 +553,19 @@ owner cannot be determined safely, startup stops instead of hiding legacy rows.
 
 1. Go to GitLab → User Settings → Access Tokens
 2. Create token with `api` scope
-3. Set `GITLAB_QUEUE_GITLAB_TOKEN` to the token value
+3. For legacy single-project mode, set `GITLAB_QUEUE_GITLAB_TOKEN` to the token value.
+   For multi-project mode, put each project's token in its `GITLAB_QUEUE_PROJECTS` entry.
 
 ### 2. Find Project ID
 
 1. Go to your project → Settings → General
 2. Project ID is shown at the top
-3. Set `GITLAB_QUEUE_GITLAB_PROJECT_ID` to this value
+3. For legacy single-project mode, set `GITLAB_QUEUE_GITLAB_PROJECT_ID` to this value.
+   For multi-project mode, put each ID in the corresponding `GITLAB_QUEUE_PROJECTS` entry.
 
 ### 3. Configure Webhook
 
-1. Go to your project → Settings → Webhooks
+1. Go to each configured project → Settings → Webhooks
 2. Add new webhook:
    - **URL**: `https://your-bot-domain.com/webhooks/gitlab`
    - **Secret token**: Same value as `GITLAB_QUEUE_WEBHOOK_SECRET`
@@ -598,7 +616,7 @@ kind: Deployment
 metadata:
   name: gitlab-queue
 spec:
-  replicas: 1  # Single instance per project
+  replicas: 1  # Single active instance per deployment
   template:
     spec:
       containers:
@@ -821,7 +839,7 @@ Headers:
 
 | Decision | Rationale |
 |----------|-----------|
-| **Single project per instance** | Isolation, security, simpler config |
+| **Multiple projects per instance** | Project-scoped queues and access with shared deployment infrastructure |
 | **SQLite storage** | Zero dependencies, single file backup |
 | **Webhook-primary, polling-fallback** | Real-time + reliability |
 | **Non-interrupting hotfix** | Hotfix priority without wasting current work |

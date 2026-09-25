@@ -17,6 +17,8 @@ from gitlab_queue.models.retry import DLQItem, DLQStats, RetryQueueItem
 from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
+
     from sqlalchemy import RowMapping
 
     from gitlab_queue.db.database import Database
@@ -82,6 +84,7 @@ _SELECT_READY_FOR_RETRY_SQL = """
 SELECT * FROM webhook_retry_queue
 WHERE next_attempt_at <= :now
   AND (:project_id IS NULL OR project_id = :project_id)
+{excluded_projects_clause}
 ORDER BY next_attempt_at ASC
 LIMIT :limit
 """
@@ -305,28 +308,68 @@ class WebhookRetryManager:
         )
         return retry_id
 
-    async def get_events_ready_for_retry(self, limit: int = 100, project_id: int | None = None) -> list[RetryQueueItem]:
+    async def get_events_ready_for_retry(
+        self,
+        limit: int = 100,
+        project_id: int | None = None,
+        excluded_project_ids: Collection[int] | None = None,
+    ) -> list[RetryQueueItem]:
         """Get events that are ready to be retried.
 
         Returns events where next_attempt_at <= now, ordered by next_attempt_at.
 
         Args:
             limit: Maximum number of items to return (default: 100).
+            project_id: Optional project ID to include exclusively.
+            excluded_project_ids: Optional project IDs to exclude from results.
 
         Returns:
             List of RetryQueueItem objects ready for retry.
         """
         now = datetime.now(UTC)
+        params: dict[str, Any] = {"now": now.isoformat(), "limit": limit, "project_id": project_id}
+        excluded_projects_clause = ""
+        if excluded_project_ids:
+            placeholders = []
+            for index, excluded_project_id in enumerate(excluded_project_ids):
+                placeholder = f"excluded_project_id_{index}"
+                placeholders.append(f":{placeholder}")
+                params[placeholder] = excluded_project_id
+            excluded_projects_clause = f"\n  AND project_id NOT IN ({', '.join(placeholders)})"
 
         async with self.db.session() as session:
             result = await session.execute(
-                text(_SELECT_READY_FOR_RETRY_SQL),
-                {"now": now.isoformat(), "limit": limit, "project_id": project_id},
+                text(_SELECT_READY_FOR_RETRY_SQL.format(excluded_projects_clause=excluded_projects_clause)),
+                params,
             )
             rows = result.mappings().all()
             await session.commit()
 
         return [self._row_to_retry_item(row) for row in rows]
+
+    async def move_retry_to_dlq(self, retry_id: int, error: str, project_id: int) -> None:
+        """Move a retry item directly to the DLQ without another processing attempt.
+
+        This is for events that cannot be processed anymore, such as retries
+        belonging to a project that has been removed from the active config.
+        """
+        async with self.db.session() as session:
+            result = await session.execute(
+                text(_SELECT_RETRY_BY_ID_SQL),
+                {"id": retry_id, "project_id": project_id},
+            )
+            row = result.mappings().one_or_none()
+            await session.commit()
+
+        if row is None:
+            raise RetryItemNotFoundError(retry_id)
+
+        await self._move_to_dlq(row, error, increment_attempt=False)
+        log.warning(
+            "Retry item moved to DLQ because its project is no longer configured",
+            retry_id=retry_id,
+            project_id=project_id,
+        )
 
     async def mark_retry_success(self, retry_id: int, project_id: int | None = None) -> None:
         """Mark a retry attempt as successful and remove from queue.
@@ -424,17 +467,31 @@ class WebhookRetryManager:
         )
         return False
 
-    async def _move_to_dlq(self, row: RowMapping, error: str) -> int:
+    async def _move_to_dlq(self, row: RowMapping, error: str, *, increment_attempt: bool = True) -> int:
         """Move a retry queue item to the DLQ.
 
         Args:
             row: The retry queue item row.
             error: Final error message.
+            increment_attempt: Whether moving to DLQ should count as a failed attempt.
 
         Returns:
             ID of the newly created DLQ item.
+
+        Raises:
+            RetryItemNotFoundError: If another operation already removed the retry item.
         """
         async with self.db.transaction() as session:
+            # Claim the source row before inserting the DLQ copy. This makes
+            # concurrent moves single-winner and keeps insertion/deletion atomic.
+            delete_result = await session.execute(
+                text(_DELETE_RETRY_BY_ID_SQL),
+                {"id": row["id"], "project_id": row["project_id"]},
+            )
+            deleted: bool = delete_result.rowcount > 0  # type: ignore[attr-defined]
+            if not deleted:
+                raise RetryItemNotFoundError(int(row["id"]))
+
             # Insert into DLQ
             await session.execute(
                 text(_INSERT_DLQ_SQL),
@@ -442,7 +499,7 @@ class WebhookRetryManager:
                     "event_type": row["event_type"],
                     "project_id": row["project_id"],
                     "payload": row["payload"],
-                    "attempt_count": row["attempt_count"] + 1,
+                    "attempt_count": row["attempt_count"] + int(increment_attempt),
                     "last_error": error,
                     "original_created_at": row["created_at"],
                 },
@@ -450,12 +507,6 @@ class WebhookRetryManager:
             # Get the last inserted row ID (SQLite specific)
             result = await session.execute(text("SELECT last_insert_rowid()"))
             dlq_id: int = result.scalar_one()
-
-            # Delete from retry queue
-            await session.execute(
-                text(_DELETE_RETRY_BY_ID_SQL),
-                {"id": row["id"], "project_id": row["project_id"]},
-            )
 
         return dlq_id
 

@@ -132,7 +132,7 @@ class ApplicationHealth:
         gitlab_health = list(self.gitlab_by_project.values())
         if self.gitlab is not None and not gitlab_health:
             gitlab_health.append(self.gitlab)
-        if any(item.status == ComponentStatus.UNHEALTHY for item in gitlab_health):
+        if any(item.status in {ComponentStatus.DEGRADED, ComponentStatus.UNHEALTHY} for item in gitlab_health):
             return ApplicationMode.DEGRADED
 
         return ApplicationMode.NORMAL

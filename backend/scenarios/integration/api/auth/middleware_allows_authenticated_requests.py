@@ -23,7 +23,7 @@ class Scenario(vedro.Scenario):
         # Use FakeUnitOfWork to avoid database calls
         uow = FakeUnitOfWork(history=FakeHistoryRepo())
 
-        self.state.uow_factory = lambda db: uow
+        self.state.uow_factory = lambda db, project_id: uow
 
     def when_protected_route_is_accessed_with_token(self):
         self.response = self.client.get("/api/history", headers=self.headers)

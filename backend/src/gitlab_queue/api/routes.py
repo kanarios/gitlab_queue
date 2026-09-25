@@ -21,7 +21,7 @@ from gitlab_queue.api.project_access import (
     authorized_project_ids_from_user,
     configured_project_ids,
     resolve_project_components,
-    resolve_project_id,
+    resolve_request_project,
 )
 from gitlab_queue.api.schemas import (
     dump_analytics_summary,
@@ -51,18 +51,8 @@ def _create_uow(state: WebhookAppState, project_id: int) -> UnitOfWork:
         UnitOfWork context manager instance.
     """
     if state.uow_factory is not None:
-        return state.uow_factory(state.database)
+        return state.uow_factory(state.database, project_id)
     return UnitOfWork(state.database, project_id=project_id)
-
-
-def _resolve_request_project(request: Request, state: WebhookAppState) -> int:
-    """Resolve the project path parameter or the single-project legacy alias."""
-    raw_project_id = request.path_params.get("project_id")
-    try:
-        requested_project_id = int(raw_project_id) if raw_project_id is not None else None
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=404, detail="Project not found") from None
-    return resolve_project_id(request, state, requested_project_id)
 
 
 # =============================================================================
@@ -99,7 +89,7 @@ async def get_history(
         Dict with history items and pagination metadata.
     """
     state: WebhookAppState = request.app.state.webhook_state
-    project_id = _resolve_request_project(request, state)
+    project_id = resolve_request_project(request, state)
 
     async with _create_uow(state, project_id) as uow:
         # Get paginated history with filters
@@ -151,7 +141,7 @@ async def get_history_item(request: Request, iid: int) -> dict[str, Any]:
         HTTPException: 404 if MR not found in history.
     """
     state: WebhookAppState = request.app.state.webhook_state
-    project_id = _resolve_request_project(request, state)
+    project_id = resolve_request_project(request, state)
 
     async with _create_uow(state, project_id) as uow:
         item = await uow.history.get_by_iid(iid)
@@ -185,7 +175,7 @@ async def get_analytics_summary(
         Dict with aggregate statistics.
     """
     state: WebhookAppState = request.app.state.webhook_state
-    project_id = _resolve_request_project(request, state)
+    project_id = resolve_request_project(request, state)
 
     now = datetime.now(UTC)
     date_from = (now - timedelta(days=days)).date()
@@ -224,7 +214,7 @@ async def get_hourly_analytics(
         Dict with hourly data points.
     """
     state: WebhookAppState = request.app.state.webhook_state
-    project_id = _resolve_request_project(request, state)
+    project_id = resolve_request_project(request, state)
 
     # Convert hours to days for get_metrics (round up)
     period_days = (hours + 23) // 24
@@ -257,7 +247,7 @@ async def get_outcomes_analytics(
         Dict with outcome breakdown (success, failed, conflict, timeout).
     """
     state: WebhookAppState = request.app.state.webhook_state
-    project_id = _resolve_request_project(request, state)
+    project_id = resolve_request_project(request, state)
 
     now = datetime.now(UTC)
     date_from = (now - timedelta(days=days)).date()
@@ -313,7 +303,7 @@ async def get_failure_reasons(
         Dict with failure reason breakdown.
     """
     state: WebhookAppState = request.app.state.webhook_state
-    project_id = _resolve_request_project(request, state)
+    project_id = resolve_request_project(request, state)
 
     now = datetime.now(UTC)
     date_from = (now - timedelta(days=days)).date()
@@ -372,7 +362,7 @@ async def get_config(request: Request) -> dict[str, str]:
         HTTPException: 503 if GitLab API is unavailable.
     """
     state: WebhookAppState = request.app.state.webhook_state
-    project_id = _resolve_request_project(request, state)
+    project_id = resolve_request_project(request, state)
     components = resolve_project_components(state, project_id)
     gitlab_client = components.gitlab_client if components else state.gitlab_client
     try:

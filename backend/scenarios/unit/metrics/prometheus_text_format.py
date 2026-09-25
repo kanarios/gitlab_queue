@@ -92,11 +92,11 @@ class Scenario3(vedro.Scenario):
 
     def then_rate_limit_metric_should_be_set(self):
         output = get_metrics_output().decode("utf-8")
-        assert "merge_queue_rate_limit_remaining" in output
+        assert 'merge_queue_rate_limit_remaining{project_id="99999"} 950.0' in output
 
     def and_circuit_breaker_metric_should_be_set(self):
         output = get_metrics_output().decode("utf-8")
-        assert "merge_queue_circuit_breaker_state" in output
+        assert 'merge_queue_circuit_breaker_state{project_id="99999"} 0.0' in output
 
 
 class Scenario4(vedro.Scenario):

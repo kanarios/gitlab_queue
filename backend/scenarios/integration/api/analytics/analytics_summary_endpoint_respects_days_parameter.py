@@ -31,7 +31,7 @@ class Scenario(vedro.Scenario):
         )
         uow = FakeUnitOfWork(history=history_repo)
 
-        self.state.uow_factory = lambda db: uow
+        self.state.uow_factory = lambda db, project_id: uow
 
     def when_summary_is_called_with_days(self):
         self.response = self.client.get(

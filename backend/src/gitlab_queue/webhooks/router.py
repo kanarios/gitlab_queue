@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import Response
 
-from gitlab_queue.api.project_access import authorized_project_ids_from_user, resolve_project_id
+from gitlab_queue.api.project_access import authorized_project_ids_from_user, resolve_request_project
 from gitlab_queue.api.routes import (
     analytics_router,
     config_router,
@@ -103,7 +103,7 @@ class WebhookAppState:
         default=None
     )
     oauth_transport: httpx.AsyncBaseTransport | None = field(default=None)
-    uow_factory: Callable[..., UnitOfWork] | None = field(default=None)
+    uow_factory: Callable[[Database, int], UnitOfWork] | None = field(default=None)
     project_components: Mapping[int, ProjectComponents] | None = field(default=None)
 
 
@@ -668,16 +668,6 @@ async def _parse_webhook_event_or_queue(
 dlq_router = APIRouter(prefix="/api/dlq", tags=["dlq"])
 
 
-def _resolve_api_project(request: Request, state: WebhookAppState) -> int:
-    """Resolve a project route parameter or the legacy single-project alias."""
-    raw_project_id = request.path_params.get("project_id")
-    try:
-        requested_project_id = int(raw_project_id) if raw_project_id is not None else None
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=404, detail="Project not found") from None
-    return resolve_project_id(request, state, requested_project_id)
-
-
 @dlq_router.get("")
 @projects_router.get("/{project_id}/dlq")
 async def list_dlq_entries(
@@ -698,7 +688,7 @@ async def list_dlq_entries(
         Dict with items list and stats.
     """
     state: WebhookAppState = request.app.state.webhook_state
-    project_id = _resolve_api_project(request, state)
+    project_id = resolve_request_project(request, state)
 
     items = await state.retry_manager.get_dlq_entries(
         limit=limit,
@@ -730,7 +720,7 @@ async def get_dlq_stats(request: Request) -> dict[str, Any]:
         DLQ statistics dict.
     """
     state: WebhookAppState = request.app.state.webhook_state
-    project_id = _resolve_api_project(request, state)
+    project_id = resolve_request_project(request, state)
     stats = await state.retry_manager.get_dlq_stats(project_id=project_id)
     return _dlq_stats_to_dict(stats)
 
@@ -751,7 +741,7 @@ async def get_dlq_entry(request: Request, entry_id: int) -> dict[str, Any]:
         HTTPException: 404 if entry not found.
     """
     state: WebhookAppState = request.app.state.webhook_state
-    project_id = _resolve_api_project(request, state)
+    project_id = resolve_request_project(request, state)
 
     try:
         item = await state.retry_manager.get_dlq_entry(entry_id, project_id=project_id)
@@ -776,7 +766,7 @@ async def delete_dlq_entry(request: Request, entry_id: int) -> dict[str, str]:
         HTTPException: 404 if entry not found.
     """
     state: WebhookAppState = request.app.state.webhook_state
-    project_id = _resolve_api_project(request, state)
+    project_id = resolve_request_project(request, state)
 
     deleted = await state.retry_manager.delete_dlq_entry(entry_id, project_id=project_id)
     if not deleted:
@@ -801,7 +791,7 @@ async def retry_dlq_entry(request: Request, entry_id: int) -> dict[str, Any]:
         HTTPException: 404 if entry not found.
     """
     state: WebhookAppState = request.app.state.webhook_state
-    project_id = _resolve_api_project(request, state)
+    project_id = resolve_request_project(request, state)
 
     try:
         retry_id = await state.retry_manager.retry_dlq_entry(entry_id, project_id=project_id)
@@ -866,7 +856,7 @@ async def get_queue_status(request: Request) -> dict[str, Any]:
     state: WebhookAppState = request.app.state.webhook_state
     queue_manager = state.queue_manager
 
-    project_id = _resolve_api_project(request, state)
+    project_id = resolve_request_project(request, state)
     active_queue = await queue_manager.get_active_queue(project_id)
     recent_history = await queue_manager.get_recent_history(limit=10, project_id=project_id)
     dashboard_stats = await queue_manager.get_dashboard_stats(days=7, project_id=project_id)
@@ -895,7 +885,7 @@ async def get_active_queue(request: Request) -> dict[str, Any]:
     state: WebhookAppState = request.app.state.webhook_state
     queue_manager = state.queue_manager
 
-    project_id = _resolve_api_project(request, state)
+    project_id = resolve_request_project(request, state)
     active_queue = await queue_manager.get_active_queue(project_id)
 
     return {
@@ -918,7 +908,7 @@ async def get_queue_statistics(request: Request) -> dict[str, Any]:
     state: WebhookAppState = request.app.state.webhook_state
     queue_manager = state.queue_manager
 
-    project_id = _resolve_api_project(request, state)
+    project_id = resolve_request_project(request, state)
     dashboard_stats = await queue_manager.get_dashboard_stats(days=7, project_id=project_id)
     current_stats = await queue_manager.get_queue_stats(project_id)
 
@@ -943,7 +933,7 @@ async def get_queue_item(request: Request, mr_iid: int) -> dict[str, Any]:
     state: WebhookAppState = request.app.state.webhook_state
     queue_manager = state.queue_manager
 
-    project_id = _resolve_api_project(request, state)
+    project_id = resolve_request_project(request, state)
     item = await queue_manager.get_queue_item(project_id, mr_iid)
     if item is None:
         raise HTTPException(status_code=404, detail=f"MR !{mr_iid} not found in queue")

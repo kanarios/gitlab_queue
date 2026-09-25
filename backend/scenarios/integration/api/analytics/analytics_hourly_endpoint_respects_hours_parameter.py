@@ -24,7 +24,7 @@ class Scenario(vedro.Scenario):
         analytics_repo = FakeAnalyticsRepo()
         uow = FakeUnitOfWork(analytics=analytics_repo)
 
-        self.state.uow_factory = lambda db: uow
+        self.state.uow_factory = lambda db, project_id: uow
 
     def when_hourly_is_called_with_hours(self):
         self.response = self.client.get(
