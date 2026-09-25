@@ -966,6 +966,17 @@ python -m gitlab_queue
 
 ## 🤝 Contributing
 
+### Changelog automation
+
+Merged pull requests are collected in [CHANGELOG.md](CHANGELOG.md). The
+`Update Changelog` workflow creates or updates a pull request from
+`automation/changelog` after a merge into `main`. It needs a GitHub App installed
+on this repository with **Contents** and **Pull requests** read/write access.
+Add the App ID and private key as repository Actions secrets named
+`CHANGELOG_APP_ID` and `CHANGELOG_APP_PRIVATE_KEY`. The changelog pull request
+uses the normal CI and branch protection rules; enabling repository auto-merge
+also lets it merge automatically once those checks pass.
+
 ### Development Setup
 
 ```bash

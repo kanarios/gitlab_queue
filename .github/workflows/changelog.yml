@@ -1,0 +1,216 @@
+name: Update Changelog
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: changelog
+  queue: max
+
+jobs:
+  update-changelog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate GitHub App configuration
+        env:
+          CHANGELOG_APP_ID: ${{ secrets.CHANGELOG_APP_ID }}
+          CHANGELOG_APP_PRIVATE_KEY: ${{ secrets.CHANGELOG_APP_PRIVATE_KEY }}
+        run: |
+          if [ -z "${CHANGELOG_APP_ID}" ] || [ -z "${CHANGELOG_APP_PRIVATE_KEY}" ]; then
+            echo "::error::Configure CHANGELOG_APP_ID and CHANGELOG_APP_PRIVATE_KEY repository secrets to enable automatic changelog pull requests."
+            exit 1
+          fi
+
+      - name: Create GitHub App installation token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.CHANGELOG_APP_ID }}
+          private-key: ${{ secrets.CHANGELOG_APP_PRIVATE_KEY }}
+          # Install the App with Contents and Pull requests read/write permissions.
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Check out the default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Rebuild the changelog branch from the default branch
+        env:
+          CHANGELOG_BOT_BRANCH: automation/changelog
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          for attempt in 1 2 3 4 5; do
+            echo "Changelog branch update attempt ${attempt}/5."
+            git fetch --no-tags origin \
+              "refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
+            DEFAULT_SHA="$(git rev-parse "refs/remotes/origin/${DEFAULT_BRANCH}")"
+
+            BOT_SHA=""
+            HAS_MERGED_CHANGELOG=0
+            REMOTE_REF_FILE="${RUNNER_TEMP}/changelog-remote-ref"
+            if git ls-remote --exit-code --heads origin "refs/heads/${CHANGELOG_BOT_BRANCH}" > "${REMOTE_REF_FILE}"; then
+              read -r BOT_SHA _ < "${REMOTE_REF_FILE}"
+              git fetch --no-tags origin "+refs/heads/${CHANGELOG_BOT_BRANCH}:refs/remotes/origin/${CHANGELOG_BOT_BRANCH}"
+              BOT_SHA="$(git rev-parse "refs/remotes/origin/${CHANGELOG_BOT_BRANCH}")"
+
+              if ! BASE_SHA="$(git merge-base "${DEFAULT_SHA}" "${BOT_SHA}")"; then
+                echo "The changelog branch has no merge base with the default branch; refusing to overwrite it." >&2
+                exit 1
+              fi
+              if ! git diff --quiet "${BASE_SHA}" "${BOT_SHA}" -- . ':(exclude)CHANGELOG.md'; then
+                echo "The changelog branch contains changes outside CHANGELOG.md; refusing to overwrite it." >&2
+                exit 1
+              fi
+              if ! git diff --quiet "${BASE_SHA}" "${BOT_SHA}" -- CHANGELOG.md; then
+                if ! git cat-file -e "${BOT_SHA}:CHANGELOG.md"; then
+                  echo "The changelog branch deletes CHANGELOG.md; refusing to overwrite it." >&2
+                  exit 1
+                fi
+                if ! git cat-file -e "${BASE_SHA}:CHANGELOG.md" || \
+                  ! git cat-file -e "${DEFAULT_SHA}:CHANGELOG.md"; then
+                  echo "Cannot three-way merge CHANGELOG.md because it is missing from the merge base or default branch." >&2
+                  exit 1
+                fi
+                git show "${BASE_SHA}:CHANGELOG.md" > "${RUNNER_TEMP}/changelog-base.md"
+                git show "${DEFAULT_SHA}:CHANGELOG.md" > "${RUNNER_TEMP}/changelog-main.md"
+                git show "${BOT_SHA}:CHANGELOG.md" > "${RUNNER_TEMP}/changelog-bot.md"
+                if git merge-file --stdout \
+                  -L "${DEFAULT_BRANCH}" \
+                  -L "${BASE_SHA}" \
+                  -L "${CHANGELOG_BOT_BRANCH}" \
+                  "${RUNNER_TEMP}/changelog-main.md" \
+                  "${RUNNER_TEMP}/changelog-base.md" \
+                  "${RUNNER_TEMP}/changelog-bot.md" \
+                  > "${RUNNER_TEMP}/changelog-merged.md"; then
+                  HAS_MERGED_CHANGELOG=1
+                else
+                  MERGE_STATUS=$?
+                  if [ "${MERGE_STATUS}" -eq 1 ]; then
+                    echo "CHANGELOG.md has conflicting edits on main and the changelog branch; refusing to overwrite either version." >&2
+                  else
+                    echo "git merge-file failed with status ${MERGE_STATUS}; refusing to overwrite CHANGELOG.md." >&2
+                  fi
+                  exit 1
+                fi
+              fi
+            else
+              REMOTE_STATUS=$?
+              if [ "${REMOTE_STATUS}" -ne 2 ]; then
+                echo "Could not inspect the remote changelog branch (git ls-remote exited ${REMOTE_STATUS})." >&2
+                exit "${REMOTE_STATUS}"
+              fi
+            fi
+
+            git checkout --force -B "${CHANGELOG_BOT_BRANCH}" "${DEFAULT_SHA}"
+            if [ "${HAS_MERGED_CHANGELOG}" -eq 1 ]; then
+              cp "${RUNNER_TEMP}/changelog-merged.md" CHANGELOG.md
+            fi
+
+            python .github/scripts/test_update_changelog.py
+            DEFAULT_BRANCH="${DEFAULT_BRANCH}" \
+              CHANGELOG_BOT_BRANCH="${CHANGELOG_BOT_BRANCH}" \
+              GITHUB_REPOSITORY="${GITHUB_REPOSITORY}" \
+              GITHUB_TOKEN="${GITHUB_TOKEN}" \
+              PUSH_BEFORE="${PUSH_BEFORE}" \
+              PUSH_AFTER="${PUSH_AFTER}" \
+              python .github/scripts/update_changelog.py
+
+            git add -- CHANGELOG.md
+            if git diff --cached --quiet -- CHANGELOG.md; then
+              echo "No changelog diff to publish."
+              exit 0
+            fi
+            STAGED_FILES="$(git diff --cached --name-only)"
+            if [ "${STAGED_FILES}" != "CHANGELOG.md" ]; then
+              echo "Refusing to commit unexpected staged files: ${STAGED_FILES}" >&2
+              exit 1
+            fi
+
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "docs: update changelog"
+
+            if git push \
+              --force-with-lease="refs/heads/${CHANGELOG_BOT_BRANCH}:${BOT_SHA}" \
+              origin "HEAD:refs/heads/${CHANGELOG_BOT_BRANCH}"; then
+              BOT_COMMIT_SHA="$(git rev-parse HEAD)"
+              break
+            fi
+            if [ "${attempt}" -eq 5 ]; then
+              echo "Could not publish the changelog branch after 5 attempts." >&2
+              exit 1
+            fi
+          done
+
+          get_open_changelog_prs() {
+            gh api \
+              --method GET \
+              "repos/${GITHUB_REPOSITORY}/pulls" \
+              --field state=open \
+              --field "head=${GITHUB_REPOSITORY%%/*}:${CHANGELOG_BOT_BRANCH}" \
+              --field "base=${DEFAULT_BRANCH}" \
+              --field per_page=100
+          }
+
+          OPEN_PRS_JSON="$(get_open_changelog_prs)"
+          IN_REPO_PR_COUNT="$(jq \
+            --arg repo "${GITHUB_REPOSITORY}" \
+            '[.[] | select(.head.repo != null and .head.repo.full_name == $repo)] | length' \
+            <<< "${OPEN_PRS_JSON}")"
+          if [ "${IN_REPO_PR_COUNT}" -eq 0 ]; then
+            gh pr create \
+              --base "${DEFAULT_BRANCH}" \
+              --head "${CHANGELOG_BOT_BRANCH}" \
+              --title "docs: update changelog" \
+              --body "Automated changelog update from merged pull requests."
+          else
+            echo "An open in-repository changelog pull request already exists; its branch has been updated."
+          fi
+
+          PR_COUNT=0
+          for attempt in 1 2 3 4 5; do
+            OPEN_PRS_JSON="$(get_open_changelog_prs)"
+            MATCHED_PRS="$(jq \
+              --arg repo "${GITHUB_REPOSITORY}" \
+              --arg sha "${BOT_COMMIT_SHA}" \
+              '[.[] | select(.head.repo != null and .head.repo.full_name == $repo and .head.sha == $sha)]' \
+              <<< "${OPEN_PRS_JSON}")"
+            PR_COUNT="$(jq 'length' <<< "${MATCHED_PRS}")"
+            if [ "${PR_COUNT}" -gt 0 ]; then
+              break
+            fi
+            if [ "${attempt}" -lt 5 ]; then
+              sleep 2
+            fi
+          done
+          if [ "${PR_COUNT}" -ne 1 ]; then
+            echo "Expected exactly one open in-repository changelog PR for commit ${BOT_COMMIT_SHA}, found ${PR_COUNT}; refusing to select or merge a different PR." >&2
+            exit 1
+          fi
+          PR_NUMBER="$(jq -r '.[0].number' <<< "${MATCHED_PRS}")"
+          ALLOW_AUTO_MERGE="$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.allow_auto_merge')"
+          if [ "${ALLOW_AUTO_MERGE}" = "true" ]; then
+            gh pr merge "${PR_NUMBER}" --auto --squash
+          else
+            echo "Auto-merge is disabled. Enable it in repository Settings > General > Pull Requests to merge changelog PRs automatically after required CI succeeds."
+          fi
