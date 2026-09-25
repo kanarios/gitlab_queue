@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, History, BarChart2, GitMerge, Activity, Sun, Moon, ChevronLeft, ChevronRight, Menu, X, LogOut, User, AlertTriangle } from 'lucide-react';
+import { LayoutDashboard, History, BarChart2, GitMerge, GitBranch, Activity, Sun, Moon, ChevronLeft, ChevronRight, Menu, X, LogOut, User, AlertTriangle } from 'lucide-react';
 import { ViewMode } from '../types';
 import { useAuth } from '../auth';
 import { config } from '../config';
 import { useHealthCheck } from '../hooks/useHealthCheck';
+import { useProject } from '../projects/ProjectContext';
 
 interface LayoutProps {
   currentView: ViewMode;
@@ -18,6 +19,7 @@ const Layout: React.FC<LayoutProps> = ({ currentView, setView, children, isDark,
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const { user, logout } = useAuth();
   const { isHealthy, mode, isLoading: isHealthLoading } = useHealthCheck();
+  const { projects, selectedProjectId, selectedProject, isLoading: isProjectsLoading, error: projectsError, selectProject, retry } = useProject();
 
   // Close mobile menu when view changes
   useEffect(() => {
@@ -108,6 +110,62 @@ const Layout: React.FC<LayoutProps> = ({ currentView, setView, children, isDark,
         </div>
 
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto" aria-label="Main menu">
+          <div className="mb-5">
+            {isSidebarCollapsed && !isMobileMenuOpen ? (
+              <label
+                className="relative flex h-12 w-full items-center justify-center rounded-lg bg-slate-100 text-slate-500 dark:bg-slate-900 dark:text-slate-300 focus-within:ring-2 focus-within:ring-blue-500"
+                title={selectedProject?.name ?? 'Select project'}
+              >
+                <GitBranch className="w-5 h-5" aria-hidden="true" />
+                <span className="sr-only">Project: {selectedProject?.name ?? 'Choose a project'}</span>
+                <select
+                  value={selectedProjectId ?? ''}
+                  onChange={(event) => selectProject(Number(event.target.value))}
+                  disabled={isProjectsLoading || projects.length === 0}
+                  aria-label="Select project"
+                  className="absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-wait"
+                >
+                  {isProjectsLoading && <option value="">Loading projects…</option>}
+                  {!isProjectsLoading && projects.length === 0 && <option value="">No projects</option>}
+                  {projects.map((project) => (
+                    <option key={project.project_id} value={project.project_id}>{project.name}</option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <>
+                <label htmlFor="project-select" className="mb-2 block px-2 text-xs font-medium text-slate-500 dark:text-slate-400">
+                  Project
+                </label>
+                <select
+                  id="project-select"
+                  value={selectedProjectId ?? ''}
+                  onChange={(event) => selectProject(Number(event.target.value))}
+                  disabled={isProjectsLoading || projects.length === 0}
+                  aria-describedby={projectsError ? 'project-load-error' : undefined}
+                  className="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait disabled:opacity-70 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                >
+                  {isProjectsLoading && <option value="">Loading projects…</option>}
+                  {!isProjectsLoading && projects.length === 0 && <option value="">No projects available</option>}
+                  {projects.map((project) => (
+                    <option key={project.project_id} value={project.project_id}>{project.name}</option>
+                  ))}
+                </select>
+                {projectsError && (
+                  <div id="project-load-error" className="mt-2 rounded-md bg-red-50 px-2.5 py-2 text-xs text-red-700 dark:bg-red-950/40 dark:text-red-300" role="alert">
+                    <p>{projectsError}</p>
+                    <button
+                      type="button"
+                      onClick={retry}
+                      className="mt-1 font-semibold underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                    >
+                      Try again
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
           {navItems.map((item) => (
             <button
               key={item.id}

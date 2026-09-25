@@ -6,16 +6,53 @@ into a single unit that can be looked up by project_id.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from gitlab_queue.clients.gitlab import GitLabClient
-    from gitlab_queue.config import ProjectConfig
+    from gitlab_queue.config import ProjectConfig, Secret, Settings
     from gitlab_queue.core.notifier import MRNotifier
     from gitlab_queue.core.processor import MergeProcessor
     from gitlab_queue.core.queue_position_notifier import QueuePositionNotifier
     from gitlab_queue.core.scheduler import QueueScheduler
+    from gitlab_queue.health import GitLabHealth
+
+
+@dataclass(frozen=True)
+class ProjectSettings:
+    """Read-only project-scoped view over shared application settings.
+
+    Runtime settings that vary by project come from ``config``. All other
+    values delegate to the global application settings object.
+    """
+
+    config: ProjectConfig
+    application: Settings = field(repr=False)
+
+    @property
+    def gitlab_project_id(self) -> int:
+        return self.config.project_id
+
+    @property
+    def gitlab_token(self) -> Secret:
+        return self.config.token
+
+    @property
+    def target_branch(self) -> str:
+        return self.config.target_branch
+
+    @property
+    def queue_label(self) -> str:
+        return self.config.queue_label
+
+    @property
+    def hotfix_label(self) -> str:
+        return self.config.hotfix_label
+
+    def __getattr__(self, name: str) -> Any:
+        """Expose shared settings without copying the full settings schema."""
+        return getattr(self.application, name)
 
 
 @dataclass
@@ -37,8 +74,13 @@ class ProjectComponents:
     """
 
     config: ProjectConfig
+    settings: ProjectSettings
     gitlab_client: GitLabClient
     notifier: MRNotifier
     position_notifier: QueuePositionNotifier
     processor: MergeProcessor
     scheduler: QueueScheduler
+    health: GitLabHealth
+
+
+__all__: list[str] = ["ProjectComponents", "ProjectSettings"]

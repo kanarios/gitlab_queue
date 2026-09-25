@@ -36,20 +36,20 @@ METRICS_CONTENT_TYPE = CONTENT_TYPE_LATEST
 QUEUE_LENGTH = Gauge(
     "merge_queue_length",
     "Current number of MRs in queue by status",
-    ["status"],
+    ["project_id", "status"],
 )
 
 MR_DURATION = Histogram(
     "merge_queue_mr_duration_seconds",
     "Time from queued to finished for MRs",
-    ["result"],
+    ["project_id", "result"],
     buckets=[60, 300, 600, 1800, 3600, 7200],  # 1m, 5m, 10m, 30m, 1h, 2h
 )
 
 OPERATIONS_TOTAL = Counter(
     "merge_queue_operations_total",
     "Total queue operations by type and status",
-    ["type", "status"],
+    ["project_id", "type", "status"],
 )
 
 # =============================================================================
@@ -59,18 +59,20 @@ OPERATIONS_TOTAL = Counter(
 API_LATENCY = Histogram(
     "merge_queue_gitlab_api_latency_seconds",
     "GitLab API request latency by method and endpoint",
-    ["method", "endpoint"],
+    ["project_id", "method", "endpoint"],
     buckets=[0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0],
 )
 
 RATE_LIMIT_REMAINING = Gauge(
     "merge_queue_rate_limit_remaining",
     "GitLab API rate limit remaining requests",
+    ["project_id"],
 )
 
 CIRCUIT_BREAKER_STATE = Gauge(
     "merge_queue_circuit_breaker_state",
     "Circuit breaker state (0=closed, 1=half_open, 2=open)",
+    ["project_id"],
 )
 
 
@@ -100,10 +102,10 @@ async def update_queue_metrics(queue_manager: QueueManager, project_id: int) -> 
     """
     stats = await queue_manager.get_queue_stats(project_id)
     for status, count in stats.items():
-        QUEUE_LENGTH.labels(status=status).set(count)
+        QUEUE_LENGTH.labels(project_id=str(project_id), status=status).set(count)
 
 
-def update_gitlab_metrics(gitlab_client: GitLabClient) -> None:
+def update_gitlab_metrics(gitlab_client: GitLabClient, project_id: int | None = None) -> None:
     """Update GitLab-related metrics from client state.
 
     Updates rate limit and circuit breaker state metrics.
@@ -113,12 +115,15 @@ def update_gitlab_metrics(gitlab_client: GitLabClient) -> None:
     """
     # Rate limit remaining (default to 0 if unknown)
     rate_limit = gitlab_client.rate_limit_state
-    RATE_LIMIT_REMAINING.set(rate_limit.remaining if rate_limit.remaining is not None else 0)
+    resolved_project_id = project_id if project_id is not None else gitlab_client.project_id
+    RATE_LIMIT_REMAINING.labels(project_id=str(resolved_project_id)).set(
+        rate_limit.remaining if rate_limit.remaining is not None else 0
+    )
 
     # Circuit breaker state: 0=closed, 1=half_open, 2=open
     cb = gitlab_client.circuit_breaker
     state_map = {"closed": 0, "half_open": 1, "open": 2}
-    CIRCUIT_BREAKER_STATE.set(state_map.get(cb.state.value, -1))
+    CIRCUIT_BREAKER_STATE.labels(project_id=str(resolved_project_id)).set(state_map.get(cb.state.value, -1))
 
 
 def normalize_endpoint(endpoint: str) -> str:

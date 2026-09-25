@@ -1,65 +1,69 @@
-"""Verify that _stamp_legacy_database_if_needed handles concurrent stamping gracefully.
-
-When another process stamps the database between our check and our stamp attempt,
-the function should detect this and not raise an exception.
-"""
+"""Concurrent startup migration runs are serialized for a legacy SQLite database."""
 
 from __future__ import annotations
 
+import asyncio
+import os
+import sqlite3
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
 
-import aiosqlite
 import vedro
 
-from gitlab_queue.db.migrations import _stamp_legacy_database_if_needed
+from gitlab_queue.db.migrations import _run_upgrade, get_current_revision, run_migrations
+
+_ENV_KEYS = (
+    "GITLAB_QUEUE_DATABASE_URL",
+    "GITLAB_QUEUE_GITLAB_PROJECT_ID",
+    "GITLAB_QUEUE_PROJECTS",
+)
 
 
 class Scenario(vedro.Scenario):
-    subject = "stamp legacy database handles concurrent stamp by another process"
+    subject = "concurrent legacy database migrations are serialized"
 
-    def given_legacy_database(self):
-        self.tmp_dir = tempfile.mkdtemp()
-        self.db_path = Path(self.tmp_dir) / "legacy.db"
-        self.database_url = f"sqlite+aiosqlite:///{self.db_path}"
+    def given_legacy_database_at_the_initial_schema(self):
+        self._tmp_dir = tempfile.TemporaryDirectory()
+        self._db_path = Path(self._tmp_dir.name) / "legacy.db"
+        self._database_url = f"sqlite+aiosqlite:///{self._db_path}"
+        self._previous_environment = {key: os.environ.get(key) for key in _ENV_KEYS}
 
-    async def given_database_with_merge_requests_table(self):
-        """Create a DB that mimics a legacy database (merge_requests table, no alembic_version)."""
-        async with aiosqlite.connect(str(self.db_path)) as db:
-            await db.execute(
+    async def given_unversioned_queue_data(self):
+        await asyncio.to_thread(_run_upgrade, self._database_url, "34c99f29b96d")
+        with sqlite3.connect(self._db_path) as connection:
+            connection.execute(
                 """
-                CREATE TABLE merge_requests (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    iid INTEGER NOT NULL UNIQUE,
-                    title TEXT NOT NULL,
-                    author_name TEXT NOT NULL,
-                    author_username TEXT NOT NULL,
-                    status TEXT NOT NULL DEFAULT 'queued',
-                    target_branch TEXT NOT NULL,
-                    queued_at TEXT NOT NULL
-                )
-                """
+                INSERT INTO merge_requests (
+                    iid, title, author_name, author_username, status, target_branch, queued_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (42, "Concurrent migration", "Alice", "alice", "queued", "main", "2026-01-01T00:00:00Z"),
             )
-            await db.commit()
+            connection.execute("DROP TABLE alembic_version")
 
-    async def when_stamp_is_called_but_another_process_already_stamped(self):
-        """Simulate race condition: command.stamp raises, but get_current_revision finds a revision."""
-        with (
-            patch(
-                "gitlab_queue.db.migrations.command.stamp",
-                side_effect=Exception("UNIQUE constraint failed: alembic_version.version_num"),
-            ),
-            patch(
-                "gitlab_queue.db.migrations.get_current_revision",
-                return_value="abc123",
-            ),
-        ):
-            self.stamped = await _stamp_legacy_database_if_needed(self.database_url)
+        os.environ["GITLAB_QUEUE_DATABASE_URL"] = self._database_url
+        os.environ["GITLAB_QUEUE_GITLAB_PROJECT_ID"] = "101"
+        os.environ["GITLAB_QUEUE_PROJECTS"] = ""
 
-    def then_it_should_return_true(self):
-        assert self.stamped is True
+    async def when_two_instances_run_migrations_concurrently(self):
+        self.results = await asyncio.gather(
+            run_migrations(self._database_url),
+            run_migrations(self._database_url),
+        )
 
-    def and_no_exception_was_raised(self):
-        # If we got here, no exception was raised — test passes
-        pass
+    async def then_exactly_one_instance_should_apply_migrations(self):
+        assert sorted(self.results) == [False, True]
+        assert await get_current_revision(self._database_url) == "c3d7f1a8b902"
+
+    def and_queue_data_should_be_preserved_and_scoped(self):
+        with sqlite3.connect(self._db_path) as connection:
+            row = connection.execute("SELECT iid, title, project_id FROM merge_requests WHERE iid = 42").fetchone()
+        assert row == (42, "Concurrent migration", 101)
+
+    def do_cleanup(self):
+        for key, value in self._previous_environment.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        self._tmp_dir.cleanup()

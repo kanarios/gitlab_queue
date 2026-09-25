@@ -71,13 +71,23 @@ def create_access_token(
 
     expire = now + expires_delta
 
+    raw_project_ids = user_data.get("project_ids")
+    if raw_project_ids is None:
+        legacy_project_id = user_data.get("project_id")
+        project_ids = [legacy_project_id] if isinstance(legacy_project_id, int) else []
+    else:
+        project_ids = [project_id for project_id in raw_project_ids if isinstance(project_id, int)]
+
     payload: dict[str, Any] = {
         "sub": str(user_data["id"]),
         "username": user_data["username"],
         "name": user_data.get("name", user_data["username"]),
         "email": user_data.get("email"),
         "avatar_url": user_data.get("avatar_url"),
-        "project_id": user_data.get("project_id"),
+        # Keep the singular claim for backward compatibility with existing
+        # sessions. New authorization code must use project_ids.
+        "project_id": project_ids[0] if len(project_ids) == 1 else None,
+        "project_ids": project_ids,
         "exp": expire,
         "iat": now,
     }
@@ -87,6 +97,23 @@ def create_access_token(
         settings.jwt_secret.get_secret_value(),
         algorithm="HS256",
     )
+
+
+def get_authorized_project_ids(payload: dict[str, Any]) -> frozenset[int]:
+    """Return project IDs authorized by a decoded JWT payload.
+
+    Tokens issued before multi-project support contain only ``project_id``;
+    accepting that claim as a singleton preserves existing sessions without
+    accidentally granting access to every configured project.
+    """
+    raw_project_ids = payload.get("project_ids")
+    if isinstance(raw_project_ids, list):
+        return frozenset(project_id for project_id in raw_project_ids if isinstance(project_id, int))
+
+    legacy_project_id = payload.get("project_id")
+    if isinstance(legacy_project_id, int):
+        return frozenset({legacy_project_id})
+    return frozenset()
 
 
 def decode_token(
@@ -152,5 +179,6 @@ __all__: list[str] = [
     "TokenExpiredError",
     "create_access_token",
     "decode_token",
+    "get_authorized_project_ids",
     "get_token_expiration",
 ]

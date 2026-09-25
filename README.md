@@ -347,6 +347,10 @@ curl -fsSL https://raw.githubusercontent.com/kanarios/gitlab_queue/main/install.
 # Or using flags
 curl -fsSL .../install.sh | bash -s -- \
   --token glpat-xxx --project-id 12345 --no-dashboard --auto-start
+
+# Multi-project mode (JSON kept on one line)
+export GITLAB_PROJECTS='[{"project_id":123,"token":"glpat-one"},{"project_id":456,"token":"glpat-two"}]'
+curl -fsSL .../install.sh | bash -s -- --no-dashboard --auto-start
 ```
 
 <details>
@@ -354,8 +358,9 @@ curl -fsSL .../install.sh | bash -s -- \
 
 | Flag | Environment Variable | Default | Description |
 |------|---------------------|---------|-------------|
-| `--token` | `GITLAB_TOKEN` | - | GitLab Personal Access Token (required) |
-| `--project-id` | `GITLAB_PROJECT_ID` | - | GitLab Project ID (required) |
+| `--projects-json` | `GITLAB_PROJECTS` | - | Multi-project JSON array; replaces token/project ID at runtime |
+| `--token` | `GITLAB_TOKEN` | - | GitLab token, required in legacy single-project mode |
+| `--project-id` | `GITLAB_PROJECT_ID` | - | Legacy project ID, or migration hint when used with multi-project JSON |
 | `--webhook-secret` | `WEBHOOK_SECRET` | auto-generated | Webhook signature secret |
 | `--gitlab-url` | `GITLAB_URL` | `https://gitlab.com` | GitLab instance URL |
 | `--target-branch` | `TARGET_BRANCH` | `master` | Target branch for merges |
@@ -417,10 +422,30 @@ deploy-merge-queue:
 
 | Variable | Description |
 |----------|-------------|
-| `GITLAB_QUEUE_GITLAB_TOKEN` | GitLab personal access token with `api` scope |
-| `GITLAB_QUEUE_GITLAB_PROJECT_ID` | GitLab project ID (positive integer) |
+| `GITLAB_QUEUE_PROJECTS` | Multi-project JSON array; each item requires `project_id` and an `api`-scope `token` |
+| `GITLAB_QUEUE_GITLAB_TOKEN` | Legacy single-project token; required only when `GITLAB_QUEUE_PROJECTS` is unset |
+| `GITLAB_QUEUE_GITLAB_PROJECT_ID` | Legacy single-project ID; required only when `GITLAB_QUEUE_PROJECTS` is unset |
 | `GITLAB_QUEUE_JWT_SECRET` | JWT signing secret (min 64 chars) |
 | `GITLAB_QUEUE_WEBHOOK_SECRET` | Webhook signature secret |
+
+Use either `GITLAB_QUEUE_PROJECTS` or the two legacy single-project variables. Example:
+
+```bash
+export GITLAB_QUEUE_PROJECTS='[
+  {"project_id": 123, "token": "glpat-project-one", "target_branch": "main"},
+  {"project_id": 456, "token": "glpat-project-two", "queue_label": "merge_queue", "hotfix_label": "hotfix"}
+]'
+```
+
+All projects share the webhook secret and GitLab base URL, while queue processing,
+retry/DLQ records, analytics, API responses and dashboard WebSockets are scoped by
+project. Configure the same webhook URL and secret in every listed GitLab project.
+
+When upgrading an existing single-project database directly to multiple projects,
+keep `GITLAB_QUEUE_GITLAB_PROJECT_ID` set to the former project ID for the first
+migration run. The migration uses it only to assign existing queue, history,
+analytics and retry rows; it must also appear in `GITLAB_QUEUE_PROJECTS`. If the
+owner cannot be determined safely, startup stops instead of hiding legacy rows.
 
 ### GitLab Connection
 

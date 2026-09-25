@@ -45,7 +45,10 @@ class MergeRequestModel(Base):
     finished_at: Mapped[str | None] = mapped_column(Text, nullable=True)
     pipeline_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     pipeline_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expected_sha: Mapped[str | None] = mapped_column(Text, nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    retried_jobs: Mapped[str] = mapped_column(Text, nullable=False, default="{}", server_default="{}")
+    processing_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     stale_warning_sent: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[str | None] = mapped_column(Text, nullable=True, server_default="CURRENT_TIMESTAMP")
@@ -73,6 +76,7 @@ class WebhookRetryModel(Base):
     __tablename__ = "webhook_retry_queue"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     event_type: Mapped[str] = mapped_column(Text, nullable=False)
     payload: Mapped[str] = mapped_column(Text, nullable=False)
     attempt_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
@@ -84,6 +88,8 @@ class WebhookRetryModel(Base):
     __table_args__ = (
         Index("idx_retry_next_attempt", "next_attempt_at"),
         Index("idx_retry_event_type", "event_type"),
+        Index("idx_retry_project_next_attempt", "project_id", "next_attempt_at"),
+        Index("idx_retry_project_event_type", "project_id", "event_type"),
     )
 
     def __repr__(self) -> str:
@@ -100,6 +106,7 @@ class WebhookDLQModel(Base):
     __tablename__ = "webhook_dlq"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     event_type: Mapped[str] = mapped_column(Text, nullable=False)
     payload: Mapped[str] = mapped_column(Text, nullable=False)
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -110,6 +117,8 @@ class WebhookDLQModel(Base):
     __table_args__ = (
         Index("idx_dlq_moved_at", "moved_to_dlq_at"),
         Index("idx_dlq_event_type", "event_type"),
+        Index("idx_dlq_project_moved_at", "project_id", "moved_to_dlq_at"),
+        Index("idx_dlq_project_event_type", "project_id", "event_type"),
     )
 
     def __repr__(self) -> str:

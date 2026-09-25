@@ -15,7 +15,7 @@ describe('api/config', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     server.use(
-      http.get('/api/config', () => {
+      http.get('/api/projects/1/config', () => {
         return HttpResponse.json(mockConfigResponse);
       })
     );
@@ -23,14 +23,14 @@ describe('api/config', () => {
 
   describe('getProjectConfig', () => {
     it('returns project config on success', async () => {
-      const result = await getProjectConfig();
+      const result = await getProjectConfig(1);
 
       expect(result).toEqual({ success: true, data: mockConfigResponse });
     });
 
     it('returns error on server error', async () => {
       server.use(
-        http.get('/api/config', () => {
+        http.get('/api/projects/1/config', () => {
           return HttpResponse.json(
             { detail: 'Internal server error' },
             { status: 500 }
@@ -38,7 +38,7 @@ describe('api/config', () => {
         })
       );
 
-      const result = await getProjectConfig();
+      const result = await getProjectConfig(1);
 
       expect(result.success).toBe(false);
       if (!result.success) {
@@ -50,7 +50,7 @@ describe('api/config', () => {
       const controller = new AbortController();
       controller.abort();
 
-      const result = await getProjectConfig(controller.signal);
+      const result = await getProjectConfig(1, controller.signal);
 
       expect(result.success).toBe(false);
       if (!result.success) {

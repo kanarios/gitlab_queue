@@ -19,7 +19,7 @@ import asyncio
 import contextlib
 import sys
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import cast
 
 import environ
 import uvicorn
@@ -27,10 +27,10 @@ import uvicorn
 from gitlab_queue import __version__
 from gitlab_queue.api.websocket import WebSocketManager
 from gitlab_queue.clients.gitlab import GitLabAPIError, GitLabCircuitOpenError, GitLabClient
-from gitlab_queue.config import ConfigurationError, ProjectConfig, load_settings
+from gitlab_queue.config import ConfigurationError, ProjectConfig, Settings, load_settings
 from gitlab_queue.core.notifier import MRNotifier
 from gitlab_queue.core.processor import MergeProcessor, create_processor
-from gitlab_queue.core.project_components import ProjectComponents
+from gitlab_queue.core.project_components import ProjectComponents, ProjectSettings
 from gitlab_queue.core.queue import QueueManager
 from gitlab_queue.core.queue_position_notifier import QueuePositionNotifier
 from gitlab_queue.core.scheduler import QueueScheduler, create_scheduler
@@ -44,9 +44,6 @@ from gitlab_queue.utils.shutdown import ShutdownManager, ShutdownReason
 from gitlab_queue.webhooks import WebhookAppState, create_webhook_app
 from gitlab_queue.webhooks.retry_manager import WebhookRetryManager
 from gitlab_queue.webhooks.retry_processor import WebhookRetryProcessor, create_retry_processor
-
-if TYPE_CHECKING:
-    from gitlab_queue.config import Settings
 
 log = get_logger(__name__)
 
@@ -241,7 +238,6 @@ async def create_application(settings: Settings) -> Application:
 
     # 5. Initialize per-project components
     project_components: dict[int, ProjectComponents] = {}
-    gitlab_verified = False
 
     for project_config in project_configs:
         pc = await _create_project_components(
@@ -249,11 +245,13 @@ async def create_application(settings: Settings) -> Application:
             settings=settings,
             queue_manager=queue_manager,
             shutdown_manager=shutdown_manager,
-            health=health,
         )
         project_components[project_config.project_id] = pc
-        if health.gitlab and health.gitlab.status == ComponentStatus.HEALTHY:
-            gitlab_verified = True
+        health.gitlab_by_project[project_config.project_id] = pc.health
+        if health.gitlab is None:
+            health.gitlab = pc.health
+
+    gitlab_verified = all(pc.health.status == ComponentStatus.HEALTHY for pc in project_components.values())
 
     # 6. Initialize webhook retry manager (tables created by migrations)
     retry_manager = WebhookRetryManager(
@@ -273,6 +271,7 @@ async def create_application(settings: Settings) -> Application:
         notifier=first_pc.notifier,
         position_notifier=first_pc.position_notifier,
     )
+    retry_processor.project_components = project_components
 
     # 8. Create analytics job processor
     analytics_processor = create_analytics_processor(
@@ -302,7 +301,6 @@ async def _create_project_components(
     settings: Settings,
     queue_manager: QueueManager,
     shutdown_manager: ShutdownManager,
-    health: ApplicationHealth,
 ) -> ProjectComponents:
     """Create per-project components (GitLabClient, processor, scheduler).
 
@@ -311,13 +309,13 @@ async def _create_project_components(
         settings: Global application settings.
         queue_manager: Shared queue manager.
         shutdown_manager: For registering cleanup handlers.
-        health: Application health tracker.
-
     Returns:
         ProjectComponents for this project.
     """
     pid = project_config.project_id
     log.info("Initializing project components", project_id=pid)
+    project_settings = ProjectSettings(config=project_config, application=settings)
+    runtime_settings = cast("Settings", project_settings)
 
     # Create per-project GitLab client
     gitlab_client = GitLabClient.for_project(project_config, settings)
@@ -326,7 +324,7 @@ async def _create_project_components(
     # Verify GitLab access
     try:
         await verify_gitlab_access(gitlab_client, project_config)
-        health.gitlab = GitLabHealth.from_circuit_breaker(gitlab_client.circuit_breaker)
+        project_health = GitLabHealth.from_circuit_breaker(gitlab_client.circuit_breaker)
     except (GitLabAPIError, GitLabCircuitOpenError) as e:
         if settings.startup_gitlab_required:
             raise
@@ -335,14 +333,14 @@ async def _create_project_components(
             project_id=pid,
             error=str(e),
         )
-        health.gitlab = GitLabHealth(
+        project_health = GitLabHealth(
             status=ComponentStatus.UNHEALTHY,
             circuit_state="unknown",
             failure_count=0,
         )
 
     # Create per-project notifier and position notifier
-    notifier = MRNotifier(gitlab_client=gitlab_client, settings=settings)
+    notifier = MRNotifier(gitlab_client=gitlab_client, settings=runtime_settings)
     position_notifier = QueuePositionNotifier(notifier=notifier, queue_manager=queue_manager)
 
     # Create per-project processor and scheduler
@@ -350,24 +348,26 @@ async def _create_project_components(
         gitlab_client=gitlab_client,
         queue_manager=queue_manager,
         notifier=notifier,
-        settings=settings,
+        settings=runtime_settings,
         position_notifier=position_notifier,
     )
     scheduler = create_scheduler(
         gitlab_client=gitlab_client,
         queue_manager=queue_manager,
-        settings=settings,
+        settings=runtime_settings,
     )
 
     log.info("Project components initialized", project_id=pid)
 
     return ProjectComponents(
         config=project_config,
+        settings=project_settings,
         gitlab_client=gitlab_client,
         notifier=notifier,
         position_notifier=position_notifier,
         processor=processor,
         scheduler=scheduler,
+        health=project_health,
     )
 
 
@@ -415,7 +415,8 @@ def _create_webhook_server(app: Application) -> tuple[uvicorn.Server, asyncio.Ta
         pc.scheduler.set_websocket_manager(websocket_manager)
     app.retry_processor.set_websocket_manager(websocket_manager)
 
-    # Use first project's components for WebhookAppState (PR 4 will add full multi-project routing)
+    # Legacy state fields retain the first project for single-project aliases;
+    # project_components is authoritative for scoped routing.
     first_pc = next(iter(app.project_components.values()))
     webhook_state = WebhookAppState(
         settings=app.settings,
@@ -425,6 +426,7 @@ def _create_webhook_server(app: Application) -> tuple[uvicorn.Server, asyncio.Ta
         notifier=first_pc.notifier,
         position_notifier=first_pc.position_notifier,
         retry_manager=app.retry_manager,
+        project_components=app.project_components,
         health=app.health,
         websocket_manager=websocket_manager,
     )

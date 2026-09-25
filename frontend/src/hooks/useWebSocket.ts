@@ -8,7 +8,7 @@
  * - Cleanup on unmount
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { wsManager } from '../api/websocket';
 import { hasToken } from '../auth/storage';
 import type { MergeRequest, QueueStatsFromWS, WebSocketState } from '../types';
@@ -39,29 +39,28 @@ interface UseWebSocketResult {
  * }
  * ```
  */
-export function useWebSocket(): UseWebSocketResult {
-  const [state, setState] = useState<WebSocketState>(wsManager.getState());
+export function useWebSocket(projectId: number | null): UseWebSocketResult {
+  const [state, setState] = useState<WebSocketState>(
+    projectId === null || !hasToken() ? 'disconnected' : 'connecting'
+  );
   const [queue, setQueue] = useState<MergeRequest[]>([]);
   const [stats, setStats] = useState<QueueStatsFromWS | null>(null);
 
-  // Track if component is mounted to prevent state updates after unmount
-  const isMounted = useRef(true);
-
   // Handle queue:updated event - full queue replacement
   const handleQueueUpdated = useCallback(
-    (data: { queue: MergeRequest[]; stats: QueueStatsFromWS }) => {
-      if (isMounted.current) {
+    (data: { project_id: number; queue: MergeRequest[]; stats: QueueStatsFromWS }) => {
+      if (data.project_id === projectId) {
         setQueue(data.queue);
         setStats(data.stats);
       }
     },
-    []
+    [projectId]
   );
 
   // Handle mr:status_changed event - update single MR status
   const handleStatusChanged = useCallback(
-    (data: { iid: number; oldStatus: string; newStatus: string }) => {
-      if (isMounted.current) {
+    (data: { project_id: number; iid: number; oldStatus: string; newStatus: string }) => {
+      if (data.project_id === projectId) {
         setQueue((prev) =>
           prev.map((mr) =>
             mr.mr_iid === data.iid
@@ -71,32 +70,36 @@ export function useWebSocket(): UseWebSocketResult {
         );
       }
     },
-    []
+    [projectId]
   );
 
   // Handle mr:completed event - remove MR from queue
   const handleCompleted = useCallback(
-    (data: { iid: number; status: string; finishedAt: string; failureReason: string | null }) => {
-      if (isMounted.current) {
+    (data: { project_id: number; iid: number; status: string; finishedAt: string; failureReason: string | null }) => {
+      if (data.project_id === projectId) {
         setQueue((prev) => prev.filter((mr) => mr.mr_iid !== data.iid));
       }
     },
-    []
+    [projectId]
   );
 
   // Reconnect handler for UI
   const reconnect = useCallback(() => {
-    wsManager.reconnect();
-  }, []);
+    if (projectId !== null) wsManager.reconnect(projectId);
+  }, [projectId]);
 
   useEffect(() => {
-    isMounted.current = true;
+    setQueue([]);
+    setStats(null);
+    setState(projectId === null || !hasToken() ? 'disconnected' : 'connecting');
+
+    if (projectId === null) {
+      return;
+    }
 
     // Subscribe to state changes
     const unsubState = wsManager.onStateChange((newState) => {
-      if (isMounted.current) {
-        setState(newState);
-      }
+      setState(newState);
     });
 
     // Subscribe to events
@@ -105,20 +108,16 @@ export function useWebSocket(): UseWebSocketResult {
     const unsubCompleted = wsManager.on('mr:completed', handleCompleted);
 
     // Connect if authenticated
-    if (hasToken()) {
-      wsManager.connect();
-    }
+    if (hasToken()) wsManager.connect(projectId);
 
     return () => {
-      isMounted.current = false;
       unsubState();
       unsubQueueUpdated();
       unsubStatusChanged();
       unsubCompleted();
-      // Note: Don't disconnect here - other components may still be using the connection
-      // The manager is a singleton and handles its own lifecycle
+      wsManager.disconnect();
     };
-  }, [handleQueueUpdated, handleStatusChanged, handleCompleted]);
+  }, [projectId, handleQueueUpdated, handleStatusChanged, handleCompleted]);
 
   return {
     state,

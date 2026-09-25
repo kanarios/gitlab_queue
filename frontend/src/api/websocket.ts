@@ -42,14 +42,15 @@ export class WebSocketManager {
   private stateListeners = new Set<StateChangeCallback>();
   private eventListeners = new Map<string, Set<EventCallback<unknown>>>();
   private intentionalDisconnect = false;
+  private activeProjectId: number | null = null;
 
   /**
    * Get the WebSocket endpoint URL.
    * Uses Vite's proxy in development.
    */
-  private getWsUrl(): string {
+  private getWsUrl(projectId: number): string {
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${wsProtocol}//${window.location.host}/ws/queue`;
+    return `${wsProtocol}//${window.location.host}/ws/projects/${projectId}/queue`;
   }
 
   /**
@@ -115,7 +116,13 @@ export class WebSocketManager {
    * Connect to the WebSocket endpoint.
    * Requires authentication token to be present.
    */
-  connect(): void {
+  connect(projectId: number): void {
+    if (this.activeProjectId !== projectId) {
+      this.disconnect();
+      this.activeProjectId = projectId;
+      this.reconnectAttempts = 0;
+    }
+
     if (
       this.socket?.readyState === WebSocket.OPEN ||
       this.socket?.readyState === WebSocket.CONNECTING
@@ -132,7 +139,7 @@ export class WebSocketManager {
     this.intentionalDisconnect = false;
     this.setState('connecting');
 
-    const url = `${this.getWsUrl()}?token=${encodeURIComponent(token)}`;
+    const url = `${this.getWsUrl(projectId)}?token=${encodeURIComponent(token)}`;
     this.socket = new WebSocket(url);
 
     this.socket.onopen = this.handleOpen.bind(this);
@@ -148,6 +155,7 @@ export class WebSocketManager {
   disconnect(): void {
     this.intentionalDisconnect = true;
     this.clearReconnectTimeout();
+    this.activeProjectId = null;
 
     if (this.socket) {
       this.socket.onopen = null;
@@ -164,11 +172,12 @@ export class WebSocketManager {
   /**
    * Force reconnection attempt.
    */
-  reconnect(): void {
+  reconnect(projectId: number): void {
     this.disconnect();
+    this.activeProjectId = projectId;
     this.intentionalDisconnect = false;
     this.reconnectAttempts = 0;
-    this.connect();
+    this.connect(projectId);
   }
 
   /**
@@ -185,11 +194,17 @@ export class WebSocketManager {
   private handleClose(event: CloseEvent): void {
     this.socket = null;
 
-    // Auth error - don't reconnect, clear token, redirect to login
+    // Policy violations are terminal for this connection. Only token failures
+    // invalidate the whole session; project authorization failures do not.
     if (event.code === CLOSE_CODE_POLICY_VIOLATION) {
-      clearToken();
+      const tokenFailure = ['Missing token', 'Token expired', 'Invalid token'].includes(
+        event.reason
+      );
       this.setState('error');
-      window.location.href = '/login';
+      if (tokenFailure) {
+        clearToken();
+        window.location.href = '/login';
+      }
       return;
     }
 
@@ -237,7 +252,8 @@ export class WebSocketManager {
     this.reconnectAttempts++;
 
     this.reconnectTimeoutId = setTimeout(() => {
-      this.connect();
+      const projectId = this.activeProjectId;
+      if (projectId !== null) this.connect(projectId);
     }, delay);
   }
 

@@ -21,6 +21,7 @@ from gitlab_queue.auth.jwt_handler import (
     InvalidTokenError,
     TokenExpiredError,
     decode_token,
+    get_authorized_project_ids,
 )
 from gitlab_queue.utils.logging import get_logger
 
@@ -156,6 +157,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
 
         try:
             payload = decode_token(token, self.settings)
+            project_ids = sorted(get_authorized_project_ids(payload))
             return {
                 "sub": payload.get("sub"),
                 "username": payload.get("username"),
@@ -163,6 +165,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
                 "email": payload.get("email"),
                 "avatar_url": payload.get("avatar_url"),
                 "project_id": payload.get("project_id"),
+                "project_ids": project_ids,
             }
         except TokenExpiredError:
             log.debug("Token expired", path=request.url.path)

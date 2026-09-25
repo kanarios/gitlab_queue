@@ -38,6 +38,17 @@ export type ApiResult<T> =
   | { success: true; data: T }
   | { success: false; error: ApiError };
 
+/** A GitLab project available to the authenticated user. */
+export interface Project {
+  project_id: number;
+  web_url: string;
+  name: string;
+}
+
+export interface ProjectsResponse {
+  projects: Project[];
+}
+
 // =============================================================================
 // Pagination (matches backend PaginationSchema)
 // =============================================================================
@@ -146,7 +157,18 @@ export interface FailureReasonsResponse {
  * Live queue statistics.
  */
 export interface QueueStats {
-  queue_length: number;
-  processing_count: number;
-  oldest_queued_at: string | null;
+  current: {
+    total: number;
+    by_status: Record<string, number>;
+  };
+  historical: {
+    window_days: number;
+    merged_count: number;
+    failed_count: number;
+    success_rate_percent: number;
+  };
+  timing: {
+    avg_wait_seconds: number;
+    avg_processing_seconds: number;
+  };
 }

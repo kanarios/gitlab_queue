@@ -16,8 +16,25 @@ describe('api/history', () => {
   });
 
   describe('getHistory', () => {
+    it('uses the selected project in the history path', async () => {
+      let requestPath = '';
+      server.use(
+        http.get('/api/projects/:projectId/history', ({ request }) => {
+          requestPath = new URL(request.url).pathname;
+          return HttpResponse.json({
+            items: [],
+            pagination: { total: 0, page: 1, per_page: 20, total_pages: 0 },
+          });
+        })
+      );
+
+      await getHistory(81);
+
+      expect(requestPath).toBe('/api/projects/81/history');
+    });
+
     it('returns paginated history', async () => {
-      const result = await getHistory();
+      const result = await getHistory(1);
 
       expect(result.success).toBe(true);
       if (result.success) {
@@ -31,7 +48,7 @@ describe('api/history', () => {
     it('passes page parameter', async () => {
       let capturedPage: string | null = null;
       server.use(
-        http.get('/api/history', ({ request }) => {
+        http.get('/api/projects/1/history', ({ request }) => {
           const url = new URL(request.url);
           capturedPage = url.searchParams.get('page');
           return HttpResponse.json({
@@ -46,7 +63,7 @@ describe('api/history', () => {
         })
       );
 
-      await getHistory({ page: 2 });
+      await getHistory(1, { page: 2 });
 
       expect(capturedPage).toBe('2');
     });
@@ -54,7 +71,7 @@ describe('api/history', () => {
     it('passes per_page parameter', async () => {
       let capturedPerPage: string | null = null;
       server.use(
-        http.get('/api/history', ({ request }) => {
+        http.get('/api/projects/1/history', ({ request }) => {
           const url = new URL(request.url);
           capturedPerPage = url.searchParams.get('per_page');
           return HttpResponse.json({
@@ -69,7 +86,7 @@ describe('api/history', () => {
         })
       );
 
-      await getHistory({ per_page: 20 });
+      await getHistory(1, { per_page: 20 });
 
       expect(capturedPerPage).toBe('20');
     });
@@ -77,7 +94,7 @@ describe('api/history', () => {
     it('passes status filter', async () => {
       let capturedStatus: string | null = null;
       server.use(
-        http.get('/api/history', ({ request }) => {
+        http.get('/api/projects/1/history', ({ request }) => {
           const url = new URL(request.url);
           capturedStatus = url.searchParams.get('status');
           return HttpResponse.json({
@@ -92,7 +109,7 @@ describe('api/history', () => {
         })
       );
 
-      await getHistory({ status: 'merged' });
+      await getHistory(1, { status: 'merged' });
 
       expect(capturedStatus).toBe('merged');
     });
@@ -100,7 +117,7 @@ describe('api/history', () => {
     it('passes search query', async () => {
       let capturedSearch: string | null = null;
       server.use(
-        http.get('/api/history', ({ request }) => {
+        http.get('/api/projects/1/history', ({ request }) => {
           const url = new URL(request.url);
           capturedSearch = url.searchParams.get('search');
           return HttpResponse.json({
@@ -115,7 +132,7 @@ describe('api/history', () => {
         })
       );
 
-      await getHistory({ search: 'test query' });
+      await getHistory(1, { search: 'test query' });
 
       expect(capturedSearch).toBe('test query');
     });
@@ -123,7 +140,7 @@ describe('api/history', () => {
     it('passes all parameters together', async () => {
       let capturedParams: Record<string, string | null> = {};
       server.use(
-        http.get('/api/history', ({ request }) => {
+        http.get('/api/projects/1/history', ({ request }) => {
           const url = new URL(request.url);
           capturedParams = {
             page: url.searchParams.get('page'),
@@ -143,7 +160,7 @@ describe('api/history', () => {
         })
       );
 
-      await getHistory({
+      await getHistory(1, {
         page: 2,
         per_page: 20,
         status: 'failed',
@@ -160,7 +177,7 @@ describe('api/history', () => {
 
     it('returns error on server error', async () => {
       server.use(
-        http.get('/api/history', () => {
+        http.get('/api/projects/1/history', () => {
           return HttpResponse.json(
             { detail: 'Internal server error' },
             { status: 500 }
@@ -168,7 +185,7 @@ describe('api/history', () => {
         })
       );
 
-      const result = await getHistory();
+      const result = await getHistory(1);
 
       expect(result.success).toBe(false);
       if (!result.success) {
@@ -179,7 +196,7 @@ describe('api/history', () => {
 
   describe('getHistoryItem', () => {
     it('returns single history item', async () => {
-      const result = await getHistoryItem(100);
+      const result = await getHistoryItem(1, 100);
 
       expect(result.success).toBe(true);
       if (result.success) {
@@ -189,7 +206,7 @@ describe('api/history', () => {
 
     it('returns not_found error for non-existent item', async () => {
       server.use(
-        http.get('/api/history/:iid', () => {
+        http.get('/api/projects/1/history/:iid', () => {
           return HttpResponse.json(
             { detail: 'MR not found' },
             { status: 404 }
@@ -197,7 +214,7 @@ describe('api/history', () => {
         })
       );
 
-      const result = await getHistoryItem(999);
+      const result = await getHistoryItem(1, 999);
 
       expect(result.success).toBe(false);
       if (!result.success) {

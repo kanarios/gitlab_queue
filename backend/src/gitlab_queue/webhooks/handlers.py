@@ -307,6 +307,7 @@ class MRWebhookHandler:
                         mr_iid,
                         "merged",
                         finished_at=datetime.now(UTC),
+                        project_id=event.project_id,
                     )
 
                 positions_before: dict[int, int] = {}
@@ -507,7 +508,9 @@ class MRWebhookHandler:
                     }
                 )
 
-            await self.websocket_manager.broadcast_queue_updated(queue_data, queue_stats)
+            await self.websocket_manager.broadcast_queue_updated(
+                queue_data, queue_stats, self.settings.gitlab_project_id
+            )
             log.debug(
                 "Broadcast queue update to WebSocket clients",
                 queue_length=len(queue_data),

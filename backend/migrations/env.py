@@ -44,6 +44,10 @@ def get_database_url() -> str:
     2. Application settings via load_settings()
     3. Fallback to alembic.ini value
     """
+    override_url = config.attributes.get("database_url_override")
+    if override_url:
+        return str(override_url)
+
     # Check env var directly first (for CI where full settings may not be available)
     env_url = os.environ.get("GITLAB_QUEUE_DATABASE_URL")
     if env_url:
@@ -65,8 +69,7 @@ def get_database_url() -> str:
         return fallback_url
 
     raise RuntimeError(
-        "No database URL found. Set GITLAB_QUEUE_DATABASE_URL env var "
-        "or configure sqlalchemy.url in alembic.ini"
+        "No database URL found. Set GITLAB_QUEUE_DATABASE_URL env var or configure sqlalchemy.url in alembic.ini"
     )
 
 

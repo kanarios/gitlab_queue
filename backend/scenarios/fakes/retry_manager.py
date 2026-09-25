@@ -35,37 +35,50 @@ class FakeRetryManager:
     # Auto-increment ID for add_to_retry_queue
     _next_id: int = field(default=1)
 
-    async def get_events_ready_for_retry(self, limit: int = 10) -> list[RetryQueueItem]:
+    async def get_events_ready_for_retry(self, limit: int = 10, project_id: int | None = None) -> list[RetryQueueItem]:
         if self.get_events_error:
             raise self.get_events_error
         return self._ready_events[:limit]
 
-    async def mark_retry_success(self, item_id: int) -> None:
+    async def mark_retry_success(self, item_id: int, project_id: int | None = None) -> None:
         self.success_calls.append(item_id)
 
-    async def mark_retry_failed(self, item_id: int, error_message: str) -> bool:
+    async def mark_retry_failed(self, item_id: int, error_message: str, project_id: int | None = None) -> bool:
         self.failed_calls.append({"item_id": item_id, "error_message": error_message})
         return self._dlq_on_fail
 
     async def ensure_schema(self) -> None:
         self.ensure_schema_calls += 1
 
-    async def add_to_retry_queue(self, event_type: str, payload: dict[str, Any], error: str) -> int:
+    async def add_to_retry_queue(
+        self,
+        event_type: str,
+        payload: dict[str, Any],
+        error: str,
+        project_id: int = 0,
+    ) -> int:
         self.add_to_retry_queue_calls.append(
             {
                 "event_type": event_type,
                 "payload": payload,
                 "error": error,
+                "project_id": project_id,
             }
         )
         current_id = self._next_id
         self._next_id += 1
         return current_id
 
-    async def get_dlq_entries(self, limit: int = 50, offset: int = 0, event_type: str | None = None) -> list[Any]:
+    async def get_dlq_entries(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        event_type: str | None = None,
+        project_id: int | None = None,
+    ) -> list[Any]:
         return self.dlq_entries[offset : offset + limit]
 
-    async def get_dlq_stats(self) -> Any:
+    async def get_dlq_stats(self, project_id: int | None = None) -> Any:
         if self.dlq_stats is not None:
             return self.dlq_stats
         # Return a minimal stats-like object
@@ -79,14 +92,14 @@ class FakeRetryManager:
             },
         )()
 
-    async def get_dlq_entry(self, entry_id: int) -> Any:
+    async def get_dlq_entry(self, entry_id: int, project_id: int | None = None) -> Any:
         if self.dlq_error:
             raise self.dlq_error
         if self.dlq_entry is not None:
             return self.dlq_entry
         raise Exception(f"DLQ entry {entry_id} not found")
 
-    async def retry_dlq_entry(self, entry_id: int) -> int:
+    async def retry_dlq_entry(self, entry_id: int, project_id: int | None = None) -> int:
         self.retry_dlq_calls.append(entry_id)
         if self.dlq_error:
             raise self.dlq_error
@@ -94,6 +107,6 @@ class FakeRetryManager:
         self._next_id += 1
         return current_id
 
-    async def delete_dlq_entry(self, entry_id: int) -> bool:
+    async def delete_dlq_entry(self, entry_id: int, project_id: int | None = None) -> bool:
         self.delete_dlq_calls.append(entry_id)
         return self.delete_result

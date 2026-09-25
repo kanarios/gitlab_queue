@@ -54,10 +54,11 @@ export interface GetHistoryParams {
  * ```
  */
 export async function getHistory(
+  projectId: number,
   params: GetHistoryParams = {}
 ): Promise<ApiResult<PaginatedHistoryResponse>> {
   const { signal, ...queryParams } = params;
-  const url = buildUrl('/api/history', queryParams);
+  const url = buildUrl(`/api/projects/${projectId}/history`, queryParams);
   return apiFetch<PaginatedHistoryResponse>(url, { signal });
 }
 
@@ -79,8 +80,9 @@ export async function getHistory(
  * ```
  */
 export async function getHistoryItem(
+  projectId: number,
   iid: number,
   signal?: AbortSignal
 ): Promise<ApiResult<MergeRequest>> {
-  return apiFetch<MergeRequest>(`/api/history/${iid}`, { signal });
+  return apiFetch<MergeRequest>(`/api/projects/${projectId}/history/${iid}`, { signal });
 }

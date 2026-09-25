@@ -38,6 +38,7 @@ class RetryQueueItem:
     max_attempts: int
     next_attempt_at: datetime
     created_at: datetime
+    project_id: int = 0
     last_error: str | None = None
 
 
@@ -65,6 +66,7 @@ class DLQItem:
     last_error: str
     original_created_at: datetime
     moved_to_dlq_at: datetime
+    project_id: int = 0
 
 
 @dataclass(frozen=True, slots=True)

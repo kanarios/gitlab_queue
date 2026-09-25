@@ -38,10 +38,15 @@ class FakeWebSocket:
 class FakeWebSocketManager:
     broadcast_calls: list[dict[str, Any]] = field(default_factory=list)
 
-    async def broadcast(self, message: dict[str, Any]) -> None:
+    async def broadcast(self, message: dict[str, Any], project_id: int | None = None) -> None:
         self.broadcast_calls.append(message)
 
-    async def broadcast_queue_updated(self, queue: list[dict[str, Any]], stats: dict[str, Any]) -> None:
+    async def broadcast_queue_updated(
+        self,
+        queue: list[dict[str, Any]],
+        stats: dict[str, Any],
+        project_id: int | None = None,
+    ) -> None:
         self.broadcast_calls.append(
             {
                 "type": "queue_updated",
@@ -50,7 +55,13 @@ class FakeWebSocketManager:
             }
         )
 
-    async def broadcast_mr_status_changed(self, mr_iid: int, old_status: str, new_status: str) -> None:
+    async def broadcast_mr_status_changed(
+        self,
+        mr_iid: int,
+        old_status: str,
+        new_status: str,
+        project_id: int | None = None,
+    ) -> None:
         self.broadcast_calls.append(
             {
                 "type": "mr_status_changed",
@@ -66,6 +77,7 @@ class FakeWebSocketManager:
         status: str,
         finished_at: Any = None,
         failure_reason: str | None = None,
+        project_id: int | None = None,
     ) -> None:
         self.broadcast_calls.append(
             {

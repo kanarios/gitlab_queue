@@ -13,9 +13,16 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from gitlab_queue.api.project_access import (
+    authorized_project_ids_from_user,
+    configured_project_ids,
+    resolve_project_components,
+    resolve_project_id,
+)
 from gitlab_queue.api.schemas import (
     dump_analytics_summary,
     dump_failure_reasons,
@@ -34,7 +41,7 @@ if TYPE_CHECKING:
 log = get_logger(__name__)
 
 
-def _create_uow(state: WebhookAppState) -> UnitOfWork:
+def _create_uow(state: WebhookAppState, project_id: int) -> UnitOfWork:
     """Create a UnitOfWork using state's uow_factory if available, otherwise default.
 
     Args:
@@ -43,8 +50,19 @@ def _create_uow(state: WebhookAppState) -> UnitOfWork:
     Returns:
         UnitOfWork context manager instance.
     """
-    factory = state.uow_factory or UnitOfWork
-    return factory(state.database)
+    if state.uow_factory is not None:
+        return state.uow_factory(state.database)
+    return UnitOfWork(state.database, project_id=project_id)
+
+
+def _resolve_request_project(request: Request, state: WebhookAppState) -> int:
+    """Resolve the project path parameter or the single-project legacy alias."""
+    raw_project_id = request.path_params.get("project_id")
+    try:
+        requested_project_id = int(raw_project_id) if raw_project_id is not None else None
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=404, detail="Project not found") from None
+    return resolve_project_id(request, state, requested_project_id)
 
 
 # =============================================================================
@@ -52,9 +70,11 @@ def _create_uow(state: WebhookAppState) -> UnitOfWork:
 # =============================================================================
 
 history_router = APIRouter(prefix="/api/history", tags=["history"])
+projects_router = APIRouter(prefix="/api/projects", tags=["projects"])
 
 
 @history_router.get("")
+@projects_router.get("/{project_id}/history")
 async def get_history(
     request: Request,
     page: int = Query(default=1, ge=1, description="Page number (1-indexed)"),
@@ -79,8 +99,9 @@ async def get_history(
         Dict with history items and pagination metadata.
     """
     state: WebhookAppState = request.app.state.webhook_state
+    project_id = _resolve_request_project(request, state)
 
-    async with _create_uow(state) as uow:
+    async with _create_uow(state, project_id) as uow:
         # Get paginated history with filters
         result = await uow.history.get_history(
             page=page,
@@ -115,6 +136,7 @@ async def get_history(
 
 
 @history_router.get("/{iid}")
+@projects_router.get("/{project_id}/history/{iid}")
 async def get_history_item(request: Request, iid: int) -> dict[str, Any]:
     """Get a specific MR from history by its IID.
 
@@ -129,8 +151,9 @@ async def get_history_item(request: Request, iid: int) -> dict[str, Any]:
         HTTPException: 404 if MR not found in history.
     """
     state: WebhookAppState = request.app.state.webhook_state
+    project_id = _resolve_request_project(request, state)
 
-    async with _create_uow(state) as uow:
+    async with _create_uow(state, project_id) as uow:
         item = await uow.history.get_by_iid(iid)
         if item is None:
             raise HTTPException(status_code=404, detail=f"MR !{iid} not found in history")
@@ -147,6 +170,7 @@ analytics_router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
 
 @analytics_router.get("/summary")
+@projects_router.get("/{project_id}/analytics/summary")
 async def get_analytics_summary(
     request: Request,
     days: int = Query(default=7, ge=1, le=365, description="Number of days to include"),
@@ -161,12 +185,13 @@ async def get_analytics_summary(
         Dict with aggregate statistics.
     """
     state: WebhookAppState = request.app.state.webhook_state
+    project_id = _resolve_request_project(request, state)
 
     now = datetime.now(UTC)
     date_from = (now - timedelta(days=days)).date()
     date_to = now.date()
 
-    async with _create_uow(state) as uow:
+    async with _create_uow(state, project_id) as uow:
         stats = await uow.history.get_stats_for_period(date_from, date_to)
 
     total_processed = stats.total_processed
@@ -184,6 +209,7 @@ async def get_analytics_summary(
 
 
 @analytics_router.get("/hourly")
+@projects_router.get("/{project_id}/analytics/hourly")
 async def get_hourly_analytics(
     request: Request,
     hours: int = Query(default=24, ge=1, le=168, description="Number of hours to include (max 168 = 7 days)"),
@@ -198,11 +224,12 @@ async def get_hourly_analytics(
         Dict with hourly data points.
     """
     state: WebhookAppState = request.app.state.webhook_state
+    project_id = _resolve_request_project(request, state)
 
     # Convert hours to days for get_metrics (round up)
     period_days = (hours + 23) // 24
 
-    async with _create_uow(state) as uow:
+    async with _create_uow(state, project_id) as uow:
         metrics = await uow.analytics.get_metrics(period_days)
 
     # Filter hourly_trend to requested hours
@@ -215,6 +242,7 @@ async def get_hourly_analytics(
 
 
 @analytics_router.get("/outcomes")
+@projects_router.get("/{project_id}/analytics/outcomes")
 async def get_outcomes_analytics(
     request: Request,
     days: int = Query(default=7, ge=1, le=365, description="Number of days to include"),
@@ -229,12 +257,13 @@ async def get_outcomes_analytics(
         Dict with outcome breakdown (success, failed, conflict, timeout).
     """
     state: WebhookAppState = request.app.state.webhook_state
+    project_id = _resolve_request_project(request, state)
 
     now = datetime.now(UTC)
     date_from = (now - timedelta(days=days)).date()
     date_to = now.date()
 
-    async with _create_uow(state) as uow:
+    async with _create_uow(state, project_id) as uow:
         stats = await uow.history.get_stats_for_period(date_from, date_to)
 
     total = stats.total_processed or 1  # Avoid division by zero
@@ -269,6 +298,7 @@ async def get_outcomes_analytics(
 
 
 @analytics_router.get("/failure-reasons")
+@projects_router.get("/{project_id}/analytics/failure-reasons")
 async def get_failure_reasons(
     request: Request,
     days: int = Query(default=7, ge=1, le=365, description="Number of days to include"),
@@ -283,12 +313,13 @@ async def get_failure_reasons(
         Dict with failure reason breakdown.
     """
     state: WebhookAppState = request.app.state.webhook_state
+    project_id = _resolve_request_project(request, state)
 
     now = datetime.now(UTC)
     date_from = (now - timedelta(days=days)).date()
     date_to = now.date()
 
-    async with _create_uow(state) as uow:
+    async with _create_uow(state, project_id) as uow:
         # Get failure reasons from history
         result = await uow.history.get_history(
             page=1,
@@ -330,6 +361,7 @@ config_router = APIRouter(prefix="/api/config", tags=["config"])
 
 
 @config_router.get("")
+@projects_router.get("/{project_id}/config")
 async def get_config(request: Request) -> dict[str, str]:
     """Get project configuration.
 
@@ -340,8 +372,11 @@ async def get_config(request: Request) -> dict[str, str]:
         HTTPException: 503 if GitLab API is unavailable.
     """
     state: WebhookAppState = request.app.state.webhook_state
+    project_id = _resolve_request_project(request, state)
+    components = resolve_project_components(state, project_id)
+    gitlab_client = components.gitlab_client if components else state.gitlab_client
     try:
-        project_web_url = await state.gitlab_client.get_project_web_url()
+        project_web_url = await gitlab_client.get_project_web_url()
     except GitLabCircuitOpenError as e:
         retry_after = int(e.retry_after or 30)
         raise HTTPException(
@@ -358,6 +393,29 @@ async def get_config(request: Request) -> dict[str, str]:
     return {"project_web_url": project_web_url}
 
 
+@projects_router.get("")
+async def get_projects(request: Request) -> dict[str, list[dict[str, Any]]]:
+    """List configured projects visible to the authenticated user."""
+    state: WebhookAppState = request.app.state.webhook_state
+    allowed_ids = authorized_project_ids_from_user(getattr(request.state, "user", None))
+    projects: list[dict[str, Any]] = []
+
+    for project_id in configured_project_ids(state):
+        if project_id not in allowed_ids:
+            continue
+        components = resolve_project_components(state, project_id)
+        gitlab_client = components.gitlab_client if components else state.gitlab_client
+        try:
+            web_url = await gitlab_client.get_project_web_url()
+        except (GitLabAPIError, GitLabCircuitOpenError):
+            web_url = ""
+        project_path = urlsplit(web_url).path.strip("/") if web_url else ""
+        name = project_path or f"Project {project_id}"
+        projects.append({"project_id": project_id, "web_url": web_url, "name": name})
+
+    return {"projects": projects}
+
+
 # =============================================================================
 # Exports
 # =============================================================================
@@ -366,4 +424,5 @@ __all__: list[str] = [
     "analytics_router",
     "config_router",
     "history_router",
+    "projects_router",
 ]

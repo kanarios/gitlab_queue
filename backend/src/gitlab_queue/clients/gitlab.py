@@ -391,6 +391,8 @@ class GitLabClient:
         self._rate_limit_lock = asyncio.Lock()
         self._project_web_url: str | None = None
         self._project_web_url_lock = asyncio.Lock()
+        self._last_request_succeeded: bool | None = None
+        self._project_access_verified = False
 
     @property
     def rate_limit_state(self) -> RateLimitState:
@@ -414,6 +416,16 @@ class GitLabClient:
     def project_id(self) -> int:
         """Return the GitLab project ID."""
         return self._project_id
+
+    @property
+    def last_request_succeeded(self) -> bool | None:
+        """Return the outcome of the most recent GitLab API request, if any."""
+        return self._last_request_succeeded
+
+    @property
+    def project_access_verified(self) -> bool:
+        """Return whether the latest MR-list permission probe succeeded."""
+        return self._project_access_verified
 
     async def get_project_web_url(self) -> str:
         """Get the project web URL from GitLab API. Cached after first call."""
@@ -698,19 +710,26 @@ class GitLabClient:
         normalized_path = normalize_endpoint(full_path)
 
         try:
-            return await self._execute_with_retry(method, full_path, normalized_path, **kwargs)
+            response = await self._execute_with_retry(method, full_path, normalized_path, **kwargs)
         except RetryError as e:
+            self._last_request_succeeded = False
             last_exc = e.last_attempt.exception()
             if last_exc is not None:
                 await self._circuit_breaker.record_failure(last_exc)
                 raise last_exc from e
             raise GitLabAPIError("Request failed after retries") from e
+        except GitLabAPIError:
+            self._last_request_succeeded = False
+            raise
+        self._last_request_succeeded = True
+        return response
 
     async def _check_circuit_breaker(self, method: str, path: str) -> None:
         """Check circuit breaker state before request."""
         try:
             await self._circuit_breaker.before_call()
         except CircuitOpenError as e:
+            self._last_request_succeeded = False
             log.warning(
                 "Request blocked by circuit breaker",
                 method=method,
@@ -757,7 +776,9 @@ class GitLabClient:
             response = await self._client.request(method, full_path, **kwargs)
         finally:
             duration = time.monotonic() - start_time
-            API_LATENCY.labels(method=method, endpoint=normalized_path).observe(duration)
+            API_LATENCY.labels(project_id=str(self._project_id), method=method, endpoint=normalized_path).observe(
+                duration
+            )
 
         await self._update_rate_limit_state(response)
 
@@ -994,6 +1015,7 @@ class GitLabClient:
             GitLabAPIError: On API errors.
         """
         log.debug("Listing merge requests with label", label=label, state=state)
+        self._project_access_verified = False
         data = await self.get_list(
             "/merge_requests",
             params={
@@ -1002,6 +1024,7 @@ class GitLabClient:
                 "per_page": 100,  # Max allowed by GitLab
             },
         )
+        self._project_access_verified = True
         mrs = [parse_merge_request(mr_data) for mr_data in data]
         log.debug(
             "Found merge requests with label",

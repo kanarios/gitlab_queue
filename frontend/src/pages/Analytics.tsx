@@ -49,7 +49,7 @@ const OUTCOME_COLORS: Record<string, string> = {
   timeout: '#3b82f6',
 };
 
-const Analytics: React.FC = () => {
+const Analytics: React.FC<{ projectId: number }> = ({ projectId }) => {
   // API data state
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
   const [hourlyData, setHourlyData] = useState<HourlyDataPoint[]>([]);
@@ -86,11 +86,13 @@ const Analytics: React.FC = () => {
 
       // Fetch all 4 endpoints in parallel
       const [summaryResult, hourlyResult, outcomesResult, failuresResult] = await Promise.all([
-        getSummary({ days: selectedDays, signal: controller.signal }),
-        getHourly({ hours, signal: controller.signal }),
-        getOutcomes({ days: selectedDays, signal: controller.signal }),
-        getFailureReasons({ days: selectedDays, signal: controller.signal }),
+        getSummary(projectId, { days: selectedDays, signal: controller.signal }),
+        getHourly(projectId, { hours, signal: controller.signal }),
+        getOutcomes(projectId, { days: selectedDays, signal: controller.signal }),
+        getFailureReasons(projectId, { days: selectedDays, signal: controller.signal }),
       ]);
+
+      if (controller.signal.aborted) return;
 
       // Handle each result independently (partial failure handling)
       if (summaryResult.success) {
@@ -123,7 +125,7 @@ const Analytics: React.FC = () => {
 
     fetchAllAnalytics();
     return () => controller.abort();
-  }, [selectedDays]);
+  }, [projectId, selectedDays]);
 
   // Transform hourly data for chart
   const chartData = useMemo(() => {

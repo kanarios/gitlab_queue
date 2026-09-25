@@ -21,7 +21,7 @@ import { useProjectConfig } from '../hooks/useProjectConfig';
 const DEFAULT_AVATAR = 'https://www.gravatar.com/avatar/?d=mp';
 const PER_PAGE = 20;
 
-const History: React.FC = () => {
+const History: React.FC<{ projectId: number }> = ({ projectId }) => {
   const { projectWebUrl } = useProjectConfig();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -30,6 +30,7 @@ const History: React.FC = () => {
   const [pagination, setPagination] = useState<Pagination | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   // Filter state - initialized from URL
   const [search, setSearch] = useState(() => searchParams.get('search') || '');
@@ -75,7 +76,7 @@ const History: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const result = await getHistory({
+      const result = await getHistory(projectId, {
         page,
         per_page: PER_PAGE,
         search: debouncedSearch || undefined,
@@ -83,12 +84,17 @@ const History: React.FC = () => {
         signal: controller.signal,
       });
 
+      if (controller.signal.aborted) return;
       if (result.success) {
+        const lastAvailablePage = Math.max(1, result.data.pagination.total_pages);
+        if (page > lastAvailablePage) {
+          setPage(lastAvailablePage);
+          return;
+        }
         setHistory(result.data.items);
         setPagination(result.data.pagination);
         setLoading(false);
-      } else if (result.error.type !== 'network_error' || !controller.signal.aborted) {
-        // Only set error if not aborted
+      } else {
         setError(result.error.message);
         setLoading(false);
       }
@@ -97,7 +103,7 @@ const History: React.FC = () => {
     fetchHistory();
 
     return () => controller.abort();
-  }, [page, debouncedSearch, statusFilter]);
+  }, [projectId, page, debouncedSearch, statusFilter, reloadKey]);
 
   const handleStatusChange = (value: string) => {
     setStatusFilter(value);
@@ -105,28 +111,9 @@ const History: React.FC = () => {
   };
 
   const handleRetry = () => {
-    // Trigger refetch by toggling a dependency
-    setPage((p) => p);
     setError(null);
     setLoading(true);
-    // Force refetch
-    const refetch = async () => {
-      const result = await getHistory({
-        page,
-        per_page: PER_PAGE,
-        search: debouncedSearch || undefined,
-        status: statusFilter || undefined,
-      });
-
-      if (result.success) {
-        setHistory(result.data.items);
-        setPagination(result.data.pagination);
-      } else {
-        setError(result.error.message);
-      }
-      setLoading(false);
-    };
-    refetch();
+    setReloadKey((key) => key + 1);
   };
 
   return (

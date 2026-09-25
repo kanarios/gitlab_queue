@@ -133,10 +133,17 @@ class AnalyticsJobProcessor:
             jobs=[job.id for job in self._scheduler.get_jobs()],
         )
 
-    def _create_uow(self) -> UnitOfWork:
-        """Create a UnitOfWork instance using the factory or default."""
+    def _project_ids(self) -> list[int]:
+        """Return configured project IDs, retaining legacy test/factory compatibility."""
+        projects = getattr(self.settings, "projects", None)
+        if projects is not None:
+            return [project.project_id for project in projects]
+        return [getattr(self.settings, "gitlab_project_id", 0)]
+
+    def _create_uow(self, project_id: int) -> UnitOfWork:
+        """Create a project-scoped UnitOfWork using the factory or default."""
         factory = self.uow_factory or UnitOfWork
-        return factory(self.database, auto_commit=True)
+        return factory(self.database, auto_commit=True, project_id=project_id)
 
     async def _save_hourly_snapshot(self) -> None:
         """Save hourly queue snapshot.
@@ -149,31 +156,30 @@ class AnalyticsJobProcessor:
         """
         log.debug("Running hourly snapshot job")
 
-        try:
-            async with self._create_uow() as uow:
-                # Get current queue depth
-                queue_depth = await uow.merge_requests.count_active()
+        for project_id in self._project_ids():
+            try:
+                async with self._create_uow(project_id) as uow:
+                    queue_depth = await uow.merge_requests.count_active()
+                    stats = await uow.history.get_stats_for_last_hour()
+                    await uow.analytics.save_hourly_snapshot(
+                        queue_depth=queue_depth,
+                        processed_count=stats.total_processed,
+                        success_count=stats.success_count,
+                        failed_count=stats.failed_count,
+                        avg_wait_time_seconds=(
+                            int(stats.avg_wait_time_seconds) if stats.avg_wait_time_seconds else None
+                        ),
+                    )
 
-                # Get stats for last hour from history
-                stats = await uow.history.get_stats_for_last_hour()
-
-                # Save snapshot
-                await uow.analytics.save_hourly_snapshot(
+                log.info(
+                    "Hourly snapshot saved",
+                    project_id=project_id,
                     queue_depth=queue_depth,
                     processed_count=stats.total_processed,
-                    success_count=stats.success_count,
-                    failed_count=stats.failed_count,
-                    avg_wait_time_seconds=(int(stats.avg_wait_time_seconds) if stats.avg_wait_time_seconds else None),
                 )
 
-            log.info(
-                "Hourly snapshot saved",
-                queue_depth=queue_depth,
-                processed_count=stats.total_processed,
-            )
-
-        except Exception:
-            log.exception("Failed to save hourly snapshot")
+            except Exception:
+                log.exception("Failed to save hourly snapshot", project_id=project_id)
 
     async def _aggregate_daily_stats(self) -> None:
         """Aggregate yesterday's statistics into daily table."""
@@ -181,27 +187,31 @@ class AnalyticsJobProcessor:
 
         log.debug("Running daily aggregation job", target_date=yesterday.isoformat())
 
-        try:
-            async with self._create_uow() as uow:
-                result = await uow.analytics.aggregate_daily(yesterday)
+        for project_id in self._project_ids():
+            try:
+                async with self._create_uow(project_id) as uow:
+                    result = await uow.analytics.aggregate_daily(yesterday)
 
                 if result:
                     log.info(
                         "Daily stats aggregated",
+                        project_id=project_id,
                         date=yesterday.isoformat(),
                         total_processed=result.total_processed,
                     )
                 else:
                     log.debug(
                         "Daily stats already exist",
+                        project_id=project_id,
                         date=yesterday.isoformat(),
                     )
 
-        except Exception:
-            log.exception(
-                "Failed to aggregate daily stats",
-                date=yesterday.isoformat(),
-            )
+            except Exception:
+                log.exception(
+                    "Failed to aggregate daily stats",
+                    project_id=project_id,
+                    date=yesterday.isoformat(),
+                )
 
     async def _cleanup_hourly_analytics(self) -> None:
         """Cleanup hourly analytics older than 30 days."""
@@ -209,23 +219,28 @@ class AnalyticsJobProcessor:
 
         log.debug("Running hourly analytics cleanup", retention_days=retention_days)
 
-        try:
-            async with self._create_uow() as uow:
-                deleted_count = await uow.analytics.cleanup_hourly(retention_days)
+        total_deleted = 0
+        for project_id in self._project_ids():
+            try:
+                async with self._create_uow(project_id) as uow:
+                    deleted_count = await uow.analytics.cleanup_hourly(retention_days)
 
-            if deleted_count > 0:
-                log.info(
-                    "Hourly analytics cleanup completed",
-                    deleted_count=deleted_count,
-                    retention_days=retention_days,
-                )
-                # Run VACUUM after significant cleanup
-                await self._vacuum_database()
-            else:
-                log.debug("No hourly analytics to cleanup")
+                total_deleted += deleted_count
+                if deleted_count > 0:
+                    log.info(
+                        "Hourly analytics cleanup completed",
+                        project_id=project_id,
+                        deleted_count=deleted_count,
+                        retention_days=retention_days,
+                    )
+                else:
+                    log.debug("No hourly analytics to cleanup", project_id=project_id)
 
-        except Exception:
-            log.exception("Failed to cleanup hourly analytics")
+            except Exception:
+                log.exception("Failed to cleanup hourly analytics", project_id=project_id)
+
+        if total_deleted > 0:
+            await self._vacuum_database()
 
     async def _cleanup_history(self) -> None:
         """Cleanup MR history older than 1 year."""
@@ -233,23 +248,28 @@ class AnalyticsJobProcessor:
 
         log.debug("Running history cleanup", retention_days=retention_days)
 
-        try:
-            async with self._create_uow() as uow:
-                deleted_count = await uow.history.cleanup_old_records(retention_days)
+        total_deleted = 0
+        for project_id in self._project_ids():
+            try:
+                async with self._create_uow(project_id) as uow:
+                    deleted_count = await uow.history.cleanup_old_records(retention_days)
 
-            if deleted_count > 0:
-                log.info(
-                    "History cleanup completed",
-                    deleted_count=deleted_count,
-                    retention_days=retention_days,
-                )
-                # Run VACUUM after significant cleanup
-                await self._vacuum_database()
-            else:
-                log.debug("No history records to cleanup")
+                total_deleted += deleted_count
+                if deleted_count > 0:
+                    log.info(
+                        "History cleanup completed",
+                        project_id=project_id,
+                        deleted_count=deleted_count,
+                        retention_days=retention_days,
+                    )
+                else:
+                    log.debug("No history records to cleanup", project_id=project_id)
 
-        except Exception:
-            log.exception("Failed to cleanup history")
+            except Exception:
+                log.exception("Failed to cleanup history", project_id=project_id)
+
+        if total_deleted > 0:
+            await self._vacuum_database()
 
     async def _vacuum_database(self) -> None:
         """Run VACUUM to reclaim space after deletions.

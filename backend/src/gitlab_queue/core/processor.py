@@ -274,7 +274,9 @@ class MergeProcessor:
             finally:
                 # Record MR processing duration
                 duration = (datetime.now(UTC) - start_time).total_seconds()
-                MR_DURATION.labels(result=result.value).observe(duration)
+                MR_DURATION.labels(project_id=str(self.settings.gitlab_project_id), result=result.value).observe(
+                    duration
+                )
 
     async def _handle_processing_error(
         self,
@@ -776,7 +778,9 @@ class MergeProcessor:
                     }
                 )
 
-            await self._websocket_manager.broadcast_queue_updated(queue_data, queue_stats)
+            await self._websocket_manager.broadcast_queue_updated(
+                queue_data, queue_stats, self.settings.gitlab_project_id
+            )
             log.debug(
                 "Broadcast queue update to WebSocket clients",
                 queue_length=len(queue_data),

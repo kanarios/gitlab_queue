@@ -15,12 +15,13 @@ from gitlab_queue.models.retorts import parse_webhook_event
 from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     from gitlab_queue.api.websocket import WebSocketManager
     from gitlab_queue.clients.gitlab import GitLabClient
     from gitlab_queue.config import Settings
     from gitlab_queue.core.notifier import MRNotifier
+    from gitlab_queue.core.project_components import ProjectComponents
     from gitlab_queue.core.queue import QueueManager
     from gitlab_queue.core.queue_position_notifier import QueuePositionNotifier
     from gitlab_queue.models.retry import RetryQueueItem
@@ -62,6 +63,7 @@ class WebhookRetryProcessor:
     mr_handler_factory: Callable[..., MRWebhookHandler] | None = None
     pipeline_handler_factory: Callable[..., PipelineWebhookHandler] | None = None
     event_parser: Callable[[dict[str, Any]], MergeRequestEvent | PipelineEvent | None] | None = None
+    project_components: Mapping[int, ProjectComponents] | None = None
 
     # Internal state
     _shutdown_event: asyncio.Event = field(default_factory=asyncio.Event, init=False)
@@ -101,8 +103,14 @@ class WebhookRetryProcessor:
         """Execute one iteration of the retry processing loop."""
         log.debug("Retry processor iteration started")
 
-        # Get events ready for retry
-        events = await self.retry_manager.get_events_ready_for_retry(limit=10)
+        # Fetch a bounded batch per project so a noisy project cannot starve
+        # retry processing for every other configured project.
+        if self.project_components is None:
+            events = await self.retry_manager.get_events_ready_for_retry(limit=10)
+        else:
+            events = []
+            for project_id in self.project_components:
+                events.extend(await self.retry_manager.get_events_ready_for_retry(limit=10, project_id=project_id))
 
         if not events:
             log.debug("No events ready for retry")
@@ -142,22 +150,36 @@ class WebhookRetryProcessor:
                 # Unknown event type - should not happen, move to DLQ
                 error_msg = f"Unknown event type: {item.event_type}"
                 log.warning(error_msg, retry_id=item.id)
-                await self.retry_manager.mark_retry_failed(item.id, error_msg)
+                await self.retry_manager.mark_retry_failed(item.id, error_msg, project_id=item.project_id)
                 return
+
+            if self.project_components is not None:
+                if item.project_id not in self.project_components:
+                    log.warning(
+                        "Dropping retry item for unconfigured project",
+                        retry_id=item.id,
+                        project_id=item.project_id,
+                    )
+                    await self.retry_manager.mark_retry_success(item.id, project_id=item.project_id)
+                    return
+                if event.project_id != item.project_id:
+                    error_msg = "Stored project_id does not match webhook payload"
+                    await self.retry_manager.mark_retry_failed(item.id, error_msg, project_id=item.project_id)
+                    return
 
             # Process based on event type
             if isinstance(event, MergeRequestEvent):
-                await self._handle_mr_event(event)
+                await self._handle_mr_event(event, item.project_id)
             elif isinstance(event, PipelineEvent):
-                await self._handle_pipeline_event(event)
+                await self._handle_pipeline_event(event, item.project_id)
             else:
                 error_msg = f"Unsupported event type: {type(event).__name__}"
                 log.warning(error_msg, retry_id=item.id)
-                await self.retry_manager.mark_retry_failed(item.id, error_msg)
+                await self.retry_manager.mark_retry_failed(item.id, error_msg, project_id=item.project_id)
                 return
 
             # Success - remove from retry queue
-            await self.retry_manager.mark_retry_success(item.id)
+            await self.retry_manager.mark_retry_success(item.id, project_id=item.project_id)
             log.info(
                 "Retry succeeded",
                 retry_id=item.id,
@@ -167,7 +189,7 @@ class WebhookRetryProcessor:
 
         except Exception as e:
             # Failed - schedule next retry or move to DLQ
-            moved_to_dlq = await self.retry_manager.mark_retry_failed(item.id, str(e))
+            moved_to_dlq = await self.retry_manager.mark_retry_failed(item.id, str(e), project_id=item.project_id)
 
             if moved_to_dlq:
                 log.warning(
@@ -190,9 +212,18 @@ class WebhookRetryProcessor:
             async with self._processing_lock:
                 self._processing_count -= 1
 
-    @property
-    def _handler_kwargs(self) -> dict[str, Any]:
+    def _handler_kwargs(self, project_id: int) -> dict[str, Any]:
         """Common kwargs for webhook handler construction."""
+        if self.project_components is not None:
+            components = self.project_components[project_id]
+            return {
+                "settings": components.settings,
+                "gitlab_client": components.gitlab_client,
+                "queue_manager": self.queue_manager,
+                "notifier": components.notifier,
+                "position_notifier": components.position_notifier,
+                "websocket_manager": self.websocket_manager,
+            }
         return {
             "settings": self.settings,
             "gitlab_client": self.gitlab_client,
@@ -202,28 +233,30 @@ class WebhookRetryProcessor:
             "websocket_manager": self.websocket_manager,
         }
 
-    def _create_mr_handler(self) -> MRWebhookHandler:
+    def _create_mr_handler(self, project_id: int) -> MRWebhookHandler:
+        handler_kwargs = self._handler_kwargs(project_id)
         if self.mr_handler_factory is not None:
-            return self.mr_handler_factory(**self._handler_kwargs)
+            return self.mr_handler_factory(**handler_kwargs)
         from gitlab_queue.webhooks.handlers import MRWebhookHandler
 
-        return MRWebhookHandler(**self._handler_kwargs)
+        return MRWebhookHandler(**handler_kwargs)
 
-    def _create_pipeline_handler(self) -> PipelineWebhookHandler:
+    def _create_pipeline_handler(self, project_id: int) -> PipelineWebhookHandler:
+        handler_kwargs = self._handler_kwargs(project_id)
         if self.pipeline_handler_factory is not None:
-            return self.pipeline_handler_factory(**self._handler_kwargs)
+            return self.pipeline_handler_factory(**handler_kwargs)
         from gitlab_queue.webhooks.handlers import PipelineWebhookHandler
 
-        return PipelineWebhookHandler(**self._handler_kwargs)
+        return PipelineWebhookHandler(**handler_kwargs)
 
-    async def _handle_mr_event(self, event: MergeRequestEvent) -> None:
+    async def _handle_mr_event(self, event: MergeRequestEvent, project_id: int = 0) -> None:
         """Handle a merge request webhook event."""
-        handler = self._create_mr_handler()
+        handler = self._create_mr_handler(project_id)
         await handler.handle(event)
 
-    async def _handle_pipeline_event(self, event: PipelineEvent) -> None:
+    async def _handle_pipeline_event(self, event: PipelineEvent, project_id: int = 0) -> None:
         """Handle a pipeline webhook event."""
-        handler = self._create_pipeline_handler()
+        handler = self._create_pipeline_handler(project_id)
         await handler.handle(event)
 
     async def _interruptible_sleep(self, seconds: float) -> bool:

@@ -8,7 +8,7 @@ from pathlib import Path
 import aiosqlite
 import vedro
 
-from gitlab_queue.db.migrations import _stamp_legacy_database_if_needed
+from gitlab_queue.db.migrations import _stamp_legacy_database_if_needed, get_current_revision
 
 
 class Scenario(vedro.Scenario):
@@ -31,7 +31,8 @@ class Scenario(vedro.Scenario):
                     queued_at TEXT NOT NULL,
                     title TEXT NOT NULL,
                     author_name TEXT NOT NULL,
-                    author_username TEXT NOT NULL
+                    author_username TEXT NOT NULL,
+                    project_id INTEGER NOT NULL DEFAULT 0
                 )
                 """
             )
@@ -48,6 +49,8 @@ class Scenario(vedro.Scenario):
 
     async def when_stamp_legacy_database_is_called(self):
         self.stamped = await _stamp_legacy_database_if_needed(self.database_url)
+        self.revision = await get_current_revision(self.database_url)
 
     def then_it_should_not_stamp(self):
         assert self.stamped is False
+        assert self.revision == "some_revision"

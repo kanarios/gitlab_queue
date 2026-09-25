@@ -35,6 +35,7 @@ export type { AnalyticsParams, HourlyParams } from './analytics';
 
 // Queue API
 export { getQueue, getQueueStats } from './queue';
+export { getProjects } from './projects';
 
 // WebSocket
 export { WebSocketManager, wsManager } from './websocket';

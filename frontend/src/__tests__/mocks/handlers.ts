@@ -33,10 +33,20 @@ export const mockMergeRequest = {
 };
 
 export const mockQueueStats = {
-  total: 3,
-  queued: 2,
-  processing: 1,
-  avg_wait_time_seconds: 300,
+  current: {
+    total: 3,
+    by_status: { queued: 2, rebasing: 1 },
+  },
+  historical: {
+    window_days: 7,
+    merged_count: 10,
+    failed_count: 2,
+    success_rate_percent: 83.3,
+  },
+  timing: {
+    avg_wait_seconds: 300,
+    avg_processing_seconds: 600,
+  },
 };
 
 export const mockHistoryItem = {
@@ -135,17 +145,27 @@ export const handlers = [
     });
   }),
 
-  // Queue endpoints
-  http.get('/api/queue', () => {
-    return HttpResponse.json([mockMergeRequest]);
+  // Project endpoints
+  http.get('/api/projects', () => {
+    return HttpResponse.json({
+      projects: [
+        { project_id: 1, web_url: 'https://gitlab.example.com/group/project', name: 'group/project' },
+        { project_id: 2, web_url: 'https://gitlab.example.com/group/second', name: 'group/second' },
+      ],
+    });
   }),
 
-  http.get('/api/queue/stats', () => {
+  // Queue endpoints
+  http.get('/api/projects/:projectId/queue/active', () => {
+    return HttpResponse.json({ items: [mockMergeRequest], count: 1 });
+  }),
+
+  http.get('/api/projects/:projectId/queue/stats', () => {
     return HttpResponse.json(mockQueueStats);
   }),
 
   // History endpoints
-  http.get('/api/history', ({ request }) => {
+  http.get('/api/projects/:projectId/history', ({ request }) => {
     const url = new URL(request.url);
     const page = parseInt(url.searchParams.get('page') ?? '1');
     const perPage = parseInt(url.searchParams.get('per_page') ?? '10');
@@ -161,25 +181,25 @@ export const handlers = [
     });
   }),
 
-  http.get('/api/history/:iid', ({ params }) => {
+  http.get('/api/projects/:projectId/history/:iid', ({ params }) => {
     const iid = parseInt(params.iid as string);
     return HttpResponse.json({ ...mockHistoryItem, mr_iid: iid });
   }),
 
   // Analytics endpoints
-  http.get('/api/analytics/summary', () => {
+  http.get('/api/projects/:projectId/analytics/summary', () => {
     return HttpResponse.json(mockAnalyticsSummary);
   }),
 
-  http.get('/api/analytics/hourly', () => {
+  http.get('/api/projects/:projectId/analytics/hourly', () => {
     return HttpResponse.json(mockAnalyticsHourly);
   }),
 
-  http.get('/api/analytics/outcomes', () => {
+  http.get('/api/projects/:projectId/analytics/outcomes', () => {
     return HttpResponse.json(mockAnalyticsOutcomes);
   }),
 
-  http.get('/api/analytics/failure-reasons', () => {
+  http.get('/api/projects/:projectId/analytics/failure-reasons', () => {
     return HttpResponse.json(mockFailureReasons);
   }),
 
