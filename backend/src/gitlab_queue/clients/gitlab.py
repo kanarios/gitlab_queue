@@ -971,11 +971,13 @@ class GitLabClient:
     # Merge Request Operations (Task 6)
     # =========================================================================
 
-    async def get_mr(self, iid: int) -> MergeRequest:
+    async def get_mr(self, iid: int, *, include_diverged_commits_count: bool = False) -> MergeRequest:
         """Get a merge request by its IID.
 
         Args:
             iid: Internal ID (project-scoped MR number).
+            include_diverged_commits_count: Ask GitLab to compute how many commits
+                the source branch is behind the target (extra Gitaly work, so opt-in).
 
         Returns:
             MergeRequest model with current MR data.
@@ -985,7 +987,8 @@ class GitLabClient:
             GitLabAPIError: On other API errors.
         """
         log.debug("Fetching merge request", mr_iid=iid)
-        data = await self.get(f"/merge_requests/{iid}")
+        params = {"include_diverged_commits_count": "true"} if include_diverged_commits_count else None
+        data = await self.get(f"/merge_requests/{iid}", params=params)
         mr = parse_merge_request(data)
         log.debug(
             "Fetched merge request",

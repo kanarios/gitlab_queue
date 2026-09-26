@@ -14,6 +14,7 @@ from gitlab_queue.core.polling import PollingConfig, PollOutcome, PollStatus
 from gitlab_queue.core.processor import MergeProcessor
 from gitlab_queue.core.rebase_coordinator import PipelineWaitState
 from gitlab_queue.core.rebase_during_testing import RebaseDuringTestingContext
+from gitlab_queue.core.rebase_handler import RebaseHandler
 from gitlab_queue.core.types import ProcessingContext
 from gitlab_queue.models.queue_item import QueueItem
 from scenarios.fakes import (
@@ -203,6 +204,19 @@ def create_test_pipeline_handler(**overrides: object) -> PipelineHandler:
     }
     defaults.update(overrides)
     return PipelineHandler(**defaults)
+
+
+def create_test_rebase_handler(**overrides: object) -> RebaseHandler:
+    """Create a RebaseHandler with fake collaborators and a non-sleeping poll function."""
+    defaults: dict[str, object] = {
+        "gitlab_client": FakeGitLabClient(),
+        "notifier": FakeNotifier(),
+        "settings": FakeSettings(),
+        "shutdown_event": asyncio.Event(),
+        "poll_fn": instant_poll,
+    }
+    defaults.update(overrides)
+    return RebaseHandler(**defaults)
 
 
 async def instant_poll(

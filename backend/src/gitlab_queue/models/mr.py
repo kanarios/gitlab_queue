@@ -44,6 +44,9 @@ class MergeRequest:
         merge_error: Error message if the last merge attempt failed, e.g. "Rebase failed"
         detailed_merge_status: Granular merge readiness status from GitLab API (v15.6+),
             e.g. "mergeable", "checking", "need_rebase", "broken_status"
+        diverged_commits_count: Number of commits the source branch is behind
+            the target branch. Only returned by GitLab when requested with
+            include_diverged_commits_count=true; None means unknown.
     """
 
     iid: int
@@ -61,6 +64,7 @@ class MergeRequest:
     web_url: str | None = None
     merge_error: str | None = None
     detailed_merge_status: str | None = None
+    diverged_commits_count: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

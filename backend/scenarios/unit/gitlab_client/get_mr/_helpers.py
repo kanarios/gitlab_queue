@@ -14,9 +14,10 @@ def create_mr_api_response(
     merge_status: str = "can_be_merged",
     has_conflicts: bool = False,
     rebase_in_progress: bool = False,
+    diverged_commits_count: int | None = None,
 ) -> dict:
     """Create a minimal GitLab MR API response for testing."""
-    return {
+    data = {
         "iid": iid,
         "title": title,
         "state": state,
@@ -35,3 +36,7 @@ def create_mr_api_response(
         },
         "web_url": f"https://gitlab.com/project/-/merge_requests/{iid}",
     }
+    # GitLab omits the key unless include_diverged_commits_count=true was sent
+    if diverged_commits_count is not None:
+        data["diverged_commits_count"] = diverged_commits_count
+    return data
