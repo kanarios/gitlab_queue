@@ -974,6 +974,10 @@ class GitLabClient:
     async def get_mr(self, iid: int, *, include_diverged_commits_count: bool = False) -> MergeRequest:
         """Get a merge request by its IID.
 
+        Always sends include_rebase_in_progress=true: GitLab omits
+        rebase_in_progress otherwise, which would make every rebase look
+        finished. Answering it is a cheap Sidekiq job-status lookup.
+
         Args:
             iid: Internal ID (project-scoped MR number).
             include_diverged_commits_count: Ask GitLab to compute how many commits
@@ -987,7 +991,9 @@ class GitLabClient:
             GitLabAPIError: On other API errors.
         """
         log.debug("Fetching merge request", mr_iid=iid)
-        params = {"include_diverged_commits_count": "true"} if include_diverged_commits_count else None
+        params = {"include_rebase_in_progress": "true"}
+        if include_diverged_commits_count:
+            params["include_diverged_commits_count"] = "true"
         data = await self.get(f"/merge_requests/{iid}", params=params)
         mr = parse_merge_request(data)
         log.debug(

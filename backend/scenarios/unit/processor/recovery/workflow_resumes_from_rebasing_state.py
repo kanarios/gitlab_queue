@@ -1,8 +1,9 @@
 """Test _execute_workflow resumes from rebasing state.
 
-When the processor finds an MR with current_state "rebasing", it should
-capture the pre-rebase SHA, then proceed through rebase wait, pipeline,
-and merge steps. This test configures fakes so the full workflow succeeds.
+When the processor finds an MR with current_state "rebasing" whose rebase
+is still running, it should capture the pre-rebase SHA, then wait for that
+rebase (without starting another) and proceed through pipeline and merge
+steps. This test configures fakes so the full workflow succeeds.
 """
 
 from __future__ import annotations
@@ -29,9 +30,9 @@ class Scenario(vedro.Scenario):
 
     def given_processor_with_mr_in_rebasing_state(self):
         self.gitlab_client = FakeGitLabClient()
-        # First get_mr (pre-rebase state capture) returns pre-rebase SHA
+        # First get_mr (pre-rebase state capture): rebase still running, pre-rebase SHA
         self.gitlab_client.mr_response_sequence = [
-            create_mr(iid=42, sha="old_sha", labels=["merge_queue"]),
+            create_mr(iid=42, sha="old_sha", labels=["merge_queue"], rebase_in_progress=True),
         ]
         # Subsequent get_mr calls return post-rebase SHA
         self.gitlab_client.mr_responses[42] = create_mr(
@@ -39,7 +40,7 @@ class Scenario(vedro.Scenario):
             sha="new_sha",
             labels=["merge_queue"],
         )
-        # Rebase is already complete
+        # Rebase completes on the first status check
         self.gitlab_client.rebase_status = (False, False)
         # Pipeline with post-rebase SHA and success status
         self.gitlab_client.latest_pipeline_response = create_pipeline(
@@ -70,3 +71,6 @@ class Scenario(vedro.Scenario):
 
     def and_rebase_complete_was_triggered(self):
         assert len(self.sm.rebase_complete_calls) == 1
+
+    def and_no_new_rebase_was_started(self):
+        assert self.gitlab_client.rebase_calls == []

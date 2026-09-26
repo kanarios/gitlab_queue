@@ -22,7 +22,6 @@ class Scenario(vedro.Scenario):
     @params("divergence is unknown", {"diverged_commits_count": None})
     @params("MR has conflicts", {"diverged_commits_count": 0, "has_conflicts": True})
     @params("GitLab says need_rebase", {"diverged_commits_count": 0, "detailed_merge_status": "need_rebase"})
-    @params("rebase is in progress", {"diverged_commits_count": 0, "rebase_in_progress": True})
     @params("SHA is empty", {"diverged_commits_count": 0, "sha": ""})
     def __init__(self, case: str, mr_fields: dict):
         self.case = case

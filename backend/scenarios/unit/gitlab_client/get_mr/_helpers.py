@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+import json
+from typing import TYPE_CHECKING
+
+import httpx
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 
 def create_mr_api_response(
     iid: int = 42,
@@ -40,3 +48,23 @@ def create_mr_api_response(
     if diverged_commits_count is not None:
         data["diverged_commits_count"] = diverged_commits_count
     return data
+
+
+def rebasing_mr_handler(iid: int = 42) -> Callable[[httpx.Request], httpx.Response]:
+    """Serve an MR with a running rebase the way GitLab does.
+
+    GitLab includes rebase_in_progress only for requests carrying
+    include_rebase_in_progress=true; without it the key is absent.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        data = create_mr_api_response(iid=iid, rebase_in_progress=True)
+        if request.url.params.get("include_rebase_in_progress") != "true":
+            del data["rebase_in_progress"]
+        return httpx.Response(
+            status_code=200,
+            content=json.dumps(data).encode(),
+            headers={"content-type": "application/json"},
+        )
+
+    return handler
