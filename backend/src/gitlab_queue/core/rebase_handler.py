@@ -33,20 +33,6 @@ QUICK_REBASE_POLL_INTERVAL_SECONDS = 3
 
 # Timeouts (seconds)
 QUICK_REBASE_TIMEOUT_SECONDS = 60
-DEFAULT_POST_REBASE_PIPELINE_WAIT_SECONDS = 60
-# How many poll cycles to skip a stale (same-ID, success) pipeline before accepting it.
-# In fast-forward rebases GitLab may not update the pipeline ID immediately.
-STALE_PIPELINE_GRACE_POLLS = 2
-
-# Failed/canceled pipeline statuses to skip in the fast-forward case
-# (SHA unchanged after rebase — success pipeline is still valid).
-TERMINAL_FAILED_PIPELINE_STATUSES = frozenset(("canceled", "failed"))
-
-# ALL terminal pipeline statuses to skip when SHA changed after rebase.
-# After rebase, ANY terminal pipeline (including success) is stale —
-# it was started before the rebase and doesn't reflect the new code.
-TERMINAL_PIPELINE_STATUSES = frozenset(("canceled", "failed", "success"))
-
 # Pipeline statuses the testing phase can follow to a result when reusing an
 # existing pipeline. Anything else (failed, canceled, canceling, skipped,
 # manual, blocked, ...) would fail the MR or stall it, so a new one is started.
@@ -126,6 +112,27 @@ class RebaseHandler:
         # Wait for rebase to complete
         return await self.wait_for_rebase(ctx)
 
+    async def resume_rebase(self, ctx: ProcessingContext) -> ProcessingResult:
+        """Continue an MR found in the rebasing state (e.g. after a restart).
+
+        The rebase may have finished before the restart, leaving the MR
+        up-to-date with an unchanged SHA from now on: then testing starts
+        with the current pipeline instead of waiting for a SHA change.
+
+        Args:
+            ctx: Processing context.
+
+        Returns:
+            ProcessingResult indicating outcome.
+        """
+        mr, pipeline = await self.capture_pre_rebase_state(ctx)
+
+        if _is_up_to_date(mr):
+            log.info("Resumed MR is already up-to-date", mr_iid=ctx.mr_iid, sha=mr.sha[:8])
+            return await self._start_testing_without_rebase(ctx, mr, pipeline)
+
+        return await self.wait_for_rebase(ctx)
+
     async def wait_for_rebase(self, ctx: ProcessingContext) -> ProcessingResult:
         """Poll rebase status until complete or timeout.
 
@@ -165,12 +172,18 @@ class RebaseHandler:
                     mr_iid,
                     old_sha,
                     old_pipeline_id=ctx.rebase_ctx.old_pipeline_id,
-                    timeout_seconds=self.settings.post_rebase_pipeline_wait_seconds,
                 )
 
-                if pipeline and pipeline.sha == new_sha:
+                if pipeline:
                     await self._enter_testing(ctx, pipeline, new_sha)
                     return PollStatus.DONE, ProcessingResult.SUCCESS
+
+                if new_sha == old_sha and not self.shutdown_event.is_set():
+                    # SHA never moved: the rebase was a no-op, so GitLab won't start a pipeline
+                    log.info("Rebase did not change SHA, treating MR as up-to-date", mr_iid=mr_iid)
+                    mr = await self.gitlab_client.get_mr(mr_iid)
+                    current_pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
+                    return PollStatus.DONE, await self._start_testing_without_rebase(ctx, mr, current_pipeline)
 
                 log.debug(
                     "Waiting for pipeline with correct SHA after rebase",
@@ -215,133 +228,39 @@ class RebaseHandler:
         old_pipeline_id: int | None = None,
         timeout_seconds: int | None = None,
     ) -> tuple[Pipeline | None, str]:
-        """Wait for a new pipeline after rebase with the correct SHA.
+        """Wait for a pipeline on the MR's new SHA after rebase.
 
-        After rebase completes, GitLab may still return an old pipeline
-        due to API caching or the new pipeline not yet being created.
-        This method waits until we find a pipeline whose SHA matches
-        the MR's current (post-rebase) SHA.
-
-        In the fast-forward case (SHA unchanged after rebase), GitLab does
-        not create a new pipeline automatically. If the existing pipeline is
-        terminal (canceled/failed) or absent, this method creates one via
-        create_pipeline(). A success pipeline is considered valid and reused.
+        After a rebase GitLab may briefly keep reporting the old SHA and
+        pipeline (API caching, pipeline not created yet), so this waits until
+        the SHA changes and a pipeline on the new SHA shows up.
 
         Args:
             mr_iid: MR IID to wait for.
             old_sha: SHA before rebase started.
             old_pipeline_id: Pipeline ID before rebase (to detect stale responses).
-            timeout_seconds: Maximum time to wait (default 60s).
+            timeout_seconds: Maximum time to wait (default: post_rebase_pipeline_wait_seconds).
 
         Returns:
-            Tuple of (pipeline, new_sha). pipeline is None on shutdown or
-            when the timeout fallback detects a stale pipeline SHA mismatch.
+            Tuple of (pipeline, current_sha). pipeline is None on shutdown or
+            when no pipeline on the new SHA appeared in time; current_sha
+            equals old_sha if the SHA never changed.
         """
-        if timeout_seconds is None:
-            timeout_seconds = DEFAULT_POST_REBASE_PIPELINE_WAIT_SECONDS
-
-        stale_skip_count = 0
 
         async def check_pipeline() -> tuple[PollStatus, tuple[Pipeline | None, str] | None]:
             """Poll for new pipeline on updated SHA after rebase."""
-            nonlocal stale_skip_count
             mr = await self.gitlab_client.get_mr(mr_iid)
 
             if mr.rebase_in_progress:
                 return PollStatus.CONTINUE, None
 
-            new_sha = mr.sha
+            if mr.sha == old_sha:
+                log.debug("SHA not updated after rebase yet", mr_iid=mr_iid, sha=old_sha[:8])
+                return PollStatus.CONTINUE, None
+
             pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
 
-            # Fast-forward case: SHA unchanged (no commits ahead of target)
-            if new_sha == old_sha:
-                if pipeline and pipeline.sha == new_sha:
-                    if pipeline.status in TERMINAL_FAILED_PIPELINE_STATUSES:
-                        log.info(
-                            "Creating new pipeline: fast-forward rebase, pre-existing terminal pipeline",
-                            mr_iid=mr_iid,
-                            pipeline_id=pipeline.id,
-                            pipeline_status=pipeline.status,
-                        )
-                        return await self._try_create_pipeline(
-                            mr.source_branch,
-                            mr_iid,
-                            new_sha,
-                            fallback_pipeline_id=pipeline.id,
-                        )
-                    # A success pipeline with matching old_pipeline_id may be stale
-                    # (race condition: SHA not yet updated by GitLab API).
-                    # canceled/failed are handled above; only success reaches here.
-                    # Non-terminal (running/pending) pipeline is always valid.
-                    if old_pipeline_id is not None and pipeline.id == old_pipeline_id and pipeline.status == "success":
-                        stale_skip_count += 1
-                        if stale_skip_count < STALE_PIPELINE_GRACE_POLLS:
-                            log.info(
-                                "Skipping possibly stale pipeline, waiting for SHA update",
-                                mr_iid=mr_iid,
-                                pipeline_id=pipeline.id,
-                                old_pipeline_id=old_pipeline_id,
-                                pipeline_status=pipeline.status,
-                                skip_count=stale_skip_count,
-                            )
-                            return PollStatus.CONTINUE, None
-                        log.info(
-                            "Accepting pipeline after grace period in fast-forward case",
-                            mr_iid=mr_iid,
-                            pipeline_id=pipeline.id,
-                            pipeline_status=pipeline.status,
-                            skip_count=stale_skip_count,
-                        )
-                        return PollStatus.DONE, (pipeline, new_sha)
-                    # When pipeline matches old_pipeline_id and is non-terminal,
-                    # check if GitLab created a newer pipeline (re-processing case)
-                    if old_pipeline_id is not None and pipeline.id == old_pipeline_id:
-                        all_pipelines = await self.gitlab_client.get_mr_pipelines(mr_iid)
-                        newer = [p for p in all_pipelines if p.sha == new_sha and p.id > old_pipeline_id]
-                        if newer:
-                            best = max(newer, key=lambda p: p.id)
-                            log.info(
-                                "Found newer pipeline in fast-forward re-processing",
-                                mr_iid=mr_iid,
-                                old_pipeline_id=old_pipeline_id,
-                                new_pipeline_id=best.id,
-                                new_status=best.status,
-                            )
-                            return PollStatus.DONE, (best, new_sha)
-                        # No newer pipeline yet — grace period to let GitLab create one
-                        stale_skip_count += 1
-                        if stale_skip_count < STALE_PIPELINE_GRACE_POLLS:
-                            log.info(
-                                "Waiting for possible newer pipeline in fast-forward case",
-                                mr_iid=mr_iid,
-                                pipeline_id=pipeline.id,
-                                pipeline_status=pipeline.status,
-                                skip_count=stale_skip_count,
-                            )
-                            return PollStatus.CONTINUE, None
-                        log.info(
-                            "Accepting old pipeline after grace period (no newer found)",
-                            mr_iid=mr_iid,
-                            pipeline_id=pipeline.id,
-                            pipeline_status=pipeline.status,
-                            skip_count=stale_skip_count,
-                        )
-
-                    return PollStatus.DONE, (pipeline, new_sha)
-                # No valid pipeline in fast-forward case: create one (GitLab won't create it automatically)
-                log.info(
-                    "Creating new pipeline: fast-forward rebase, no valid pipeline found",
-                    mr_iid=mr_iid,
-                )
-                return await self._try_create_pipeline(
-                    mr.source_branch,
-                    mr_iid,
-                    new_sha,
-                    fallback_pipeline_id=old_pipeline_id,
-                )
-
-            # SHA changed — skip stale pipeline from before rebase (race condition)
-            if pipeline and old_pipeline_id is not None and pipeline.id == old_pipeline_id:
+            # Skip stale pipeline from before rebase (race condition)
+            if pipeline and pipeline.id == old_pipeline_id:
                 log.info(
                     "Skipping stale pipeline from before rebase",
                     mr_iid=mr_iid,
@@ -350,22 +269,21 @@ class RebaseHandler:
                 )
                 return PollStatus.CONTINUE, None
 
-            # SHA changed, need pipeline with new SHA
-            if pipeline and pipeline.sha == new_sha:
+            if pipeline and pipeline.sha == mr.sha:
                 log.info(
                     "Found pipeline with new SHA after rebase",
                     mr_iid=mr_iid,
                     pipeline_id=pipeline.id,
                     pipeline_status=pipeline.status,
                     old_sha=old_sha[:8],
-                    new_sha=new_sha[:8],
+                    new_sha=mr.sha[:8],
                 )
-                return PollStatus.DONE, (pipeline, new_sha)
+                return PollStatus.DONE, (pipeline, mr.sha)
 
             return PollStatus.CONTINUE, None
 
         config = PollingConfig(
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=timeout_seconds or self.settings.post_rebase_pipeline_wait_seconds,
             poll_interval_seconds=self.settings.pipeline_poll_interval_seconds,
             operation_name="post_rebase_pipeline",
         )
@@ -381,28 +299,23 @@ class RebaseHandler:
 
         # Timeout - return current state with SHA validation
         mr = await self.gitlab_client.get_mr(mr_iid)
-        new_sha = mr.sha
+        if mr.sha == old_sha:
+            log.warning("Timeout waiting for SHA change after rebase", mr_iid=mr_iid, sha=old_sha[:8])
+            return None, old_sha
+
         pipeline = await self.gitlab_client.get_latest_mr_pipeline(mr_iid)
         log.warning(
             "Timeout waiting for post-rebase pipeline",
             mr_iid=mr_iid,
             old_sha=old_sha[:8],
-            current_sha=new_sha[:8] if new_sha else "unknown",
+            current_sha=mr.sha[:8],
             pipeline_id=pipeline.id if pipeline else None,
             pipeline_sha=pipeline.sha[:8] if pipeline and pipeline.sha else None,
         )
-
         # Don't return stale pipeline if SHA doesn't match
-        if pipeline and pipeline.sha != new_sha:
-            log.warning(
-                "Timeout with stale pipeline - SHA mismatch",
-                mr_iid=mr_iid,
-                pipeline_sha=pipeline.sha[:8] if pipeline.sha else "unknown",
-                expected_sha=new_sha[:8] if new_sha else "unknown",
-            )
-            return None, new_sha
-
-        return pipeline, new_sha
+        if pipeline and pipeline.sha == mr.sha:
+            return pipeline, mr.sha
+        return None, mr.sha
 
     async def _try_create_pipeline(
         self,

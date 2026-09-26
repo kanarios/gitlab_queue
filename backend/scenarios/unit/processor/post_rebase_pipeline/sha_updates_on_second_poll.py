@@ -1,9 +1,8 @@
 """Test wait_for_post_rebase_pipeline handles race condition when SHA updates on second poll.
 
-Race condition scenario: first poll sees old SHA (fast-forward path), skips stale pipeline.
-Second poll sees updated SHA → enters SHA-changed branch → returns new pipeline.
-
-This test confirms the grace period counter does NOT interfere with the race condition path.
+Race condition scenario (#46): right after a real rebase GitLab still reports the
+old SHA. The first poll keeps waiting instead of looking at pipelines for the
+old SHA; the second poll sees the updated SHA and returns the new pipeline.
 """
 
 from __future__ import annotations
@@ -20,7 +19,7 @@ from .._helpers import (
 
 
 class Scenario(vedro.Scenario):
-    subject = "wait_for_post_rebase_pipeline handles race condition when SHA updates on second poll"
+    subject = "wait_for_post_rebase_pipeline waits while SHA is not updated after rebase"
 
     def given_processor_with_sha_update_on_second_poll(self):
         self.old_sha = "old_sha_abc"
@@ -38,10 +37,7 @@ class Scenario(vedro.Scenario):
         ]
 
         self.new_pipeline = create_pipeline(id=200, sha=self.new_sha, status="running")
-        self.processor.gitlab_client.latest_pipeline_sequence = [
-            create_pipeline(id=self.old_pipeline_id, sha=self.old_sha, status="success"),
-            self.new_pipeline,
-        ]
+        self.processor.gitlab_client.latest_pipeline_sequence = [self.new_pipeline]
 
     async def when_wait_for_post_rebase_pipeline_is_called(self):
         self.returned_pipeline, self.returned_sha = await self.processor._rebase_handler.wait_for_post_rebase_pipeline(
@@ -56,3 +52,6 @@ class Scenario(vedro.Scenario):
 
     def then_returned_sha_is_new(self):
         assert self.returned_sha == self.new_sha
+
+    def then_no_pipeline_was_created_for_stale_sha(self):
+        assert self.processor.gitlab_client.create_pipeline_calls == []

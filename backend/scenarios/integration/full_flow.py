@@ -11,6 +11,7 @@ Note: The following scenarios have been extracted to separate files:
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from scenarios.contexts.sqlite_client import initialized_test_database
@@ -70,15 +71,14 @@ async def full_flow_with_failures_and_recovery():
                 return sm
 
             # MR 400: flaky pipeline (fail → job retry → success → merge)
+            # MR is already up-to-date with target, so the rebase is skipped.
             # Pipeline sequence consumed by:
-            #   1. capture_pre_rebase_state → old pipeline before rebase
-            #   2. post-rebase wait (fast-forward): sees "running" → returns it
-            #   3. wait_for_pipeline poll 1: sees "failed" → job retry
-            #   4. wait_for_pipeline poll 2: sees "success" → merge
+            #   1. capture_pre_rebase_state → "running" pipeline, reused for testing
+            #   2. wait_for_pipeline poll 1: sees "failed" → job retry
+            #   3. wait_for_pipeline poll 2: sees "success" → merge
             gitlab_400 = FakeGitLabClient(
-                mr_responses={400: mr_400},
+                mr_responses={400: replace(mr_400, diverged_commits_count=0)},
                 latest_pipeline_sequence=[
-                    create_pipeline(id=7999, status="success", sha="flaky123"),
                     create_pipeline(id=8000, status="running", sha="flaky123"),
                     create_pipeline(id=8000, status="failed", sha="flaky123"),
                     create_pipeline(id=8000, status="success", sha="flaky123"),
@@ -130,6 +130,7 @@ async def full_flow_with_failures_and_recovery():
             assert results[0][1] == ProcessingResult.SUCCESS
             assert len(gitlab_400.merge_calls) == 1
             assert len(gitlab_400.retry_job_calls) == 1
+            assert gitlab_400.rebase_calls == []
 
         with then("conflict MR is detected and fails"):
             assert results[1][1] == ProcessingResult.CONFLICT

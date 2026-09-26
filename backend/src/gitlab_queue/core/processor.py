@@ -349,10 +349,8 @@ class MergeProcessor:
             current_state = "testing"
 
         if current_state == "rebasing":
-            # Capture pre-rebase SHA if not already set (e.g., restart recovery)
-            await self._capture_pre_rebase_state(ctx)
-            # Wait for rebase to complete
-            result = await self._wait_for_rebase(ctx)
+            # Resume after restart: rebase may be done already or still running
+            result = await self._resume_rebase(ctx)
             if result != ProcessingResult.SUCCESS:
                 return result
             current_state = "testing"
@@ -565,8 +563,8 @@ class MergeProcessor:
                         error=str(e),
                     )
 
-    async def _capture_pre_rebase_state(self, ctx: ProcessingContext) -> None:
-        await self._rebase_handler.capture_pre_rebase_state(ctx)
+    async def _resume_rebase(self, ctx: ProcessingContext) -> ProcessingResult:
+        return await self._rebase_handler.resume_rebase(ctx)
 
     async def _interruptible_sleep(self, seconds: float) -> bool:
         """Sleep that can be interrupted by shutdown event."""

@@ -1,6 +1,6 @@
-"""Test _wait_for_post_rebase_pipeline uses DEFAULT_POST_REBASE_PIPELINE_WAIT_SECONDS when timeout_seconds is None.
+"""Test wait_for_post_rebase_pipeline works without an explicit timeout_seconds.
 
-Line 498: when timeout_seconds is not provided, defaults to DEFAULT_POST_REBASE_PIPELINE_WAIT_SECONDS.
+When timeout_seconds is not provided, settings.post_rebase_pipeline_wait_seconds is used.
 """
 
 from __future__ import annotations
@@ -29,11 +29,11 @@ class Scenario(vedro.Scenario):
         self.old_sha = "old_sha"
 
     async def when_called_without_timeout_seconds(self):
-        # Call WITHOUT timeout_seconds — line 498 assigns the default
+        # Call WITHOUT timeout_seconds — falls back to settings
         self.pipeline, self.returned_sha = await self.processor._rebase_handler.wait_for_post_rebase_pipeline(
             mr_iid=42,
             old_sha=self.old_sha,
-            # timeout_seconds intentionally omitted — uses DEFAULT_POST_REBASE_PIPELINE_WAIT_SECONDS
+            # timeout_seconds intentionally omitted
         )
 
     def then_pipeline_is_none(self):

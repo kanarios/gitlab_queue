@@ -1,8 +1,8 @@
-"""Test scenario: _wait_for_rebase completes when rebase finishes without conflicts.
+"""Test scenario: _wait_for_rebase completes when a no-op rebase finishes without conflicts.
 
 Verifies that when check_rebase_status returns (False, False) — rebase completed,
-no conflicts — the processor finds the post-rebase pipeline and triggers
-rebase_complete on the state machine.
+no conflicts — but the SHA never changes, the processor treats the MR as
+up-to-date, reuses the pipeline on that SHA and triggers rebase_complete.
 """
 
 from __future__ import annotations
@@ -25,14 +25,14 @@ async def process_mr_with_async_rebase():
         sm = FakeStateMachine(current_state=FakeCurrentState(id="rebasing"))
         processor = create_mock_processor(poll_fn=instant_poll)
 
-        # MR returned by get_mr inside _wait_for_post_rebase_pipeline
+        # SHA never changes: the rebase turns out to be a no-op
         mr = create_mr(iid=43, sha="def456", labels=["merge_queue"], state="opened")
-        processor.gitlab_client.mr_response_sequence = [mr]
+        processor.gitlab_client.mr_responses[43] = mr
 
         # Rebase completes (not in progress, no conflicts)
         processor.gitlab_client.rebase_status = (False, False)
 
-        # Pipeline found after rebase (fast-forward case: old_sha == new_sha)
+        # Existing pipeline on the unchanged SHA is reused for testing
         pipeline = create_pipeline(id=1002, sha="def456", status="success")
         processor.gitlab_client.latest_pipeline_response = pipeline
 
