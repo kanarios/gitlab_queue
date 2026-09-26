@@ -33,6 +33,7 @@ def create_mr(
     web_url: str | None = None,
     merge_error: str | None = None,
     detailed_merge_status: str | None = None,
+    diverged_commits_count: int | None = None,
 ) -> MergeRequest:
     return MergeRequest(
         iid=iid,
@@ -50,6 +51,7 @@ def create_mr(
         web_url=web_url,
         merge_error=merge_error,
         detailed_merge_status=detailed_merge_status,
+        diverged_commits_count=diverged_commits_count,
     )
 
 

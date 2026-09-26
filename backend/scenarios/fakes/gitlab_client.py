@@ -62,12 +62,14 @@ class FakeGitLabClient:
     create_pipeline_calls: list[str] = field(default_factory=list)
     retry_pipeline_calls: list[int] = field(default_factory=list)
     get_mr_calls: list[int] = field(default_factory=list)
+    get_mr_diverged_flags: list[bool] = field(default_factory=list)
     get_latest_pipeline_calls: list[int] = field(default_factory=list)
     list_mrs_calls: list[str] = field(default_factory=list)
     check_rebase_status_calls: list[int] = field(default_factory=list)
 
-    async def get_mr(self, iid: int) -> MergeRequest:
+    async def get_mr(self, iid: int, *, include_diverged_commits_count: bool = False) -> MergeRequest:
         self.get_mr_calls.append(iid)
+        self.get_mr_diverged_flags.append(include_diverged_commits_count)
         if self.get_mr_error:
             raise self.get_mr_error
         if self.mr_response_sequence:

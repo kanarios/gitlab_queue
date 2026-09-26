@@ -131,6 +131,7 @@ def parse_merge_request(data: dict[str, Any]) -> MergeRequest:
         web_url=data.get("web_url"),
         merge_error=data.get("merge_error"),
         detailed_merge_status=data.get("detailed_merge_status"),
+        diverged_commits_count=data.get("diverged_commits_count"),
     )
 
 

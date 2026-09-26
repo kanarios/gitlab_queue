@@ -565,8 +565,8 @@ class MergeProcessor:
                         error=str(e),
                     )
 
-    async def _capture_pre_rebase_state(self, ctx: ProcessingContext) -> str:
-        return await self._rebase_handler.capture_pre_rebase_state(ctx)
+    async def _capture_pre_rebase_state(self, ctx: ProcessingContext) -> None:
+        await self._rebase_handler.capture_pre_rebase_state(ctx)
 
     async def _interruptible_sleep(self, seconds: float) -> bool:
         """Sleep that can be interrupted by shutdown event."""
