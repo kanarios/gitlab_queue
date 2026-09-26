@@ -1,7 +1,7 @@
 """Test _wait_for_post_rebase_pipeline returns pipeline when SHA changed and running pipeline found.
 
-Lines 535-542: when SHA changed after rebase and found a pipeline with new SHA that is NOT
-in TERMINAL_PIPELINE_STATUSES (e.g. running), log and return DONE with that pipeline.
+When the SHA changed after rebase and the latest pipeline runs on the new SHA,
+it is returned as the post-rebase pipeline.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ class Scenario(vedro.Scenario):
         # MR: rebase complete, SHA changed to new_sha
         self.processor.gitlab_client.mr_responses[42] = create_mr(iid=42, sha=self.new_sha, rebase_in_progress=False)
 
-        # Pipeline: has new SHA, status "running" (NOT in TERMINAL_PIPELINE_STATUSES)
+        # Pipeline: has new SHA, status "running"
         self.pipeline = create_pipeline(id=200, sha=self.new_sha, status="running")
         self.processor.gitlab_client.latest_pipeline_response = self.pipeline
 

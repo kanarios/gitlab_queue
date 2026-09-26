@@ -294,6 +294,7 @@ __all__ = [
     "create_processing_context",
     "create_test_pipeline_handler",
     "create_test_queue_item",
+    "create_test_rebase_handler",
     "exhaustive_poll",
     "instant_poll",
 ]

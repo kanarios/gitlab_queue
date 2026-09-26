@@ -1,11 +1,9 @@
 """Test wait_for_post_rebase_pipeline skips stale pipeline by ID after rebase.
 
-Race condition scenario: rebase_in_progress is already false, but mr.sha
-hasn't updated yet. The old pipeline (id=100, sha=old_sha, status=success)
-is still returned. Without the fix, the bot accepts it and merges with
-wrong SHA → 409 Conflict.
-
-With the fix: pipeline.id == old_pipeline_id → skip, wait for new pipeline.
+Defense in depth for the post-rebase race (#46): even when the MR already
+reports its new SHA and the latest pipeline claims that SHA, a pipeline whose
+ID equals the pre-rebase pipeline ID is stale data and must not be accepted.
+Accepting it would test the wrong code and merge with the wrong SHA.
 """
 
 from __future__ import annotations
@@ -34,19 +32,14 @@ class Scenario(vedro.Scenario):
         self.new_sha = "new_sha_def"
         self.old_pipeline_id = 100
 
-        # Simulate race condition:
-        # 1st get_mr: SHA not yet updated (old_sha)
-        # 2nd get_mr: SHA updated (new_sha)
-        self.processor.gitlab_client.mr_response_sequence = [
-            create_mr(iid=42, sha=self.old_sha, rebase_in_progress=False),
-            create_mr(iid=42, sha=self.new_sha, rebase_in_progress=False),
-        ]
+        # SHA already updated after rebase
+        self.processor.gitlab_client.mr_responses[42] = create_mr(iid=42, sha=self.new_sha, rebase_in_progress=False)
 
-        # 1st get_latest_pipeline: stale pipeline (id=100, old_sha, success)
+        # 1st get_latest_pipeline: stale pipeline (old ID, reported with new SHA)
         # 2nd get_latest_pipeline: new pipeline (id=200, new_sha, running)
         self.new_pipeline = create_pipeline(id=200, sha=self.new_sha, status="running")
         self.processor.gitlab_client.latest_pipeline_sequence = [
-            create_pipeline(id=100, sha=self.old_sha, status="success"),
+            create_pipeline(id=self.old_pipeline_id, sha=self.new_sha, status="success"),
             self.new_pipeline,
         ]
 
