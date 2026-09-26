@@ -24,10 +24,10 @@ class Scenario(vedro.Scenario):
 
     def given_processor_resuming_from_rebasing(self):
         self.gitlab_client = FakeGitLabClient()
-        # First get_mr call (pre-rebase state capture) returns pre-rebase SHA
+        # First get_mr call (pre-rebase state capture): rebase still running, pre-rebase SHA
         # Subsequent calls return post-rebase SHA
         self.gitlab_client.mr_response_sequence = [
-            create_mr(iid=42, sha="pre_rebase_sha_123", labels=["merge_queue"]),
+            create_mr(iid=42, sha="pre_rebase_sha_123", labels=["merge_queue"], rebase_in_progress=True),
         ]
         self.gitlab_client.mr_responses[42] = create_mr(
             iid=42,

@@ -76,6 +76,9 @@ class RebaseHandler:
 
         Skips the rebase entirely when the MR is already up-to-date with
         the target branch and moves on to testing with the current pipeline.
+        Waits for a rebase that is already running (started from the GitLab
+        UI, or by us before a restart) instead of starting another: GitLab
+        rejects that with 409, which would look like a conflict.
 
         Args:
             ctx: Processing context.
@@ -93,6 +96,10 @@ class RebaseHandler:
         if _is_up_to_date(mr):
             log.info("Skipping rebase: MR is already up-to-date", mr_iid=mr_iid, sha=mr.sha[:8])
             return await self._start_testing_without_rebase(ctx, mr, pipeline)
+
+        if mr.rebase_in_progress:
+            log.info("Rebase already in progress, waiting for it", mr_iid=mr_iid)
+            return await self.wait_for_rebase(ctx)
 
         log.info("Starting rebase", mr_iid=mr_iid, diverged_commits_count=mr.diverged_commits_count)
 
@@ -115,9 +122,11 @@ class RebaseHandler:
     async def resume_rebase(self, ctx: ProcessingContext) -> ProcessingResult:
         """Continue an MR found in the rebasing state (e.g. after a restart).
 
-        The rebase may have finished before the restart, leaving the MR
-        up-to-date with an unchanged SHA from now on: then testing starts
-        with the current pipeline instead of waiting for a SHA change.
+        Whatever happened before the restart, the MR's current state decides:
+        a finished rebase leaves it up-to-date and it goes straight to testing,
+        a running one is waited for, and if none is running (never started,
+        or the target moved on since) a new rebase is started. Just waiting
+        for a SHA change there would time out and test an MR that is behind.
 
         Args:
             ctx: Processing context.
@@ -125,13 +134,7 @@ class RebaseHandler:
         Returns:
             ProcessingResult indicating outcome.
         """
-        mr, pipeline = await self.capture_pre_rebase_state(ctx)
-
-        if _is_up_to_date(mr):
-            log.info("Resumed MR is already up-to-date", mr_iid=ctx.mr_iid, sha=mr.sha[:8])
-            return await self._start_testing_without_rebase(ctx, mr, pipeline)
-
-        return await self.wait_for_rebase(ctx)
+        return await self.process_rebase(ctx)
 
     async def wait_for_rebase(self, ctx: ProcessingContext) -> ProcessingResult:
         """Poll rebase status until complete or timeout.
