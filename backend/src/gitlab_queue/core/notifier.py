@@ -26,6 +26,28 @@ log = get_logger(__name__)
 
 COMMENT_TEMPLATES: dict[str, str] = {
     # === QUEUE EVENTS ===
+    "priority_changed": """## 🤖 Merge Queue Bot
+
+**Status:** ⏳ {priority}
+
+**Position:** {position} of {total}
+
+**Estimated wait:** ~{estimated_minutes} min
+
+---
+_Current processing continues. Priority applies to the waiting queue._
+""",
+    "position_changed_priority": """## 🤖 Merge Queue Bot
+
+**Status:** ⏳ Waiting in queue
+
+**Position:** {position} of {total} _(was {old_position})_
+
+**Estimated wait:** ~{estimated_minutes} min
+
+---
+_Your position changed because an MR's hotfix priority changed._
+""",
     "queued": """## 🤖 Merge Queue Bot
 
 **Status:** ⏳ Added to queue

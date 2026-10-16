@@ -99,6 +99,45 @@ class QueuePositionNotifier:
                 positions[item.mr_iid] = i
         return positions
 
+    async def notify_priority_changed(
+        self,
+        project_id: int,
+        mr_iid: int,
+        positions_before: dict[int, int],
+    ) -> None:
+        """Refresh the changed MR's comment and all affected waiting positions.
+
+        A priority change also needs feedback when the MR was already first.
+        Processing comments must remain intact for MRs already running.
+        """
+        queue = await self.queue_manager.get_active_queue(project_id)
+        total = len(queue)
+        waiting = [(position, item) for position, item in enumerate(queue, start=1) if item.state == "queued"]
+        # Update the triggering MR first, then the other affected authors.
+        waiting.sort(key=lambda entry: entry[1].mr_iid != mr_iid)
+        for position, item in waiting:
+            old_position = positions_before.get(item.mr_iid)
+            if old_position is None:
+                continue
+            if item.mr_iid == mr_iid:
+                await self.notifier.notify(
+                    mr_iid,
+                    "priority_changed",
+                    priority="Hotfix priority enabled" if item.is_hotfix else "Hotfix priority removed",
+                    position=position,
+                    total=total,
+                    estimated_minutes=position * ESTIMATED_MINUTES_PER_POSITION,
+                )
+            elif old_position != position:
+                await self.notifier.notify(
+                    item.mr_iid,
+                    "position_changed_priority",
+                    position=position,
+                    old_position=old_position,
+                    total=total,
+                    estimated_minutes=position * ESTIMATED_MINUTES_PER_POSITION,
+                )
+
     def _select_notification_template(
         self,
         position_changed: bool,

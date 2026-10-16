@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from gitlab_queue.clients.gitlab import GitLabAPIError, GitLabNotFoundError
+from gitlab_queue.core.queue_metadata import QueueMetadataUpdater
 from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
     from gitlab_queue.clients.gitlab import GitLabClient
     from gitlab_queue.config import Settings
     from gitlab_queue.core.queue import QueueManager
+    from gitlab_queue.core.queue_position_notifier import QueuePositionNotifier
     from gitlab_queue.models.mr import MergeRequest
     from gitlab_queue.models.queue_item import QueueItem
 
@@ -39,6 +41,7 @@ class SyncStats:
     mrs_in_queue: int = 0
     added: int = 0
     removed: int = 0
+    updated: int = 0
     unchanged: int = 0
 
 
@@ -54,6 +57,7 @@ class QueueScheduler:
         gitlab_client: GitLab API client.
         queue_manager: Queue manager for MR storage.
         settings: Application settings.
+        position_notifier: Optional notifications for recovered priority changes.
 
     Example:
         >>> scheduler = QueueScheduler(gitlab_client, queue_manager, settings)
@@ -67,6 +71,7 @@ class QueueScheduler:
     gitlab_client: GitLabClient
     queue_manager: QueueManager
     settings: Settings
+    position_notifier: QueuePositionNotifier | None = None
 
     # Internal state
     _shutdown_event: asyncio.Event = field(default_factory=asyncio.Event, init=False)
@@ -115,6 +120,7 @@ class QueueScheduler:
                         mrs_with_label=stats.mrs_in_gitlab,
                         added=stats.added,
                         removed=stats.removed,
+                        updated=stats.updated,
                     )
 
                     log.debug(
@@ -123,6 +129,7 @@ class QueueScheduler:
                         mrs_in_queue=stats.mrs_in_queue,
                         added=stats.added,
                         removed=stats.removed,
+                        updated=stats.updated,
                         unchanged=stats.unchanged,
                     )
                 except GitLabAPIError as e:
@@ -174,6 +181,7 @@ class QueueScheduler:
         2. Comparing with current queue state
         3. Adding missing MRs (discovered from GitLab but not in queue)
         4. Removing orphaned entries (in queue but no longer valid in GitLab)
+        5. Refreshing labels and priority of existing entries
 
         Returns:
             SyncStats with counts of changes made.
@@ -225,10 +233,14 @@ class QueueScheduler:
         # Sync: add missing MRs, remove orphaned MRs
         stats.added = await self._add_missing_mrs(gitlab_mrs, queue_mr_iids)
         stats.removed = await self._remove_orphaned_mrs(queue_items, gitlab_mr_iids)
-        stats.unchanged = len(gitlab_mr_iids & queue_mr_iids)
+        updater = QueueMetadataUpdater(self.queue_manager, self.settings.hotfix_label, self.position_notifier)
+        for mr in gitlab_mrs:
+            if mr.iid in queue_mr_iids and await updater.refresh(self.settings.gitlab_project_id, mr.iid, mr.labels):
+                stats.updated += 1
+        stats.unchanged = len(gitlab_mr_iids & queue_mr_iids) - stats.updated
 
         # Broadcast and update stats if queue changed
-        if stats.added > 0 or stats.removed > 0:
+        if stats.added > 0 or stats.removed > 0 or stats.updated > 0:
             await self._finalize_sync(stats)
 
         return stats
@@ -449,6 +461,7 @@ def create_scheduler(
     gitlab_client: GitLabClient,
     queue_manager: QueueManager,
     settings: Settings,
+    position_notifier: QueuePositionNotifier | None = None,
 ) -> QueueScheduler:
     """Create a configured QueueScheduler instance.
 
@@ -456,6 +469,7 @@ def create_scheduler(
         gitlab_client: GitLab API client.
         queue_manager: Queue manager for MR storage.
         settings: Application settings.
+        position_notifier: Optional notifications for recovered priority changes.
 
     Returns:
         Configured QueueScheduler ready to run.
@@ -464,6 +478,7 @@ def create_scheduler(
         gitlab_client=gitlab_client,
         queue_manager=queue_manager,
         settings=settings,
+        position_notifier=position_notifier,
     )
 
 

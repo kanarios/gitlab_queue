@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from statemachine.exceptions import TransitionNotAllowed
 
+from gitlab_queue.core.queue_metadata import QueueMetadataUpdater
 from gitlab_queue.core.state_machine import calculate_duration, create_state_machine_for_mr
 from gitlab_queue.models.events import MergeRequestEvent, PipelineEvent
 from gitlab_queue.utils.logging import get_logger
@@ -394,6 +395,7 @@ class MRWebhookHandler:
         """Handle MR update event.
 
         If MR has queue label or hotfix label but is not in active queue, adds it.
+        Reconciles label changes for existing entries, including lost triggers.
         Does NOT reset state for MRs already being processed - this avoids race conditions
         with bot-initiated rebases.
 
@@ -406,6 +408,10 @@ class MRWebhookHandler:
         has_queue_label = self.settings.queue_label in event.labels
         has_hotfix_label = self.settings.hotfix_label in event.labels
         has_trigger_label = has_queue_label or has_hotfix_label
+
+        if not has_trigger_label and (self._was_queue_label_removed(event) or self._was_hotfix_label_removed(event)):
+            await self._handle_unlabeled(event)
+            return
 
         # Check if MR is in queue
         queue_item = await self.queue_manager.get_queue_item(event.project_id, mr_iid)
@@ -445,6 +451,8 @@ class MRWebhookHandler:
         # Log update but don't reset state - this avoids race conditions with bot rebases
         # At this point queue_item is not None (checked by is_in_active_queue)
         assert queue_item is not None
+        if event.label_changes is not None:
+            await self._refresh_queue_item_metadata(event.project_id, mr_iid, event)
         log.debug(
             "MR update received",
             mr_iid=mr_iid,
@@ -533,19 +541,13 @@ class MRWebhookHandler:
             mr_iid: The MR's internal ID.
             event: The merge request webhook event with current labels.
         """
-        is_hotfix = self.settings.hotfix_label in event.labels
-        await self.queue_manager.update_hotfix_status(
-            project_id,
-            mr_iid=mr_iid,
-            is_hotfix=is_hotfix,
-            labels=list(event.labels),
+        updater = QueueMetadataUpdater(
+            self.queue_manager,
+            self.settings.hotfix_label,
+            self.position_notifier,
         )
-        log.info(
-            "Refreshed MR queue metadata",
-            mr_iid=mr_iid,
-            is_hotfix=is_hotfix,
-            labels_count=len(event.labels),
-        )
+        if await updater.refresh(project_id, mr_iid, list(event.labels)):
+            await self._broadcast_queue_update()
 
     def _was_label_changed(
         self,

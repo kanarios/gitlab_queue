@@ -25,6 +25,7 @@ from gitlab_queue.clients.gitlab import (
 )
 from gitlab_queue.core.handler_utils import interruptible_sleep, verify_mr_in_queue
 from gitlab_queue.core.polling import poll_until_done
+from gitlab_queue.core.queue_metadata import QueueMetadataUpdater
 from gitlab_queue.core.state_machine import create_state_machine_for_mr
 from gitlab_queue.core.types import ProcessingContext, ProcessingResult, RetrySignal, VerifyResult
 from gitlab_queue.metrics import MR_DURATION
@@ -723,6 +724,8 @@ class MergeProcessor:
 
         # Add missing MRs to queue
         added_count = 0
+        updated_count = 0
+        updater = QueueMetadataUpdater(self.queue_manager, self.settings.hotfix_label, self.position_notifier)
         for mr in gitlab_mrs:
             if mr.iid not in queued_iids:
                 is_hotfix = self.settings.hotfix_label in mr.labels
@@ -734,15 +737,18 @@ class MergeProcessor:
                     is_hotfix=is_hotfix,
                 )
                 added_count += 1
+            elif await updater.refresh(self.settings.gitlab_project_id, mr.iid, mr.labels):
+                updated_count += 1
 
         log.info(
             "GitLab sync complete",
             gitlab_mrs_count=len(gitlab_mrs),
             added_count=added_count,
+            updated_count=updated_count,
         )
 
-        # Broadcast queue update if MRs were added
-        if added_count > 0 and self._websocket_manager:
+        # Metadata changes can reorder the queue even when membership stays the same.
+        if (added_count > 0 or updated_count > 0) and self._websocket_manager:
             await self._broadcast_queue_update()
 
     async def _broadcast_queue_update(self) -> None:

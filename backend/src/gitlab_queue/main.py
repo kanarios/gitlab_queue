@@ -355,6 +355,7 @@ async def _create_project_components(
         gitlab_client=gitlab_client,
         queue_manager=queue_manager,
         settings=runtime_settings,
+        position_notifier=position_notifier,
     )
 
     log.info("Project components initialized", project_id=pid)
