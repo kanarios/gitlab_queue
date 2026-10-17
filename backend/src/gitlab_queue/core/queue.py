@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from sqlalchemy import text
 
+from gitlab_queue.db.time_sql import epoch_sql, utc_now
 from gitlab_queue.metrics import OPERATIONS_TOTAL
 from gitlab_queue.models.completion import CompletionRequest, requeue_is_cancelled
 from gitlab_queue.models.event_order import compare_event, definitely_before, preserve_uncertainty
@@ -22,6 +23,7 @@ from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
     from asyncio import Lock
+    from collections.abc import Callable
 
     from sqlalchemy import RowMapping
 
@@ -47,80 +49,6 @@ _JSON_SERIALIZED_FIELDS = frozenset({"retried_jobs"})
 # =============================================================================
 # SQL Statements
 # =============================================================================
-
-_CREATE_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS merge_requests (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_id INTEGER NOT NULL DEFAULT 0,
-    iid INTEGER NOT NULL,
-    title TEXT NOT NULL,
-    author_name TEXT NOT NULL,
-    author_username TEXT NOT NULL,
-    author_avatar TEXT,
-    status TEXT NOT NULL DEFAULT 'queued',
-    is_hotfix INTEGER DEFAULT 0,
-    labels TEXT,
-    metadata_version INTEGER NOT NULL DEFAULT 0,
-    pending_notification TEXT,
-    pending_completion TEXT,
-    requeue_request TEXT,
-    ignored_label_events TEXT,
-    target_branch TEXT NOT NULL,
-    queued_at TEXT NOT NULL,
-    started_at TEXT,
-    finished_at TEXT,
-    pipeline_id INTEGER,
-    pipeline_status TEXT,
-    expected_sha TEXT,
-    retry_count INTEGER DEFAULT 0,
-    retried_jobs TEXT NOT NULL DEFAULT '{}',
-    last_error TEXT,
-    stale_warning_sent INTEGER DEFAULT 0,
-    processing_attempts INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(project_id, iid)
-)
-"""
-
-_CREATE_HISTORY_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS merge_requests_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_id INTEGER NOT NULL DEFAULT 0,
-    iid INTEGER NOT NULL,
-    title TEXT NOT NULL,
-    author_name TEXT NOT NULL,
-    author_username TEXT NOT NULL,
-    author_avatar TEXT,
-    status TEXT NOT NULL,
-    is_hotfix INTEGER DEFAULT 0 NOT NULL,
-    labels TEXT,
-    target_branch TEXT NOT NULL,
-    queued_at TEXT NOT NULL,
-    started_at TEXT,
-    finished_at TEXT NOT NULL,
-    wait_time_seconds INTEGER,
-    processing_time_seconds INTEGER,
-    failure_reason TEXT,
-    pipeline_id INTEGER,
-    pipeline_status TEXT,
-    pipeline_duration_seconds INTEGER,
-    pipeline_failed_jobs TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(project_id, iid)
-)
-"""
-
-_CREATE_INDEXES_SQL = [
-    "CREATE INDEX IF NOT EXISTS idx_mr_status ON merge_requests(status)",
-    "CREATE INDEX IF NOT EXISTS idx_mr_queued_at ON merge_requests(queued_at)",
-    "CREATE INDEX IF NOT EXISTS idx_mr_iid ON merge_requests(iid)",
-    "CREATE INDEX IF NOT EXISTS idx_mr_finished_at ON merge_requests(finished_at)",
-]
-
-_CREATE_HISTORY_INDEXES_SQL = [
-    "CREATE INDEX IF NOT EXISTS idx_history_finished_at ON merge_requests_history(finished_at)",
-    "CREATE INDEX IF NOT EXISTS idx_history_status ON merge_requests_history(status)",
-]
 
 _INSERT_MR_SQL = """
 INSERT INTO merge_requests (
@@ -182,14 +110,14 @@ _SELECT_QUEUE_STATS_GROUP_SQL = """GROUP BY status
 
 _CLEANUP_OLD_ENTRIES_SQL = """
 DELETE FROM merge_requests
-WHERE finished_at IS NOT NULL AND finished_at < datetime('now', :days_param) AND project_id = :project_id
+WHERE finished_at IS NOT NULL AND {finished_epoch} < :cutoff AND project_id = :project_id AND pending_completion IS NULL
 """
 
 _SELECT_STALE_MRS_SQL = """
 SELECT * FROM merge_requests
 WHERE status IN ('queued', 'rebasing', 'testing', 'merging')
 AND stale_warning_sent = 0
-AND queued_at < datetime('now', :hours_param)
+AND {queued_epoch} < :cutoff
 AND project_id = :project_id
 ORDER BY queued_at ASC
 """
@@ -209,7 +137,7 @@ AND finished_at IS NOT NULL
 _SELECT_RECENT_HISTORY_PROJECT_SQL = """AND project_id = :project_id
 """
 
-_SELECT_RECENT_HISTORY_TAIL_SQL = """ORDER BY finished_at DESC
+_SELECT_RECENT_HISTORY_TAIL_SQL = """ORDER BY {finished_epoch} DESC, id DESC
 LIMIT :limit
 """
 
@@ -218,13 +146,13 @@ SELECT
     SUM(CASE WHEN status = 'merged' THEN 1 ELSE 0 END) as merged_count,
     SUM(CASE WHEN status IN ('merged', 'failed', 'conflict', 'timeout') THEN 1 ELSE 0 END) as total_completed,
     AVG(CASE WHEN started_at IS NOT NULL AND queued_at IS NOT NULL THEN
-        (julianday(started_at) - julianday(queued_at)) * 86400 ELSE NULL END
+        ({started_epoch} - {queued_epoch}) ELSE NULL END
     ) as avg_wait_seconds,
     AVG(CASE WHEN finished_at IS NOT NULL AND started_at IS NOT NULL AND status = 'merged' THEN
-        (julianday(finished_at) - julianday(started_at)) * 86400 ELSE NULL END
+        ({finished_epoch} - {started_epoch}) ELSE NULL END
     ) as avg_processing_seconds
 FROM merge_requests_history
-WHERE finished_at >= datetime('now', :days_param)
+WHERE {finished_epoch} >= :cutoff
 """
 
 _SELECT_STATS_WINDOW_PROJECT_SQL = """AND project_id = :project_id
@@ -361,6 +289,7 @@ class QueueManager:
     """
 
     db: Database
+    clock: Callable[[], datetime] = utc_now
     _cache: QueueCache = field(default_factory=QueueCache, init=False)
 
     def metadata_lock(self, project_id: int) -> Lock:
@@ -384,16 +313,7 @@ class QueueManager:
         """
         log.debug("Ensuring database schema exists")
 
-        async with self.db.transaction() as session:
-            # Create active queue table
-            await session.execute(text(_CREATE_TABLE_SQL))
-            for index_sql in _CREATE_INDEXES_SQL:
-                await session.execute(text(index_sql))
-
-            # Create history table
-            await session.execute(text(_CREATE_HISTORY_TABLE_SQL))
-            for index_sql in _CREATE_HISTORY_INDEXES_SQL:
-                await session.execute(text(index_sql))
+        await self.db.ensure_schema()
 
         log.info("Database schema ensured")
 
@@ -1310,6 +1230,7 @@ class QueueManager:
             sql = _SELECT_RECENT_HISTORY_BASE_SQL + _SELECT_RECENT_HISTORY_TAIL_SQL
             params = {"limit": limit}
 
+        sql = sql.format(finished_epoch=epoch_sql("finished_at", self.db.engine.dialect.name))
         async with self.db.session() as session:
             result = await session.execute(text(sql), params)
             rows = result.mappings().all()
@@ -1339,11 +1260,20 @@ class QueueManager:
 
         if project_id is not None:
             sql = _SELECT_STATS_WINDOW_BASE_SQL + _SELECT_STATS_WINDOW_PROJECT_SQL
-            params: dict[str, Any] = {"days_param": f"-{days} days", "project_id": project_id}
+            params: dict[str, Any] = {
+                "cutoff": (self.clock() - timedelta(days=days)).timestamp(),
+                "project_id": project_id,
+            }
         else:
             sql = _SELECT_STATS_WINDOW_BASE_SQL
-            params = {"days_param": f"-{days} days"}
+            params = {"cutoff": (self.clock() - timedelta(days=days)).timestamp()}
 
+        backend = self.db.engine.dialect.name
+        sql = sql.format(
+            queued_epoch=epoch_sql("queued_at", backend),
+            started_epoch=epoch_sql("started_at", backend),
+            finished_epoch=epoch_sql("finished_at", backend),
+        )
         async with self.db.session() as session:
             result = await session.execute(text(sql), params)
             row = result.mappings().one()
@@ -1385,8 +1315,12 @@ class QueueManager:
 
         async with self.db.transaction() as session:
             cursor_result = await session.execute(
-                text(_CLEANUP_OLD_ENTRIES_SQL),
-                {"days_param": f"-{days} days", "project_id": project_id},
+                text(
+                    _CLEANUP_OLD_ENTRIES_SQL.format(
+                        finished_epoch=epoch_sql("finished_at", self.db.engine.dialect.name)
+                    )
+                ),
+                {"cutoff": (self.clock() - timedelta(days=days)).timestamp(), "project_id": project_id},
             )
             deleted_count: int = cursor_result.rowcount  # type: ignore[attr-defined]
 
@@ -1411,11 +1345,11 @@ class QueueManager:
         """
         log.debug("Checking for stale MRs", project_id=project_id, hours=hours)
 
-        sql = _SELECT_STALE_MRS_SQL
-        params: dict[str, Any] = {"hours_param": f"-{hours} hours", "project_id": project_id}
-        if self.db.engine.dialect.name == "postgresql":
-            sql = sql.replace("datetime('now', :hours_param)", ":cutoff")
-            params = {"cutoff": (datetime.now(UTC) - timedelta(hours=hours)).isoformat(), "project_id": project_id}
+        sql = _SELECT_STALE_MRS_SQL.format(queued_epoch=epoch_sql("queued_at", self.db.engine.dialect.name))
+        params: dict[str, Any] = {
+            "cutoff": (self.clock() - timedelta(hours=hours)).timestamp(),
+            "project_id": project_id,
+        }
         async with self.db.session() as session:
             result = await session.execute(text(sql), params)
             rows = result.mappings().all()

@@ -286,9 +286,8 @@ class AnalyticsJobProcessor:
         try:
             # VACUUM must run outside transaction with autocommit
             async with self.database.engine.connect() as conn:
-                # SQLite requires VACUUM outside transaction
+                conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
                 await conn.execute(text("VACUUM"))
-                await conn.commit()
 
             log.info("Database VACUUM completed")
 

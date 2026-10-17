@@ -192,7 +192,7 @@ jobs:
       - name: Run PostgreSQL queue and migration regressions
         env:
           GITLAB_QUEUE_TEST_POSTGRES_URL: postgresql+asyncpg://test:test@localhost:5432/test_db
-        run: uv run vedro run scenarios/core/hotfix_priority/ scenarios/core/database_migrations/ --verbose --fail-fast
+        run: uv run vedro run scenarios/core/hotfix_priority/ scenarios/core/database_migrations/ scenarios/core/storage_backends/ scenarios/integration/retry_manager/ scenarios/integration/repositories/ --verbose --fail-fast
 
   # =============================================================================
   # Frontend Jobs

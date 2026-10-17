@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from weakref import WeakValueDictionary
 
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -31,6 +31,9 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from gitlab_queue.db.migrations import _migration_lock
+from gitlab_queue.db.models import Base
+from gitlab_queue.db.time_sql import utc_epoch
 from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -79,6 +82,10 @@ class DatabaseStatus:
     foreign_keys_enabled: bool
     database_path: str
     error: str | None = None
+
+
+def _register_sqlite_functions(connection: Any, _record: Any) -> None:
+    connection.create_function("queue_epoch", 1, utc_epoch, deterministic=True)
 
 
 @dataclass
@@ -156,6 +163,8 @@ class Database:
         if make_url(self.database_url).get_backend_name() == "sqlite":
             kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30.0}
 
+        if make_url(self.database_url).get_backend_name() == "postgresql":
+            kwargs["connect_args"] = {"server_settings": {"timezone": "UTC"}}
         if not is_memory_db:
             kwargs.update(
                 {
@@ -168,6 +177,15 @@ class Database:
             )
 
         return kwargs
+
+    async def ensure_schema(self) -> None:
+        """Create the complete current model schema; migrations reconcile existing tables."""
+        if make_url(self.database_url).database == ":memory:":
+            async with self._init_lock, self.engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+        else:
+            async with _migration_lock(self.database_url), self.engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
 
     async def _configure_sqlite_pragmas(self, conn: Any, is_memory_db: bool) -> str:
         """Configure SQLite pragmas and return journal mode."""
@@ -204,6 +222,8 @@ class Database:
             is_memory_db = ":memory:" in self.database_url
             engine_kwargs = self._build_engine_kwargs(is_memory_db)
             self._engine = create_async_engine(self.database_url, **engine_kwargs)
+            if self._engine.dialect.name == "sqlite":
+                event.listen(self._engine.sync_engine, "connect", _register_sqlite_functions)
 
             async with self._engine.begin() as conn:
                 if conn.dialect.name == "sqlite":

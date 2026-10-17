@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 
 @asynccontextmanager
-async def isolated_database_url() -> AsyncIterator[str]:
+async def isolated_database_url(*, sqlite_in_memory: bool = False) -> AsyncIterator[str]:
     """Use a fresh PostgreSQL database when opted in, otherwise a temporary SQLite file.
 
     GITLAB_QUEUE_TEST_POSTGRES_URL names a disposable PostgreSQL admin database.
@@ -26,6 +26,9 @@ async def isolated_database_url() -> AsyncIterator[str]:
     """
     admin_url = os.getenv("GITLAB_QUEUE_TEST_POSTGRES_URL")
     if admin_url is None:
+        if sqlite_in_memory:
+            yield "sqlite+aiosqlite:///:memory:"
+            return
         with TemporaryDirectory() as directory:
             yield f"sqlite+aiosqlite:///{Path(directory) / 'queue.db'}"
         return

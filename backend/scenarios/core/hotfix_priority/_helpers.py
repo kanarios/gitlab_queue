@@ -189,8 +189,10 @@ async def queue_environment(revision: str = "head") -> AsyncIterator[QueueEnviro
 
 
 @asynccontextmanager
-async def queue_services(queue: QueueManager, server: GitLabServer) -> AsyncIterator[QueueEnvironment]:
-    settings = created_test_settings(project_id=123)
+async def queue_services(
+    queue: QueueManager, server: GitLabServer, settings: Settings | None = None
+) -> AsyncIterator[QueueEnvironment]:
+    settings = settings if settings is not None else created_test_settings(project_id=123)
     gitlab = GitLabClient(settings, transport=httpx.MockTransport(server.respond))
     notifier = MRNotifier(gitlab_client=gitlab, settings=settings, queue_manager=queue)
     positions = QueuePositionNotifier(notifier=notifier, queue_manager=queue)

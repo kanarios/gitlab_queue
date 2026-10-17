@@ -28,7 +28,7 @@ class RetryQueueItem:
         max_attempts: Maximum attempts before moving to DLQ
         next_attempt_at: When the next retry should be attempted
         last_error: Error message from the last failed attempt
-        created_at: When the item was first added to the retry queue
+        created_at: When the item was first added, or None for unknown legacy dates
     """
 
     id: int
@@ -37,7 +37,7 @@ class RetryQueueItem:
     attempt_count: int
     max_attempts: int
     next_attempt_at: datetime
-    created_at: datetime
+    created_at: datetime | None
     project_id: int = 0
     last_error: str | None = None
 
@@ -55,8 +55,8 @@ class DLQItem:
         payload: Original webhook payload as dict
         attempt_count: Total number of attempts made
         last_error: Error message from the final failed attempt
-        original_created_at: When the item was first received
-        moved_to_dlq_at: When the item was moved to the DLQ
+        original_created_at: When first received, or None if the original date is unknown
+        moved_to_dlq_at: When moved to the DLQ, or None for missing legacy dates
     """
 
     id: int
@@ -64,8 +64,8 @@ class DLQItem:
     payload: dict[str, Any]
     attempt_count: int
     last_error: str
-    original_created_at: datetime
-    moved_to_dlq_at: datetime
+    original_created_at: datetime | None
+    moved_to_dlq_at: datetime | None
     project_id: int = 0
 
 

@@ -13,13 +13,16 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
 
+from gitlab_queue.db.time_sql import epoch_sql
 from gitlab_queue.models.retry import DLQItem, DLQStats, RetryQueueItem
 from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
-    from collections.abc import Collection
+    from collections.abc import Callable, Collection
 
     from sqlalchemy import RowMapping
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.sql.elements import TextClause
 
     from gitlab_queue.db.database import Database
 
@@ -29,47 +32,6 @@ log = get_logger(__name__)
 # =============================================================================
 # SQL Statements
 # =============================================================================
-
-_CREATE_RETRY_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS webhook_retry_queue (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_id INTEGER NOT NULL DEFAULT 0,
-    event_type TEXT NOT NULL,
-    payload TEXT NOT NULL,
-    attempt_count INTEGER DEFAULT 0,
-    max_attempts INTEGER DEFAULT 3,
-    next_attempt_at TEXT NOT NULL,
-    last_error TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-)
-"""
-
-_CREATE_DLQ_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS webhook_dlq (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_id INTEGER NOT NULL DEFAULT 0,
-    event_type TEXT NOT NULL,
-    payload TEXT NOT NULL,
-    attempt_count INTEGER NOT NULL,
-    last_error TEXT NOT NULL,
-    original_created_at TEXT NOT NULL,
-    moved_to_dlq_at TEXT DEFAULT CURRENT_TIMESTAMP
-)
-"""
-
-_CREATE_RETRY_INDEXES_SQL = [
-    "CREATE INDEX IF NOT EXISTS idx_retry_next_attempt ON webhook_retry_queue(next_attempt_at)",
-    "CREATE INDEX IF NOT EXISTS idx_retry_event_type ON webhook_retry_queue(event_type)",
-    "CREATE INDEX IF NOT EXISTS idx_retry_project_next_attempt ON webhook_retry_queue(project_id, next_attempt_at)",
-    "CREATE INDEX IF NOT EXISTS idx_retry_project_event_type ON webhook_retry_queue(project_id, event_type)",
-]
-
-_CREATE_DLQ_INDEXES_SQL = [
-    "CREATE INDEX IF NOT EXISTS idx_dlq_moved_at ON webhook_dlq(moved_to_dlq_at)",
-    "CREATE INDEX IF NOT EXISTS idx_dlq_event_type ON webhook_dlq(event_type)",
-    "CREATE INDEX IF NOT EXISTS idx_dlq_project_moved_at ON webhook_dlq(project_id, moved_to_dlq_at)",
-    "CREATE INDEX IF NOT EXISTS idx_dlq_project_event_type ON webhook_dlq(project_id, event_type)",
-]
 
 _INSERT_RETRY_SQL = """
 INSERT INTO webhook_retry_queue (
@@ -82,21 +44,21 @@ VALUES (
 
 _SELECT_READY_FOR_RETRY_SQL = """
 SELECT * FROM webhook_retry_queue
-WHERE next_attempt_at <= :now
-  AND (:project_id IS NULL OR project_id = :project_id)
+WHERE {next_epoch} <= :now
+  AND (CAST(:project_id AS INTEGER) IS NULL OR project_id = :project_id)
 {excluded_projects_clause}
-ORDER BY next_attempt_at ASC
+ORDER BY {next_epoch} ASC, id ASC
 LIMIT :limit
 """
 
 _SELECT_RETRY_BY_ID_SQL = """
 SELECT * FROM webhook_retry_queue
-WHERE id = :id AND (:project_id IS NULL OR project_id = :project_id)
+WHERE id = :id AND (CAST(:project_id AS INTEGER) IS NULL OR project_id = :project_id)
 """
 
 _DELETE_RETRY_BY_ID_SQL = """
 DELETE FROM webhook_retry_queue
-WHERE id = :id AND (:project_id IS NULL OR project_id = :project_id)
+WHERE id = :id AND (CAST(:project_id AS INTEGER) IS NULL OR project_id = :project_id)
 """
 
 _UPDATE_RETRY_ATTEMPT_SQL = """
@@ -109,56 +71,56 @@ WHERE id = :id
 
 _INSERT_DLQ_SQL = """
 INSERT INTO webhook_dlq (
-    project_id, event_type, payload, attempt_count, last_error, original_created_at
+    project_id, event_type, payload, attempt_count, last_error, original_created_at, moved_to_dlq_at
 )
 VALUES (
-    :project_id, :event_type, :payload, :attempt_count, :last_error, :original_created_at
+    :project_id, :event_type, :payload, :attempt_count, :last_error, :original_created_at, :moved_to_dlq_at
 )
 """
 
 _SELECT_DLQ_ALL_SQL = """
 SELECT * FROM webhook_dlq
-WHERE (:project_id IS NULL OR project_id = :project_id)
-ORDER BY moved_to_dlq_at DESC
+WHERE (CAST(:project_id AS INTEGER) IS NULL OR project_id = :project_id)
+ORDER BY {moved_epoch} DESC, id DESC
 LIMIT :limit OFFSET :offset
 """
 
 _SELECT_DLQ_BY_TYPE_SQL = """
 SELECT * FROM webhook_dlq
 WHERE event_type = :event_type
-  AND (:project_id IS NULL OR project_id = :project_id)
-ORDER BY moved_to_dlq_at DESC
+  AND (CAST(:project_id AS INTEGER) IS NULL OR project_id = :project_id)
+ORDER BY {moved_epoch} DESC, id DESC
 LIMIT :limit OFFSET :offset
 """
 
 _SELECT_DLQ_BY_ID_SQL = """
 SELECT * FROM webhook_dlq
-WHERE id = :id AND (:project_id IS NULL OR project_id = :project_id)
+WHERE id = :id AND (CAST(:project_id AS INTEGER) IS NULL OR project_id = :project_id)
 """
 
 _DELETE_DLQ_BY_ID_SQL = """
 DELETE FROM webhook_dlq
-WHERE id = :id AND (:project_id IS NULL OR project_id = :project_id)
+WHERE id = :id AND (CAST(:project_id AS INTEGER) IS NULL OR project_id = :project_id)
 """
 
 _SELECT_DLQ_STATS_SQL = """
 SELECT
     COUNT(*) as total_count,
-    MIN(moved_to_dlq_at) as oldest_entry
+    MIN({moved_epoch}) as oldest_entry
 FROM webhook_dlq
-WHERE (:project_id IS NULL OR project_id = :project_id)
+WHERE (CAST(:project_id AS INTEGER) IS NULL OR project_id = :project_id)
 """
 
 _SELECT_DLQ_BY_TYPE_COUNT_SQL = """
 SELECT event_type, COUNT(*) as count
 FROM webhook_dlq
-WHERE (:project_id IS NULL OR project_id = :project_id)
+WHERE (CAST(:project_id AS INTEGER) IS NULL OR project_id = :project_id)
 GROUP BY event_type
 """
 
 _CLEANUP_OLD_DLQ_SQL = """
 DELETE FROM webhook_dlq
-WHERE moved_to_dlq_at < datetime('now', :days_param)
+WHERE {moved_epoch} < :cutoff
 """
 
 
@@ -192,6 +154,10 @@ class DLQItemNotFoundError(RetryQueueError):
 # =============================================================================
 
 
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
 @dataclass
 class WebhookRetryManager:
     """Manages retry queue and DLQ for failed webhook events.
@@ -219,6 +185,7 @@ class WebhookRetryManager:
     max_attempts: int = 3
     base_delay_seconds: int = 30
     max_delay_seconds: int = 300
+    clock: Callable[[], datetime] = _utc_now
 
     async def ensure_schema(self) -> None:
         """Create retry queue and DLQ tables if they don't exist.
@@ -227,13 +194,7 @@ class WebhookRetryManager:
         """
         log.debug("Ensuring retry queue schema exists")
 
-        async with self.db.transaction() as session:
-            await session.execute(text(_CREATE_RETRY_TABLE_SQL))
-            await session.execute(text(_CREATE_DLQ_TABLE_SQL))
-            for index_sql in _CREATE_RETRY_INDEXES_SQL:
-                await session.execute(text(index_sql))
-            for index_sql in _CREATE_DLQ_INDEXES_SQL:
-                await session.execute(text(index_sql))
+        await self.db.ensure_schema()
 
         log.info("Retry queue schema ensured")
 
@@ -252,7 +213,7 @@ class WebhookRetryManager:
             self.base_delay_seconds * (2**attempt_count),
             self.max_delay_seconds,
         )
-        return datetime.now(UTC) + timedelta(seconds=delay)
+        return self.clock() + timedelta(seconds=delay)
 
     async def add_to_retry_queue(
         self,
@@ -273,7 +234,7 @@ class WebhookRetryManager:
         Returns:
             ID of the newly created retry queue item.
         """
-        now = datetime.now(UTC)
+        now = self.clock()
         next_attempt = self._calculate_next_attempt(0)
 
         log.debug(
@@ -283,8 +244,8 @@ class WebhookRetryManager:
         )
 
         async with self.db.transaction() as session:
-            await session.execute(
-                text(_INSERT_RETRY_SQL),
+            result = await session.execute(
+                text(_INSERT_RETRY_SQL + " RETURNING id"),
                 {
                     "event_type": event_type,
                     "project_id": project_id,
@@ -296,8 +257,6 @@ class WebhookRetryManager:
                     "created_at": now.isoformat(),
                 },
             )
-            # Get the last inserted row ID (SQLite specific)
-            result = await session.execute(text("SELECT last_insert_rowid()"))
             retry_id: int = result.scalar_one()
 
         log.info(
@@ -326,8 +285,8 @@ class WebhookRetryManager:
         Returns:
             List of RetryQueueItem objects ready for retry.
         """
-        now = datetime.now(UTC)
-        params: dict[str, Any] = {"now": now.isoformat(), "limit": limit, "project_id": project_id}
+        now = self.clock()
+        params: dict[str, Any] = {"now": now.timestamp(), "limit": limit, "project_id": project_id}
         excluded_projects_clause = ""
         if excluded_project_ids:
             placeholders = []
@@ -339,7 +298,7 @@ class WebhookRetryManager:
 
         async with self.db.session() as session:
             result = await session.execute(
-                text(_SELECT_READY_FOR_RETRY_SQL.format(excluded_projects_clause=excluded_projects_clause)),
+                self._time_sql(_SELECT_READY_FOR_RETRY_SQL, excluded_projects_clause=excluded_projects_clause),
                 params,
             )
             rows = result.mappings().all()
@@ -394,121 +353,58 @@ class WebhookRetryManager:
 
         log.info("Retry succeeded and removed from queue", retry_id=retry_id)
 
-    async def mark_retry_failed(
-        self,
-        retry_id: int,
-        error: str,
-        project_id: int | None = None,
-    ) -> bool:
-        """Mark a retry attempt as failed.
-
-        If max attempts exceeded, moves to DLQ and returns True.
-        Otherwise, schedules next retry and returns False.
-
-        Args:
-            retry_id: ID of the retry queue item.
-            error: Error message from the failed attempt.
-
-        Returns:
-            True if moved to DLQ, False if scheduled for another retry.
-
-        Raises:
-            RetryItemNotFoundError: If the item doesn't exist.
-        """
-        log.debug("Marking retry as failed", retry_id=retry_id)
-
-        # First, get the current item
-        async with self.db.session() as session:
+    async def mark_retry_failed(self, retry_id: int, error: str, project_id: int | None = None) -> bool:
+        """Atomically increment the attempt and reschedule or move the owned row."""
+        async with self.db.transaction() as session:
             result = await session.execute(
-                text(_SELECT_RETRY_BY_ID_SQL),
-                {"id": retry_id, "project_id": project_id},
+                text(
+                    "UPDATE webhook_retry_queue SET attempt_count = attempt_count + 1, last_error = :error "
+                    "WHERE id = :id AND (CAST(:project_id AS INTEGER) IS NULL OR project_id = :project_id) RETURNING *"
+                ),
+                {"id": retry_id, "project_id": project_id, "error": error},
             )
             row = result.mappings().one_or_none()
-            await session.commit()
-
-        if row is None:
-            raise RetryItemNotFoundError(retry_id)
-
-        current_attempt = row["attempt_count"]
-        max_attempts = row["max_attempts"]
-        new_attempt_count = current_attempt + 1
-
-        # Check if we've exceeded max attempts
-        if new_attempt_count >= max_attempts:
-            # Move to DLQ
-            await self._move_to_dlq(row, error)
-            log.warning(
-                "Event moved to DLQ after max retries",
-                retry_id=retry_id,
-                attempts=new_attempt_count,
-                event_type=row["event_type"],
-            )
-            return True
-
-        # Schedule next retry
-        next_attempt = self._calculate_next_attempt(new_attempt_count)
-
-        async with self.db.transaction() as session:
+            if row is None:
+                raise RetryItemNotFoundError(retry_id)
+            if row["attempt_count"] >= row["max_attempts"]:
+                await self._move_row_to_dlq(session, row, error, increment_attempt=False)
+                return True
             await session.execute(
                 text(_UPDATE_RETRY_ATTEMPT_SQL),
                 {
                     "id": retry_id,
-                    "attempt_count": new_attempt_count,
-                    "next_attempt_at": next_attempt.isoformat(),
+                    "attempt_count": row["attempt_count"],
+                    "next_attempt_at": self._calculate_next_attempt(row["attempt_count"]).isoformat(),
                     "last_error": error,
                 },
             )
-
-        log.info(
-            "Retry failed, scheduled for next attempt",
-            retry_id=retry_id,
-            attempt=new_attempt_count,
-            next_attempt=next_attempt.isoformat(),
-        )
         return False
 
     async def _move_to_dlq(self, row: RowMapping, error: str, *, increment_attempt: bool = True) -> int:
-        """Move a retry queue item to the DLQ.
-
-        Args:
-            row: The retry queue item row.
-            error: Final error message.
-            increment_attempt: Whether moving to DLQ should count as a failed attempt.
-
-        Returns:
-            ID of the newly created DLQ item.
-
-        Raises:
-            RetryItemNotFoundError: If another operation already removed the retry item.
-        """
         async with self.db.transaction() as session:
-            # Claim the source row before inserting the DLQ copy. This makes
-            # concurrent moves single-winner and keeps insertion/deletion atomic.
-            delete_result = await session.execute(
-                text(_DELETE_RETRY_BY_ID_SQL),
-                {"id": row["id"], "project_id": row["project_id"]},
-            )
-            deleted: bool = delete_result.rowcount > 0  # type: ignore[attr-defined]
-            if not deleted:
-                raise RetryItemNotFoundError(int(row["id"]))
+            return await self._move_row_to_dlq(session, row, error, increment_attempt=increment_attempt)
 
-            # Insert into DLQ
-            await session.execute(
-                text(_INSERT_DLQ_SQL),
-                {
-                    "event_type": row["event_type"],
-                    "project_id": row["project_id"],
-                    "payload": row["payload"],
-                    "attempt_count": row["attempt_count"] + int(increment_attempt),
-                    "last_error": error,
-                    "original_created_at": row["created_at"],
-                },
-            )
-            # Get the last inserted row ID (SQLite specific)
-            result = await session.execute(text("SELECT last_insert_rowid()"))
-            dlq_id: int = result.scalar_one()
-
-        return dlq_id
+    async def _move_row_to_dlq(
+        self, session: AsyncSession, row: RowMapping, error: str, *, increment_attempt: bool
+    ) -> int:
+        result = await session.execute(
+            text(_DELETE_RETRY_BY_ID_SQL), {"id": row["id"], "project_id": row["project_id"]}
+        )
+        if result.rowcount == 0:  # type: ignore[attr-defined]
+            raise RetryItemNotFoundError(int(row["id"]))
+        result = await session.execute(
+            text(_INSERT_DLQ_SQL + " RETURNING id"),
+            {
+                "event_type": row["event_type"],
+                "project_id": row["project_id"],
+                "payload": row["payload"],
+                "attempt_count": row["attempt_count"] + int(increment_attempt),
+                "last_error": error,
+                "original_created_at": row["created_at"],
+                "moved_to_dlq_at": self.clock().isoformat(),
+            },
+        )
+        return int(result.scalar_one())
 
     # =========================================================================
     # DLQ Operations
@@ -534,7 +430,7 @@ class WebhookRetryManager:
         async with self.db.session() as session:
             if event_type:
                 result = await session.execute(
-                    text(_SELECT_DLQ_BY_TYPE_SQL),
+                    self._time_sql(_SELECT_DLQ_BY_TYPE_SQL),
                     {
                         "event_type": event_type,
                         "limit": limit,
@@ -544,7 +440,7 @@ class WebhookRetryManager:
                 )
             else:
                 result = await session.execute(
-                    text(_SELECT_DLQ_ALL_SQL),
+                    self._time_sql(_SELECT_DLQ_ALL_SQL),
                     {"limit": limit, "offset": offset, "project_id": project_id},
                 )
             rows = result.mappings().all()
@@ -601,66 +497,28 @@ class WebhookRetryManager:
         return deleted
 
     async def retry_dlq_entry(self, entry_id: int, project_id: int | None = None) -> int:
-        """Move a DLQ entry back to the retry queue for another attempt.
-
-        Args:
-            entry_id: ID of the DLQ item.
-
-        Returns:
-            ID of the new retry queue item.
-
-        Raises:
-            DLQItemNotFoundError: If the item doesn't exist.
-        """
-        log.debug("Retrying DLQ entry", entry_id=entry_id)
-
-        # Get the DLQ item
-        async with self.db.session() as session:
+        """Atomically claim one DLQ row before inserting its reset retry."""
+        async with self.db.transaction() as session:
             result = await session.execute(
-                text(_SELECT_DLQ_BY_ID_SQL),
-                {"id": entry_id, "project_id": project_id},
+                text(_DELETE_DLQ_BY_ID_SQL + " RETURNING *"), {"id": entry_id, "project_id": project_id}
             )
             row = result.mappings().one_or_none()
-            await session.commit()
-
-        if row is None:
-            raise DLQItemNotFoundError(entry_id)
-
-        # Add back to retry queue with reset attempt count
-        now = datetime.now(UTC)
-        next_attempt = self._calculate_next_attempt(0)
-
-        async with self.db.transaction() as session:
-            # Insert into retry queue
-            await session.execute(
-                text(_INSERT_RETRY_SQL),
+            if row is None:
+                raise DLQItemNotFoundError(entry_id)
+            result = await session.execute(
+                text(_INSERT_RETRY_SQL + " RETURNING id"),
                 {
                     "event_type": row["event_type"],
                     "project_id": row["project_id"],
                     "payload": row["payload"],
                     "attempt_count": 0,
                     "max_attempts": self.max_attempts,
-                    "next_attempt_at": next_attempt.isoformat(),
+                    "next_attempt_at": self._calculate_next_attempt(0).isoformat(),
                     "last_error": f"Re-queued from DLQ (original error: {row['last_error']})",
-                    "created_at": now.isoformat(),
+                    "created_at": self.clock().isoformat(),
                 },
             )
-            # Get the last inserted row ID (SQLite specific)
-            result = await session.execute(text("SELECT last_insert_rowid()"))
-            retry_id: int = result.scalar_one()
-
-            # Delete from DLQ
-            await session.execute(
-                text(_DELETE_DLQ_BY_ID_SQL),
-                {"id": entry_id, "project_id": row["project_id"]},
-            )
-
-        log.info(
-            "DLQ entry moved back to retry queue",
-            dlq_entry_id=entry_id,
-            retry_id=retry_id,
-        )
-        return retry_id
+            return int(result.scalar_one())
 
     async def get_dlq_stats(self, project_id: int | None = None) -> DLQStats:
         """Get statistics about the Dead Letter Queue.
@@ -670,7 +528,7 @@ class WebhookRetryManager:
         """
         async with self.db.session() as session:
             # Get total count and oldest entry
-            result = await session.execute(text(_SELECT_DLQ_STATS_SQL), {"project_id": project_id})
+            result = await session.execute(self._time_sql(_SELECT_DLQ_STATS_SQL), {"project_id": project_id})
             stats_row = result.mappings().one()
 
             # Get counts by event type
@@ -681,8 +539,8 @@ class WebhookRetryManager:
         by_event_type = {row["event_type"]: row["count"] for row in type_rows}
 
         oldest_entry = stats_row["oldest_entry"]
-        if isinstance(oldest_entry, str):
-            oldest_entry = datetime.fromisoformat(oldest_entry)
+        if oldest_entry is not None:
+            oldest_entry = datetime.fromtimestamp(float(oldest_entry), UTC)
 
         return DLQStats(
             total_count=stats_row["total_count"],
@@ -703,8 +561,8 @@ class WebhookRetryManager:
 
         async with self.db.transaction() as session:
             cursor_result = await session.execute(
-                text(_CLEANUP_OLD_DLQ_SQL),
-                {"days_param": f"-{days} days"},
+                self._time_sql(_CLEANUP_OLD_DLQ_SQL),
+                {"cutoff": (self.clock() - timedelta(days=days)).timestamp()},
             )
             deleted_count: int = cursor_result.rowcount  # type: ignore[attr-defined]
 
@@ -723,15 +581,29 @@ class WebhookRetryManager:
     # Helper Methods
     # =========================================================================
 
+    def _time_sql(self, template: str, **values: str) -> TextClause:
+        backend = self.db.engine.dialect.name
+        return text(
+            template.format(
+                next_epoch=epoch_sql("next_attempt_at", backend),
+                moved_epoch=epoch_sql("moved_to_dlq_at", backend),
+                **values,
+            )
+        )
+
     def _row_to_retry_item(self, row: RowMapping | dict[str, Any]) -> RetryQueueItem:
         """Convert a database row to a RetryQueueItem."""
         next_attempt_at = row["next_attempt_at"]
         if isinstance(next_attempt_at, str):
             next_attempt_at = datetime.fromisoformat(next_attempt_at)
+        if next_attempt_at.tzinfo is None:
+            next_attempt_at = next_attempt_at.replace(tzinfo=UTC)
 
         created_at = row["created_at"]
         if isinstance(created_at, str):
             created_at = datetime.fromisoformat(created_at)
+        if created_at is not None and created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=UTC)
 
         payload = row["payload"]
         if isinstance(payload, str):
@@ -754,10 +626,14 @@ class WebhookRetryManager:
         original_created_at = row["original_created_at"]
         if isinstance(original_created_at, str):
             original_created_at = datetime.fromisoformat(original_created_at)
+        if original_created_at is not None and original_created_at.tzinfo is None:
+            original_created_at = original_created_at.replace(tzinfo=UTC)
 
         moved_to_dlq_at = row["moved_to_dlq_at"]
         if isinstance(moved_to_dlq_at, str):
             moved_to_dlq_at = datetime.fromisoformat(moved_to_dlq_at)
+        if moved_to_dlq_at is not None and moved_to_dlq_at.tzinfo is None:
+            moved_to_dlq_at = moved_to_dlq_at.replace(tzinfo=UTC)
 
         payload = row["payload"]
         if isinstance(payload, str):

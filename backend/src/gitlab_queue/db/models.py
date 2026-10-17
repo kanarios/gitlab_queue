@@ -10,7 +10,7 @@ ORM access if needed in the future.
 
 from __future__ import annotations
 
-from sqlalchemy import Index, Integer, Text, UniqueConstraint
+from sqlalchemy import Index, Integer, Text, UniqueConstraint, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -56,7 +56,7 @@ class MergeRequestModel(Base):
     processing_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     stale_warning_sent: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
-    created_at: Mapped[str | None] = mapped_column(Text, nullable=True, server_default="CURRENT_TIMESTAMP")
+    created_at: Mapped[str | None] = mapped_column(Text, nullable=True, server_default=text("CURRENT_TIMESTAMP"))
 
     __table_args__ = (
         UniqueConstraint("project_id", "iid", name="uq_mr_project_iid"),
@@ -89,13 +89,14 @@ class WebhookRetryModel(Base):
     max_attempts: Mapped[int] = mapped_column(Integer, default=3, server_default="3")
     next_attempt_at: Mapped[str] = mapped_column(Text, nullable=False)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[str | None] = mapped_column(Text, nullable=True, server_default="CURRENT_TIMESTAMP")
+    created_at: Mapped[str | None] = mapped_column(Text, nullable=True, server_default=text("CURRENT_TIMESTAMP"))
 
     __table_args__ = (
         Index("idx_retry_next_attempt", "next_attempt_at"),
         Index("idx_retry_event_type", "event_type"),
         Index("idx_retry_project_next_attempt", "project_id", "next_attempt_at"),
         Index("idx_retry_project_event_type", "project_id", "event_type"),
+        {"sqlite_autoincrement": True},
     )
 
     def __repr__(self) -> str:
@@ -117,14 +118,15 @@ class WebhookDLQModel(Base):
     payload: Mapped[str] = mapped_column(Text, nullable=False)
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False)
     last_error: Mapped[str] = mapped_column(Text, nullable=False)
-    original_created_at: Mapped[str] = mapped_column(Text, nullable=False)
-    moved_to_dlq_at: Mapped[str | None] = mapped_column(Text, nullable=True, server_default="CURRENT_TIMESTAMP")
+    original_created_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+    moved_to_dlq_at: Mapped[str | None] = mapped_column(Text, nullable=True, server_default=text("CURRENT_TIMESTAMP"))
 
     __table_args__ = (
         Index("idx_dlq_moved_at", "moved_to_dlq_at"),
         Index("idx_dlq_event_type", "event_type"),
         Index("idx_dlq_project_moved_at", "project_id", "moved_to_dlq_at"),
         Index("idx_dlq_project_event_type", "project_id", "event_type"),
+        {"sqlite_autoincrement": True},
     )
 
     def __repr__(self) -> str:
@@ -161,13 +163,14 @@ class MergeRequestHistoryModel(Base):
     pipeline_status: Mapped[str | None] = mapped_column(Text, nullable=True)
     pipeline_duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     pipeline_failed_jobs: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[str | None] = mapped_column(Text, nullable=True, server_default="CURRENT_TIMESTAMP")
+    created_at: Mapped[str | None] = mapped_column(Text, nullable=True, server_default=text("CURRENT_TIMESTAMP"))
 
     __table_args__ = (
         UniqueConstraint("project_id", "iid", name="uq_history_project_iid"),
         Index("idx_history_project_id", "project_id"),
         Index("idx_history_finished_at", "finished_at"),
         Index("idx_history_status", "status"),
+        {"sqlite_autoincrement": True},
     )
 
     def __repr__(self) -> str:

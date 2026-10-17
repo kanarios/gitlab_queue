@@ -26,6 +26,7 @@ from gitlab_queue.db.models import (
     MergeRequestHistoryModel,
     MergeRequestModel,
 )
+from gitlab_queue.db.time_sql import TimestampEpoch
 from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -238,7 +239,7 @@ class MergeRequestRepository:
         Only returns MRs that haven't received a stale warning yet.
         """
         threshold = datetime.now(UTC) - timedelta(hours=hours)
-        threshold_str = threshold.isoformat()
+        threshold_str = threshold.timestamp()
 
         stmt = (
             select(MergeRequestModel)
@@ -247,7 +248,7 @@ class MergeRequestRepository:
                     MergeRequestModel.status.in_(ACTIVE_STATES),
                     MergeRequestModel.project_id == self._project_id,
                     MergeRequestModel.stale_warning_sent == 0,
-                    MergeRequestModel.queued_at < threshold_str,
+                    TimestampEpoch(MergeRequestModel.queued_at) < threshold_str,
                 )
             )
             .order_by(MergeRequestModel.queued_at.asc())
@@ -541,12 +542,15 @@ class HistoryRepository:
             conditions.append(MergeRequestHistoryModel.status == status_filter)
 
         if date_from:
-            conditions.append(MergeRequestHistoryModel.finished_at >= date_from.isoformat())
+            conditions.append(
+                TimestampEpoch(MergeRequestHistoryModel.finished_at)
+                >= datetime.combine(date_from, datetime.min.time(), tzinfo=UTC).timestamp()
+            )
 
         if date_to:
             # Include full day
-            date_to_end = datetime.combine(date_to, datetime.max.time())
-            conditions.append(MergeRequestHistoryModel.finished_at <= date_to_end.isoformat())
+            date_to_end = datetime.combine(date_to, datetime.max.time(), tzinfo=UTC)
+            conditions.append(TimestampEpoch(MergeRequestHistoryModel.finished_at) <= date_to_end.timestamp())
 
         if author_username:
             conditions.append(MergeRequestHistoryModel.author_username == author_username)
@@ -562,7 +566,7 @@ class HistoryRepository:
         # Get paginated items
         items_stmt = (
             select(MergeRequestHistoryModel)
-            .order_by(MergeRequestHistoryModel.finished_at.desc())
+            .order_by(TimestampEpoch(MergeRequestHistoryModel.finished_at).desc(), MergeRequestHistoryModel.id.desc())
             .offset(offset)
             .limit(per_page)
         )
@@ -603,7 +607,7 @@ class HistoryRepository:
         stmt = (
             select(MergeRequestHistoryModel)
             .where(MergeRequestHistoryModel.project_id == self._project_id)
-            .order_by(MergeRequestHistoryModel.finished_at.desc())
+            .order_by(TimestampEpoch(MergeRequestHistoryModel.finished_at).desc(), MergeRequestHistoryModel.id.desc())
             .limit(limit)
         )
         result = await self._session.execute(stmt)
@@ -623,8 +627,8 @@ class HistoryRepository:
         Returns:
             PeriodStats with counts and averages.
         """
-        date_from_str = date_from.isoformat()
-        date_to_str = datetime.combine(date_to, datetime.max.time()).isoformat()
+        date_from_str = datetime.combine(date_from, datetime.min.time(), tzinfo=UTC).timestamp()
+        date_to_str = datetime.combine(date_to, datetime.max.time(), tzinfo=UTC).timestamp()
 
         # Use CASE WHEN for SQLite compatibility (no IIF in older versions)
         stmt = select(
@@ -638,8 +642,8 @@ class HistoryRepository:
             func.avg(MergeRequestHistoryModel.processing_time_seconds).label("avg_processing"),
         ).where(
             and_(
-                MergeRequestHistoryModel.finished_at >= date_from_str,
-                MergeRequestHistoryModel.finished_at <= date_to_str,
+                TimestampEpoch(MergeRequestHistoryModel.finished_at) >= date_from_str,
+                TimestampEpoch(MergeRequestHistoryModel.finished_at) <= date_to_str,
                 MergeRequestHistoryModel.project_id == self._project_id,
             )
         )
@@ -654,8 +658,8 @@ class HistoryRepository:
             conflict_count=row.conflict or 0,
             timeout_count=row.timeout or 0,
             hotfix_count=row.hotfix or 0,
-            avg_wait_time_seconds=float(row.avg_wait) if row.avg_wait else None,
-            avg_processing_time_seconds=(float(row.avg_processing) if row.avg_processing else None),
+            avg_wait_time_seconds=float(row.avg_wait) if row.avg_wait is not None else None,
+            avg_processing_time_seconds=(float(row.avg_processing) if row.avg_processing is not None else None),
         )
 
     async def get_stats_for_date(self, target_date: date) -> PeriodStats:
@@ -689,8 +693,8 @@ class HistoryRepository:
             func.avg(MergeRequestHistoryModel.wait_time_seconds).label("avg_wait"),
         ).where(
             and_(
-                MergeRequestHistoryModel.finished_at >= hour_ago.isoformat(),
-                MergeRequestHistoryModel.finished_at <= now.isoformat(),
+                TimestampEpoch(MergeRequestHistoryModel.finished_at) >= hour_ago.timestamp(),
+                TimestampEpoch(MergeRequestHistoryModel.finished_at) <= now.timestamp(),
                 MergeRequestHistoryModel.project_id == self._project_id,
             )
         )
@@ -705,7 +709,7 @@ class HistoryRepository:
             conflict_count=0,
             timeout_count=0,
             hotfix_count=0,
-            avg_wait_time_seconds=float(row.avg_wait) if row.avg_wait else None,
+            avg_wait_time_seconds=float(row.avg_wait) if row.avg_wait is not None else None,
             avg_processing_time_seconds=None,
         )
 
@@ -715,11 +719,11 @@ class HistoryRepository:
         Returns number of records deleted.
         """
         cutoff = datetime.now(UTC) - timedelta(days=retention_days)
-        cutoff_str = cutoff.isoformat()
+        cutoff_str = cutoff.timestamp()
 
         stmt = delete(MergeRequestHistoryModel).where(
             MergeRequestHistoryModel.project_id == self._project_id,
-            MergeRequestHistoryModel.finished_at < cutoff_str,
+            TimestampEpoch(MergeRequestHistoryModel.finished_at) < cutoff_str,
         )
         result = await self._session.execute(stmt)
         await self._session.flush()
@@ -794,8 +798,8 @@ class AnalyticsRepository:
             return None
 
         # Get stats from history for that date
-        date_start = datetime.combine(target_date, datetime.min.time()).isoformat()
-        date_end = datetime.combine(target_date, datetime.max.time()).isoformat()
+        date_start = datetime.combine(target_date, datetime.min.time(), tzinfo=UTC).timestamp()
+        date_end = datetime.combine(target_date, datetime.max.time(), tzinfo=UTC).timestamp()
 
         # Query history for the day
         history_stmt = select(
@@ -809,8 +813,8 @@ class AnalyticsRepository:
             func.avg(MergeRequestHistoryModel.processing_time_seconds).label("avg_processing"),
         ).where(
             and_(
-                MergeRequestHistoryModel.finished_at >= date_start,
-                MergeRequestHistoryModel.finished_at <= date_end,
+                TimestampEpoch(MergeRequestHistoryModel.finished_at) >= date_start,
+                TimestampEpoch(MergeRequestHistoryModel.finished_at) <= date_end,
                 MergeRequestHistoryModel.project_id == self._project_id,
             )
         )
@@ -821,8 +825,8 @@ class AnalyticsRepository:
         # Get max queue depth from hourly snapshots
         hourly_stmt = select(func.max(AnalyticsHourlyModel.queue_depth)).where(
             and_(
-                AnalyticsHourlyModel.timestamp >= date_start,
-                AnalyticsHourlyModel.timestamp <= date_end,
+                TimestampEpoch(AnalyticsHourlyModel.timestamp) >= date_start,
+                TimestampEpoch(AnalyticsHourlyModel.timestamp) <= date_end,
                 AnalyticsHourlyModel.project_id == self._project_id,
             )
         )
@@ -839,8 +843,10 @@ class AnalyticsRepository:
             conflict_count=history_row.conflict or 0,
             timeout_count=history_row.timeout or 0,
             hotfix_count=history_row.hotfix or 0,
-            avg_wait_time_seconds=(int(history_row.avg_wait) if history_row.avg_wait else None),
-            avg_processing_time_seconds=(int(history_row.avg_processing) if history_row.avg_processing else None),
+            avg_wait_time_seconds=(int(history_row.avg_wait) if history_row.avg_wait is not None else None),
+            avg_processing_time_seconds=(
+                int(history_row.avg_processing) if history_row.avg_processing is not None else None
+            ),
             max_queue_depth=max_queue_depth,
         )
 
@@ -865,7 +871,7 @@ class AnalyticsRepository:
         """
         now = datetime.now(UTC)
         period_start = now - timedelta(days=period_days)
-        period_start_str = period_start.isoformat()
+        period_start_str = period_start.timestamp()
 
         # Get current queue count
         queue_stmt = (
@@ -895,7 +901,7 @@ class AnalyticsRepository:
             func.avg(MergeRequestHistoryModel.processing_time_seconds).label("avg_processing"),
         ).where(
             MergeRequestHistoryModel.project_id == self._project_id,
-            MergeRequestHistoryModel.finished_at >= period_start_str,
+            TimestampEpoch(MergeRequestHistoryModel.finished_at) >= period_start_str,
         )
 
         history_result = await self._session.execute(history_stmt)
@@ -907,14 +913,14 @@ class AnalyticsRepository:
         success_rate = (merged_count / total_completed * 100) if total_completed > 0 else 0.0
 
         # Get hourly trend (last 24 hours)
-        hourly_start = (now - timedelta(hours=24)).isoformat()
+        hourly_start = (now - timedelta(hours=24)).timestamp()
         hourly_stmt = (
             select(AnalyticsHourlyModel)
             .where(
                 AnalyticsHourlyModel.project_id == self._project_id,
-                AnalyticsHourlyModel.timestamp >= hourly_start,
+                TimestampEpoch(AnalyticsHourlyModel.timestamp) >= hourly_start,
             )
-            .order_by(AnalyticsHourlyModel.timestamp.asc())
+            .order_by(TimestampEpoch(AnalyticsHourlyModel.timestamp).asc(), AnalyticsHourlyModel.id.asc())
         )
         hourly_result = await self._session.execute(hourly_stmt)
         hourly_records = hourly_result.scalars().all()
@@ -965,11 +971,11 @@ class AnalyticsRepository:
     async def cleanup_hourly(self, retention_days: int = 30) -> int:
         """Delete hourly records older than retention period."""
         cutoff = datetime.now(UTC) - timedelta(days=retention_days)
-        cutoff_str = cutoff.isoformat()
+        cutoff_str = cutoff.timestamp()
 
         stmt = delete(AnalyticsHourlyModel).where(
             AnalyticsHourlyModel.project_id == self._project_id,
-            AnalyticsHourlyModel.timestamp < cutoff_str,
+            TimestampEpoch(AnalyticsHourlyModel.timestamp) < cutoff_str,
         )
         result = await self._session.execute(stmt)
         await self._session.flush()
@@ -979,13 +985,13 @@ class AnalyticsRepository:
 
     async def get_max_queue_depth_for_date(self, target_date: date) -> int | None:
         """Get maximum queue depth from hourly snapshots for a date."""
-        date_start = datetime.combine(target_date, datetime.min.time()).isoformat()
-        date_end = datetime.combine(target_date, datetime.max.time()).isoformat()
+        date_start = datetime.combine(target_date, datetime.min.time(), tzinfo=UTC).timestamp()
+        date_end = datetime.combine(target_date, datetime.max.time(), tzinfo=UTC).timestamp()
 
         stmt = select(func.max(AnalyticsHourlyModel.queue_depth)).where(
             and_(
-                AnalyticsHourlyModel.timestamp >= date_start,
-                AnalyticsHourlyModel.timestamp <= date_end,
+                TimestampEpoch(AnalyticsHourlyModel.timestamp) >= date_start,
+                TimestampEpoch(AnalyticsHourlyModel.timestamp) <= date_end,
                 AnalyticsHourlyModel.project_id == self._project_id,
             )
         )

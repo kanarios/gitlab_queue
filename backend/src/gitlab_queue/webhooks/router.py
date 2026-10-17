@@ -823,8 +823,8 @@ def _dlq_item_to_dict(item: DLQItem) -> dict[str, Any]:
         "payload": item.payload,
         "attempt_count": item.attempt_count,
         "last_error": item.last_error,
-        "original_created_at": item.original_created_at.isoformat(),
-        "moved_to_dlq_at": item.moved_to_dlq_at.isoformat(),
+        "original_created_at": item.original_created_at.isoformat() if item.original_created_at is not None else None,
+        "moved_to_dlq_at": item.moved_to_dlq_at.isoformat() if item.moved_to_dlq_at is not None else None,
     }
 
 
