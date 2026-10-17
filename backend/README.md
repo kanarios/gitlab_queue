@@ -110,6 +110,8 @@ insertion before any
 archive acknowledgment. Sequences never rewind and include archived/deleted
 high-water marks; PostgreSQL sequence advances can leave harmless gaps after a
 rolled-back migration. Interrupted transactions can be retried after reopening.
+SQLite REFERENCES names follow its ASCII case-insensitive identifier rules;
+Unicode lookalikes remain distinct. PostgreSQL retains quoted-name/OID semantics.
 
 The five mutation targets must resolve to the same ordinary permanent tables
 that are inspected: SQLite `main`, or PostgreSQL's connection inspection

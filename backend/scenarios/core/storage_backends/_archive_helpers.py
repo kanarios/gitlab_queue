@@ -37,6 +37,7 @@ async def seed_dead(url, entry_id=4, project_id=123, original=None, moved="2026-
 
 async def snapshot(url, *, include_sequences=False):
     async with Database(url) as database, database.engine.connect() as connection:
+        quote = connection.dialect.identifier_preparer.quote
         tables = await connection.run_sync(lambda sync: inspect(sync).get_table_names())
         result = {}
         for table in tables:
@@ -47,7 +48,7 @@ async def snapshot(url, *, include_sequences=False):
                     for column in columns
                 ],
                 "rows": sorted(
-                    [dict(row) for row in (await connection.execute(text(f"SELECT * FROM {table}"))).mappings()],
+                    [dict(row) for row in (await connection.execute(text(f"SELECT * FROM {quote(table)}"))).mappings()],
                     key=repr,
                 ),
                 "constraints": await connection.run_sync(

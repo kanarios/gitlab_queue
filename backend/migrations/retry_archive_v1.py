@@ -232,8 +232,9 @@ def _check_mutation_safety(bind):
             raise RuntimeError("Rollback archive refuses rewrite rules on mutation targets")
     if bind.dialect.name == "sqlite":
         inspector = sa.inspect(bind)
+        # Fixed targets are ASCII; SQLite does not fold Unicode lookalikes.
         referenced = any(
-            key["referred_table"] in targets.values()
+            key["referred_table"].isascii() and key["referred_table"].lower() in targets.values()
             for name in inspector.get_table_names()
             for key in inspector.get_foreign_keys(name)
         )
