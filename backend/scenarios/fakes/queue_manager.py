@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from asyncio import Lock
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -12,6 +13,20 @@ if TYPE_CHECKING:
 
 @dataclass
 class FakeQueueManager:
+    _metadata_locks: dict[int, Lock] = field(default_factory=dict)
+    _notification_locks: dict[tuple[int, int], Lock] = field(default_factory=dict)
+
+    def metadata_lock(self, project_id: int) -> Lock:
+        return self._metadata_locks.setdefault(project_id, Lock())
+
+    def notification_lock(self, project_id: int, mr_iid: int) -> Lock:
+        return self._notification_locks.setdefault((project_id, mr_iid), Lock())
+
+    async def clear_pending_notification(self, project_id: int, mr_iid: int, pending: str) -> None:
+        item = self._items.get(mr_iid)
+        if item is not None and item.pending_notification == pending:
+            item.pending_notification = None
+
     _items: dict[int, QueueItem] = field(default_factory=dict)
     _completed: dict[int, dict[str, Any]] = field(default_factory=dict)
 
@@ -118,7 +133,16 @@ class FakeQueueManager:
                 setattr(item, key, value)
         return True
 
-    async def update_hotfix_status(self, project_id: int, mr_iid: int, is_hotfix: bool, labels: list[str]) -> bool:
+    async def update_hotfix_status(
+        self,
+        project_id: int,
+        mr_iid: int,
+        is_hotfix: bool,
+        labels: list[str],
+        *,
+        expected_revision: tuple[int, int] | None = None,
+        notify_positions: bool = False,
+    ) -> bool:
         self.update_hotfix_calls.append(
             {
                 "project_id": project_id,
@@ -130,8 +154,11 @@ class FakeQueueManager:
         item = self._items.get(mr_iid)
         if item is None:
             return False
+        if expected_revision is not None and expected_revision != (item.queue_id, item.metadata_version):
+            return False
         item.is_hotfix = is_hotfix
         item.labels = labels
+        item.metadata_version += 1
         return True
 
     async def complete_mr(

@@ -703,6 +703,8 @@ class MergeProcessor:
         skips sync and lets the scheduler handle it when GitLab recovers.
         """
         log.info("Syncing missing MRs from GitLab")
+        snapshot = await self.queue_manager.get_active_queue(self.settings.gitlab_project_id)
+        revisions = {item.mr_iid: (item.queue_id, item.metadata_version) for item in snapshot}
 
         queue_mrs = await self._fetch_mrs_by_label(self.settings.queue_label)
         hotfix_mrs = await self._fetch_mrs_by_label(self.settings.hotfix_label)
@@ -710,12 +712,13 @@ class MergeProcessor:
         # Merge without duplicates
         mrs_dict = {mr.iid: mr for mr in queue_mrs}
         for mr in hotfix_mrs:
-            if mr.iid not in mrs_dict:
-                mrs_dict[mr.iid] = mr
+            mrs_dict[mr.iid] = mr
         gitlab_mrs = list(mrs_dict.values())
+        updater = QueueMetadataUpdater(self.queue_manager, self.settings.hotfix_label, self.position_notifier)
 
         if not gitlab_mrs:
             log.info("No MRs found with queue or hotfix labels")
+            await updater.retry_pending(self.settings.gitlab_project_id)
             return
 
         # Get current queue IIDs
@@ -725,7 +728,6 @@ class MergeProcessor:
         # Add missing MRs to queue
         added_count = 0
         updated_count = 0
-        updater = QueueMetadataUpdater(self.queue_manager, self.settings.hotfix_label, self.position_notifier)
         for mr in gitlab_mrs:
             if mr.iid not in queued_iids:
                 is_hotfix = self.settings.hotfix_label in mr.labels
@@ -737,8 +739,16 @@ class MergeProcessor:
                     is_hotfix=is_hotfix,
                 )
                 added_count += 1
-            elif await updater.refresh(self.settings.gitlab_project_id, mr.iid, mr.labels):
+            elif mr.iid in revisions and await updater.refresh(
+                self.settings.gitlab_project_id,
+                mr.iid,
+                mr.labels,
+                expected_revision=revisions[mr.iid],
+                notify=False,
+            ):
                 updated_count += 1
+
+        await updater.retry_pending(self.settings.gitlab_project_id)
 
         log.info(
             "GitLab sync complete",

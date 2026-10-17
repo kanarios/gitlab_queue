@@ -340,7 +340,7 @@ async def _create_project_components(
         )
 
     # Create per-project notifier and position notifier
-    notifier = MRNotifier(gitlab_client=gitlab_client, settings=runtime_settings)
+    notifier = MRNotifier(gitlab_client=gitlab_client, settings=runtime_settings, queue_manager=queue_manager)
     position_notifier = QueuePositionNotifier(notifier=notifier, queue_manager=queue_manager)
 
     # Create per-project processor and scheduler

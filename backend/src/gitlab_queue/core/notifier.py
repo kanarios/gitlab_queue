@@ -6,15 +6,18 @@ Each state transition MUST trigger a notification to keep authors informed.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from asyncio import Lock
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
+from weakref import WeakValueDictionary
 
 from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
     from gitlab_queue.clients.gitlab import GitLabClient
     from gitlab_queue.config import Settings
+    from gitlab_queue.core.protocols import QueueManagerProtocol
     from gitlab_queue.models.mr import Note
 
 log = get_logger(__name__)
@@ -340,6 +343,18 @@ STATE_DESCRIPTIONS: dict[str, str] = {
     "merging": "being merged",
 }
 
+WAITING_STATUSES = frozenset(
+    {
+        "queued",
+        "priority_changed",
+        "position_changed_priority",
+        "position_changed",
+        "position_changed_hotfix",
+        "total_changed",
+        "total_changed_hotfix",
+    }
+)
+
 
 # =============================================================================
 # MRNotifier Class
@@ -375,13 +390,61 @@ class MRNotifier:
 
     gitlab_client: GitLabClient
     settings: Settings
+    queue_manager: QueueManagerProtocol | None = None
+    _notification_locks: WeakValueDictionary[int, Lock] = field(
+        default_factory=WeakValueDictionary, init=False, repr=False
+    )
+
+    def _notification_lock(self, mr_iid: int) -> Lock:
+        if self.queue_manager is not None:
+            return self.queue_manager.notification_lock(self.gitlab_client.project_id, mr_iid)
+        return self._notification_locks.setdefault(mr_iid, Lock())
+
+    async def notify_if_queued(
+        self,
+        project_id: int,
+        mr_iid: int,
+        status: str,
+        queue_manager: QueueManagerProtocol,
+        *,
+        pending: str | None = None,
+        **context: Any,
+    ) -> Note | None:
+        """Send waiting feedback only while it still describes the current queue.
+
+        Recheck intent and state after acquiring the same lock used by processing
+        comments. The acknowledgment stays inside that lock to exclude two drains.
+        """
+        async with queue_manager.notification_lock(project_id, mr_iid):
+            item = await queue_manager.get_queue_item(project_id, mr_iid)
+            if item is None or (pending is not None and item.pending_notification != pending):
+                return None
+            if item.state != "queued":
+                if pending is not None:
+                    await queue_manager.clear_pending_notification(project_id, mr_iid, pending)
+                return None
+            queue = await queue_manager.get_active_queue(project_id)
+            position = next((index for index, entry in enumerate(queue, 1) if entry.mr_iid == mr_iid), None)
+            if position is None:
+                return None
+            context.update(
+                position=position,
+                total=len(queue),
+                estimated_minutes=position * 15,
+                priority="Hotfix priority enabled" if item.is_hotfix else "Hotfix priority removed",
+                queued_at=item.queued_at,
+            )
+            note = await self._send_notification(mr_iid, status, **context)
+            if pending is not None:
+                await queue_manager.clear_pending_notification(project_id, mr_iid, pending)
+            return note
 
     async def notify(
         self,
         mr_iid: int,
         status: str,
         **context: Any,
-    ) -> Note:
+    ) -> Note | None:
         """Update or create pinned comment for MR.
 
         Args:
@@ -396,6 +459,18 @@ class MRNotifier:
             KeyError: If status is not a valid template key.
             GitLabAPIError: If comment update fails.
         """
+        if status in WAITING_STATUSES and self.queue_manager is not None:
+            return await self.notify_if_queued(
+                self.gitlab_client.project_id,
+                mr_iid,
+                status,
+                self.queue_manager,
+                **context,
+            )
+        async with self._notification_lock(mr_iid):
+            return await self._send_notification(mr_iid, status, **context)
+
+    async def _send_notification(self, mr_iid: int, status: str, **context: Any) -> Note:
         if status not in COMMENT_TEMPLATES:
             msg = f"Unknown notification status: {status}"
             raise KeyError(msg)

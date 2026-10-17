@@ -10,6 +10,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -19,6 +20,8 @@ from gitlab_queue.models.queue_item import DashboardStats, QueueItem
 from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
+    from asyncio import Lock
+
     from sqlalchemy import RowMapping
 
     from gitlab_queue.db.database import Database
@@ -56,6 +59,8 @@ CREATE TABLE IF NOT EXISTS merge_requests (
     status TEXT NOT NULL DEFAULT 'queued',
     is_hotfix INTEGER DEFAULT 0,
     labels TEXT,
+    metadata_version INTEGER NOT NULL DEFAULT 0,
+    pending_notification TEXT,
     target_branch TEXT NOT NULL,
     queued_at TEXT NOT NULL,
     started_at TEXT,
@@ -244,8 +249,11 @@ DELETE FROM merge_requests WHERE iid = :iid AND project_id = :project_id
 
 _UPDATE_HOTFIX_STATUS_SQL = """
 UPDATE merge_requests
-SET is_hotfix = :is_hotfix, labels = :labels
+SET is_hotfix = :is_hotfix, labels = :labels, metadata_version = metadata_version + 1
 WHERE iid = :iid AND project_id = :project_id
+  AND status IN ('queued', 'rebasing', 'testing', 'merging')
+  AND (:expected_id IS NULL OR (id = :expected_id AND metadata_version = :expected_version))
+  AND (is_hotfix != :is_hotfix OR COALESCE(labels, '[]') != :labels)
 """
 
 
@@ -350,6 +358,13 @@ class QueueManager:
 
     db: Database
     _cache: QueueCache = field(default_factory=QueueCache, init=False)
+
+    def metadata_lock(self, project_id: int) -> Lock:
+        """Serialize metadata changes and their feedback across all entrypoints."""
+        return self.db.queue_metadata_lock(project_id)
+
+    def notification_lock(self, project_id: int, mr_iid: int) -> Lock:
+        return self.db.queue_notification_lock(project_id, mr_iid)
 
     async def ensure_schema(self) -> None:
         """Create the merge_requests and history tables if they don't exist.
@@ -756,6 +771,9 @@ class QueueManager:
         mr_iid: int,
         is_hotfix: bool,
         labels: list[str],
+        *,
+        expected_revision: tuple[int, int] | None = None,
+        notify_positions: bool = False,
     ) -> bool:
         """Update the hotfix status and labels of an MR in the queue.
 
@@ -767,9 +785,11 @@ class QueueManager:
             mr_iid: The MR's internal ID.
             is_hotfix: New hotfix status.
             labels: Current labels on the MR.
+            expected_revision: Optional (row identity, metadata version) to compare atomically.
+            notify_positions: Persist feedback for the changed and displaced waiting MRs.
 
         Returns:
-            True if updated, False if MR not found.
+            True for the owner of an effective change; False for stale, duplicate or absent entries.
         """
         log.debug(
             "Updating MR hotfix status",
@@ -782,14 +802,45 @@ class QueueManager:
         labels_json = json.dumps(labels)
 
         async with self.db.transaction() as session:
+            before: dict[int, int] = {}
+            if notify_positions:
+                rows = await session.execute(
+                    text(_SELECT_ACTIVE_QUEUE_PROJECT_SQL + _SELECT_ACTIVE_QUEUE_ORDER_SQL),
+                    {"project_id": project_id},
+                )
+                before = {row["iid"]: pos for pos, row in enumerate(rows.mappings(), 1) if row["status"] == "queued"}
             params = {
                 "iid": mr_iid,
                 "project_id": project_id,
                 "is_hotfix": 1 if is_hotfix else 0,
                 "labels": labels_json,
+                "expected_id": expected_revision[0] if expected_revision else None,
+                "expected_version": expected_revision[1] if expected_revision else None,
             }
             cursor_result = await session.execute(text(_UPDATE_HOTFIX_STATUS_SQL), params)
             changed: bool = cursor_result.rowcount > 0  # type: ignore[attr-defined]
+            if changed and notify_positions:
+                rows = await session.execute(
+                    text(_SELECT_ACTIVE_QUEUE_PROJECT_SQL + _SELECT_ACTIVE_QUEUE_ORDER_SQL),
+                    {"project_id": project_id},
+                )
+                for pos, row in enumerate(rows.mappings(), 1):
+                    old_position = before.get(row["iid"])
+                    if row["status"] != "queued" or old_position is None:
+                        continue
+                    if row["iid"] != mr_iid and old_position == pos:
+                        continue
+                    pending = json.dumps(
+                        {
+                            "token": uuid4().hex,
+                            "status": "priority_changed" if row["iid"] == mr_iid else "position_changed_priority",
+                            "old_position": old_position,
+                        }
+                    )
+                    await session.execute(
+                        text("UPDATE merge_requests SET pending_notification = :pending WHERE id = :id"),
+                        {"pending": pending, "id": row["id"]},
+                    )
 
         if changed:
             self._cache.invalidate()
@@ -803,6 +854,18 @@ class QueueManager:
             log.debug("MR not found for hotfix status update", mr_iid=mr_iid)
 
         return changed
+
+    async def clear_pending_notification(self, project_id: int, mr_iid: int, pending: str) -> None:
+        """Acknowledge only the intent that was sent, preserving newer changes."""
+        async with self.db.transaction() as session:
+            await session.execute(
+                text(
+                    "UPDATE merge_requests SET pending_notification = NULL "
+                    "WHERE project_id = :project_id AND iid = :iid AND pending_notification = :pending"
+                ),
+                {"project_id": project_id, "iid": mr_iid, "pending": pending},
+            )
+        self._cache.invalidate()
 
     async def complete_mr(
         self,
@@ -1233,6 +1296,9 @@ class QueueManager:
             last_error=row.get("last_error"),
             stale_warning_sent=bool(row.get("stale_warning_sent", 0)),
             processing_attempts=row.get("processing_attempts", 0) or 0,
+            queue_id=row.get("id", 0),
+            metadata_version=row.get("metadata_version", 0),
+            pending_notification=row.get("pending_notification"),
         )
 
 

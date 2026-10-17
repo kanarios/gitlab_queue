@@ -88,6 +88,9 @@ jobs:
           - test_suite: core
             slicer_total: ""
             slicer_index: ""
+          - test_suite: webhooks/mr_webhook
+            slicer_total: ""
+            slicer_index: ""
     defaults:
       run:
         working-directory: backend

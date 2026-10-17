@@ -949,7 +949,9 @@ class WebhookHandler:
         if self.notifier is None:
             from gitlab_queue.core.notifier import MRNotifier
 
-            self.notifier = MRNotifier(gitlab_client=self.gitlab_client, settings=self.settings)
+            self.notifier = MRNotifier(
+                gitlab_client=self.gitlab_client, settings=self.settings, queue_manager=self.queue_manager
+            )
 
     async def handle_merge_request_event(self, webhook_payload: dict[str, Any]) -> None:
         """Handle merge request webhook event.

@@ -42,6 +42,9 @@ class QueueItem:
         retried_jobs: Per-job retry counts {job_name: count} persisted to DB
         last_error: Most recent error message if any
         stale_warning_sent: Whether stale warning has been sent for this MR
+        queue_id: Database row identity, distinguishing remove/rejoin of the same MR
+        metadata_version: Revision of labels and priority for optimistic refreshes
+        pending_notification: Durable priority feedback intent awaiting acknowledgment
     """
 
     # Required fields (no defaults)
@@ -68,6 +71,9 @@ class QueueItem:
     last_error: str | None = None
     stale_warning_sent: bool = False
     processing_attempts: int = 0
+    queue_id: int = 0
+    metadata_version: int = 0
+    pending_notification: str | None = None
 
     def get_max_job_retry_count(self) -> int:
         """Return the highest retry count across all retried jobs.

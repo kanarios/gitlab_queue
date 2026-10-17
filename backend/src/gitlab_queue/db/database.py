@@ -20,6 +20,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from weakref import WeakValueDictionary
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
@@ -119,6 +120,16 @@ class Database:
     _session_factory: async_sessionmaker[AsyncSession] | None = field(default=None, init=False, repr=False)
     _initialized: bool = field(default=False, init=False, repr=False)
     _init_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
+    _queue_metadata_locks: dict[int, asyncio.Lock] = field(default_factory=dict, init=False, repr=False)
+    _queue_notification_locks: WeakValueDictionary[tuple[int, int], asyncio.Lock] = field(
+        default_factory=WeakValueDictionary, init=False, repr=False
+    )
+
+    def queue_metadata_lock(self, project_id: int) -> asyncio.Lock:
+        return self._queue_metadata_locks.setdefault(project_id, asyncio.Lock())
+
+    def queue_notification_lock(self, project_id: int, mr_iid: int) -> asyncio.Lock:
+        return self._queue_notification_locks.setdefault((project_id, mr_iid), asyncio.Lock())
 
     def _build_engine_kwargs(self, is_memory_db: bool) -> dict[str, Any]:
         """Build engine keyword arguments based on database type."""

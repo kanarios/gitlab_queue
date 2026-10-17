@@ -40,6 +40,9 @@ class FakeRecordingNotifier:
 
     notify: _NotifyRecorder = field(default_factory=_NotifyRecorder)
 
+    async def notify_if_queued(self, project_id, mr_iid, status, queue_manager, **context):
+        return await self.notify(mr_iid, status, **context)
+
 
 @dataclass
 class FakeRecordingQueueManager:

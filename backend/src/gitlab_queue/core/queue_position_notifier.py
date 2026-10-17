@@ -6,6 +6,7 @@ Handles notifications when MRs are added, removed, or positions shift.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -72,9 +73,11 @@ class QueuePositionNotifier:
 
         # Estimated time includes processing time for all MRs ahead plus this MR
         estimated_minutes = position * ESTIMATED_MINUTES_PER_POSITION
-        await self.notifier.notify(
+        await self.notifier.notify_if_queued(
+            project_id,
             mr_iid,
             "queued",
+            self.queue_manager,
             position=position,
             total=total,
             estimated_minutes=estimated_minutes,
@@ -99,44 +102,29 @@ class QueuePositionNotifier:
                 positions[item.mr_iid] = i
         return positions
 
-    async def notify_priority_changed(
-        self,
-        project_id: int,
-        mr_iid: int,
-        positions_before: dict[int, int],
-    ) -> None:
-        """Refresh the changed MR's comment and all affected waiting positions.
-
-        A priority change also needs feedback when the MR was already first.
-        Processing comments must remain intact for MRs already running.
-        """
+    async def retry_pending(self, project_id: int) -> None:
+        """Repair durable priority feedback independently of metadata changes."""
         queue = await self.queue_manager.get_active_queue(project_id)
-        total = len(queue)
-        waiting = [(position, item) for position, item in enumerate(queue, start=1) if item.state == "queued"]
-        # Update the triggering MR first, then the other affected authors.
-        waiting.sort(key=lambda entry: entry[1].mr_iid != mr_iid)
-        for position, item in waiting:
-            old_position = positions_before.get(item.mr_iid)
-            if old_position is None:
+        pending_items = [item for item in queue if item.pending_notification is not None]
+        pending_items.sort(
+            key=lambda item: json.loads(item.pending_notification or "{}").get("status") != "priority_changed"
+        )
+        for item in pending_items:
+            pending = item.pending_notification
+            if pending is None:
                 continue
-            if item.mr_iid == mr_iid:
-                await self.notifier.notify(
-                    mr_iid,
-                    "priority_changed",
-                    priority="Hotfix priority enabled" if item.is_hotfix else "Hotfix priority removed",
-                    position=position,
-                    total=total,
-                    estimated_minutes=position * ESTIMATED_MINUTES_PER_POSITION,
-                )
-            elif old_position != position:
-                await self.notifier.notify(
+            payload = json.loads(pending)
+            try:
+                await self.notifier.notify_if_queued(
+                    project_id,
                     item.mr_iid,
-                    "position_changed_priority",
-                    position=position,
-                    old_position=old_position,
-                    total=total,
-                    estimated_minutes=position * ESTIMATED_MINUTES_PER_POSITION,
+                    payload["status"],
+                    self.queue_manager,
+                    pending=pending,
+                    old_position=payload["old_position"],
                 )
+            except Exception as error:
+                log.warning("Failed to send pending priority notification", mr_iid=item.mr_iid, error=str(error))
 
     def _select_notification_template(
         self,
@@ -220,9 +208,11 @@ class QueuePositionNotifier:
                 context=log_context.strip() if log_context else None,
             )
 
-            await self.notifier.notify(
+            await self.notifier.notify_if_queued(
+                project_id,
                 item.mr_iid,
                 template,
+                self.queue_manager,
                 position=new_position,
                 total=total,
                 old_position=old_position,

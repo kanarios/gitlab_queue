@@ -23,6 +23,16 @@ class FakeNotifier:
     # Error injection
     notify_error: Exception | None = None
 
+    async def notify_if_queued(
+        self,
+        project_id: int,
+        mr_iid: int,
+        status: str,
+        queue_manager: Any,
+        **context: Any,
+    ) -> Note:
+        return await self.notify(mr_iid, status, **context)
+
     async def notify(self, mr_iid: int, status: str, **context: Any) -> Note:
         if self.notify_error:
             raise self.notify_error

@@ -195,6 +195,8 @@ class QueueScheduler:
         Must be called while holding _sync_lock.
         """
         stats = SyncStats()
+        snapshot = await self.queue_manager.get_active_queue(self.settings.gitlab_project_id)
+        revisions = {item.mr_iid: (item.queue_id, item.metadata_version) for item in snapshot}
 
         # Get current state from GitLab - fetch MRs with queue label OR hotfix label
         log.debug("Fetching MRs with queue or hotfix label from GitLab")
@@ -214,8 +216,7 @@ class QueueScheduler:
         # Merge both lists, removing duplicates (MR might have both labels)
         gitlab_mrs_dict = {mr.iid: mr for mr in queue_label_mrs}
         for mr in hotfix_label_mrs:
-            if mr.iid not in gitlab_mrs_dict:
-                gitlab_mrs_dict[mr.iid] = mr
+            gitlab_mrs_dict[mr.iid] = mr
         gitlab_mrs = list(gitlab_mrs_dict.values())
 
         stats.mrs_in_gitlab = len(gitlab_mrs)
@@ -235,8 +236,19 @@ class QueueScheduler:
         stats.removed = await self._remove_orphaned_mrs(queue_items, gitlab_mr_iids)
         updater = QueueMetadataUpdater(self.queue_manager, self.settings.hotfix_label, self.position_notifier)
         for mr in gitlab_mrs:
-            if mr.iid in queue_mr_iids and await updater.refresh(self.settings.gitlab_project_id, mr.iid, mr.labels):
+            if (
+                mr.iid in queue_mr_iids
+                and mr.iid in revisions
+                and await updater.refresh(
+                    self.settings.gitlab_project_id,
+                    mr.iid,
+                    mr.labels,
+                    expected_revision=revisions[mr.iid],
+                    notify=False,
+                )
+            ):
                 stats.updated += 1
+        await updater.retry_pending(self.settings.gitlab_project_id)
         stats.unchanged = len(gitlab_mr_iids & queue_mr_iids) - stats.updated
 
         # Broadcast and update stats if queue changed

@@ -5,13 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from gitlab_queue.utils.logging import get_logger
-
 if TYPE_CHECKING:
     from gitlab_queue.core.protocols import QueueManagerProtocol
     from gitlab_queue.core.queue_position_notifier import QueuePositionNotifier
-
-log = get_logger(__name__)
 
 
 @dataclass
@@ -20,9 +16,38 @@ class QueueMetadataUpdater:
     hotfix_label: str
     position_notifier: QueuePositionNotifier | None = None
 
-    async def refresh(self, project_id: int, mr_iid: int, labels: list[str]) -> bool:
+    async def refresh(
+        self,
+        project_id: int,
+        mr_iid: int,
+        labels: list[str],
+        *,
+        expected_revision: tuple[int, int] | None = None,
+        notify: bool = True,
+    ) -> bool:
+        async with self.queue_manager.metadata_lock(project_id):
+            updated = await self._refresh(project_id, mr_iid, labels, expected_revision)
+            if notify:
+                await self.retry_pending(project_id)
+            return updated
+
+    async def retry_pending(self, project_id: int) -> None:
+        if self.position_notifier:
+            await self.position_notifier.retry_pending(project_id)
+
+    async def _refresh(
+        self,
+        project_id: int,
+        mr_iid: int,
+        labels: list[str],
+        expected_revision: tuple[int, int] | None,
+    ) -> bool:
         item = await self.queue_manager.get_queue_item(project_id, mr_iid)
         if item is None or item.state not in ("queued", "rebasing", "testing", "merging"):
+            return False
+
+        revision = (item.queue_id, item.metadata_version)
+        if expected_revision is not None and expected_revision != revision:
             return False
 
         is_hotfix = self.hotfix_label in labels
@@ -30,14 +55,12 @@ class QueueMetadataUpdater:
         if not priority_changed and set(item.labels) == set(labels):
             return False
 
-        positions_before: dict[int, int] = {}
-        if priority_changed and self.position_notifier:
-            positions_before = await self.position_notifier.capture_queue_positions(project_id)
-
-        updated = await self.queue_manager.update_hotfix_status(project_id, mr_iid, is_hotfix, labels)
-        if updated and priority_changed and self.position_notifier:
-            try:
-                await self.position_notifier.notify_priority_changed(project_id, mr_iid, positions_before)
-            except Exception as error:
-                log.warning("Failed to notify priority change", mr_iid=mr_iid, error=str(error))
+        updated = await self.queue_manager.update_hotfix_status(
+            project_id,
+            mr_iid,
+            is_hotfix,
+            labels,
+            expected_revision=revision,
+            notify_positions=priority_changed,
+        )
         return updated

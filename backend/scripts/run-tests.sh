@@ -5,8 +5,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-# Run unit tests (fast, run on every commit)
-echo "Running unit tests..."
-uv run vedro run scenarios/unit/ scenarios/models/ scenarios/core/ --fail-fast
+# Run local suites, including queue and MR webhook regressions, on every commit.
+echo "Running backend tests..."
+uv run vedro run scenarios/unit/ scenarios/models/ scenarios/core/ scenarios/webhooks/mr_webhook/ --fail-fast
 
 echo "All tests passed!"
