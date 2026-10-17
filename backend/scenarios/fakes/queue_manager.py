@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 class FakeQueueManager:
     _metadata_locks: dict[int, Lock] = field(default_factory=dict)
     _notification_locks: dict[tuple[int, int], Lock] = field(default_factory=dict)
+    _admission_locks: dict[tuple[int, int], Lock] = field(default_factory=dict)
     _completion_locks: dict[tuple[int, int], Lock] = field(default_factory=dict)
 
     def metadata_lock(self, project_id: int) -> Lock:
@@ -23,6 +24,9 @@ class FakeQueueManager:
 
     def notification_lock(self, project_id: int, mr_iid: int) -> Lock:
         return self._notification_locks.setdefault((project_id, mr_iid), Lock())
+
+    def admission_lock(self, project_id: int, mr_iid: int) -> Lock:
+        return self._admission_locks.setdefault((project_id, mr_iid), Lock())
 
     def completion_lock(self, project_id: int, mr_iid: int) -> Lock:
         return self._completion_locks.setdefault((project_id, mr_iid), Lock())
@@ -72,10 +76,10 @@ class FakeQueueManager:
         pass
 
     async def defer_requeue(self, project_id, mr, request):
-        pass
+        return True
 
-    async def cancel_requeue(self, project_id, queue_id, event_at):
-        pass
+    async def cancel_requeue(self, project_id, queue_id, event_at, **options):
+        return True
 
     async def clear_pending_notification(self, project_id: int, mr_iid: int, pending: str) -> None:
         item = self._items.get(mr_iid)

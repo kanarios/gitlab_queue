@@ -16,6 +16,7 @@ from sqlalchemy import text
 
 from gitlab_queue.metrics import OPERATIONS_TOTAL
 from gitlab_queue.models.completion import CompletionRequest, requeue_is_cancelled
+from gitlab_queue.models.event_order import compare_event, preserve_uncertainty
 from gitlab_queue.models.queue_item import DashboardStats, QueueItem
 from gitlab_queue.utils.logging import get_logger
 
@@ -368,6 +369,9 @@ class QueueManager:
 
     def notification_lock(self, project_id: int, mr_iid: int) -> Lock:
         return self.db.queue_notification_lock(project_id, mr_iid)
+
+    def admission_lock(self, project_id: int, mr_iid: int) -> Lock:
+        return self.db.queue_admission_lock(project_id, mr_iid)
 
     def completion_lock(self, project_id: int, mr_iid: int) -> Lock:
         return self.db.queue_completion_lock(project_id, mr_iid)
@@ -959,68 +963,106 @@ class QueueManager:
                 {"pending": json.dumps(payload), "project_id": project_id, "id": queue_id},
             )
 
-    async def defer_requeue(self, project_id: int, mr: MergeRequest, request: dict[str, Any]) -> None:
+    async def defer_requeue(self, project_id: int, item: QueueItem, request: dict[str, Any]) -> bool:
+        """Admit from the original row before HTTP; False means ownership changed."""
         params = {
             "project_id": project_id,
-            "iid": mr.iid,
-            "title": mr.title,
-            "author_name": mr.author.name,
-            "author_username": mr.author.username,
-            "author_avatar": mr.author.avatar_url,
-            "target_branch": mr.target_branch,
-            "labels": json.dumps(request.get("labels", mr.labels)),
+            "iid": item.mr_iid,
+            "title": request.get("title", item.title),
+            "author_name": item.author_name,
+            "author_username": item.author_username,
+            "author_avatar": item.author_avatar,
+            "target_branch": request.get("target_branch", item.target_branch),
+            "labels": json.dumps(request.get("labels", item.labels)),
             "is_hotfix": int(request["is_hotfix"]),
         }
-        pending = json.dumps({**request, "token": uuid4().hex, "params": params})
-        async with self.db.transaction() as session:
-            result = await session.execute(
-                text("SELECT requeue_request FROM merge_requests WHERE project_id = :project_id AND id = :id"),
-                {"project_id": project_id, "id": request["queue_id"]},
-            )
-            saved = result.scalar_one_or_none()
-            if self._older_requeue_request(request, saved):
-                return
-            await session.execute(
-                text(
-                    "UPDATE merge_requests SET requeue_request = :pending WHERE project_id = :project_id "
-                    "AND id = :id AND pending_completion IS NOT NULL AND (requeue_request = :saved "
-                    "OR (requeue_request IS NULL AND :saved IS NULL))"
-                ),
-                {"pending": pending, "project_id": project_id, "id": request["queue_id"], "saved": saved},
-            )
+        return await self._write_requeue(project_id, item.queue_id, {**request, "params": params})
 
-    def _older_requeue_request(self, request: dict[str, Any], saved: str | None) -> bool:
-        event_at = request.get("requested_at")
-        if saved is None or event_at is None:
-            return False
-        previous = json.loads(saved)
-        times = [
-            time for time in [previous.get("requested_at"), *previous.get("cancelled_events", [])] if time is not None
-        ]
-        return bool(times) and event_at <= max(times)
+    async def _write_requeue(self, project_id: int, queue_id: int, incoming: dict[str, Any]) -> bool:
+        async with self.db.queue_intent_lock(project_id, queue_id):
+            while True:
+                async with self.db.transaction() as session:
+                    result = await session.execute(
+                        text(
+                            "SELECT requeue_request FROM merge_requests WHERE project_id = :project_id AND id = :id AND pending_completion IS NOT NULL"
+                        ),
+                        {"project_id": project_id, "id": queue_id},
+                    )
+                    row = result.first()
+                    if row is None:
+                        return False
+                    saved = row[0]
+                    previous = json.loads(saved) if saved else {}
+                    message_id = incoming.get("message_id")
+                    if message_id is not None and message_id in previous.get("seen_messages", []):
+                        return True
+                    order = compare_event(incoming, previous)
+                    if order < 0:
+                        return True
+                    cancelling = incoming.get("cancelled", False)
+                    if order == 0 and cancelling and previous and not previous.get("cancelled_events"):
+                        return True
+                    pending = self._merge_requeue(incoming, previous, order, cancelling)
+                    pending["token"] = uuid4().hex
+                    pending["seen_messages"] = [
+                        *previous.get("seen_messages", []),
+                        *([message_id] if message_id else []),
+                    ]
+                    result = await session.execute(
+                        text(
+                            "UPDATE merge_requests SET requeue_request = :pending WHERE project_id = :project_id AND id = :id AND pending_completion IS NOT NULL AND (requeue_request = :saved OR (requeue_request IS NULL AND :saved IS NULL)) RETURNING id"
+                        ),
+                        {"pending": json.dumps(pending), "project_id": project_id, "id": queue_id, "saved": saved},
+                    )
+                    if result.first() is not None:
+                        return True
+                # A separate writer changed the token. Reread and compare source
+                # order rather than acknowledging a zero-row conditional write.
 
-    async def cancel_requeue(self, project_id: int, queue_id: int, event_at: datetime) -> None:
-        async with self.db.transaction() as session:
-            result = await session.execute(
-                text("SELECT requeue_request FROM merge_requests WHERE project_id = :project_id AND id = :id"),
-                {"project_id": project_id, "id": queue_id},
-            )
-            saved = result.scalar_one_or_none()
-            if saved is None:
-                return
-            request = json.loads(saved)
-            requested_at = request.get("requested_at")
-            if requested_at is not None and event_at <= datetime.fromisoformat(requested_at):
-                return
-            request["cancelled_events"] = [*request.get("cancelled_events", []), event_at.isoformat()]
-            request["token"] = uuid4().hex
-            await session.execute(
-                text(
-                    "UPDATE merge_requests SET requeue_request = :request WHERE project_id = :project_id AND id = :id "
-                    "AND requeue_request = :saved AND pending_completion IS NOT NULL"
-                ),
-                {"request": json.dumps(request), "saved": saved, "project_id": project_id, "id": queue_id},
-            )
+    def _merge_requeue(
+        self, incoming: dict[str, Any], previous: dict[str, Any], order: int, cancelling: bool
+    ) -> dict[str, Any]:
+        if cancelling:
+            pending = {**previous, **incoming, "cancelled_events": [incoming["requested_at"]]}
+        else:
+            pending = dict(incoming)
+            if order == 0 and previous and not previous.get("cancelled_events"):
+                preserve_uncertainty(pending, previous)
+                pending["triggers"] = list(dict.fromkeys([*previous["triggers"], *incoming["triggers"]]))
+                pending["params"]["is_hotfix"] = int(
+                    bool(previous["params"]["is_hotfix"] or incoming["params"]["is_hotfix"])
+                )
+                pending["params"]["labels"] = json.dumps(
+                    list(
+                        dict.fromkeys(
+                            [
+                                *json.loads(previous["params"]["labels"]),
+                                *json.loads(incoming["params"]["labels"]),
+                            ]
+                        )
+                    )
+                )
+        return pending
+
+    async def cancel_requeue(
+        self,
+        project_id: int,
+        queue_id: int,
+        event_at: datetime,
+        *,
+        precision_us: int = 1,
+        message_id: str | None = None,
+    ) -> bool:
+        return await self._write_requeue(
+            project_id,
+            queue_id,
+            {
+                "requested_at": event_at.isoformat(),
+                "precision_us": precision_us,
+                "message_id": message_id,
+                "cancelled": True,
+            },
+        )
 
     async def _stage_completion_positions(
         self, session: Any, project_id: int, positions: dict[str, int], old_total: int
@@ -1056,7 +1098,11 @@ class QueueManager:
 
     async def finalize_completion(self, project_id: int, item: QueueItem, payload: dict[str, Any]) -> bool:
         """Archive and delete only this intent's incarnation; transfer any requeue atomically."""
-        async with self.db.transaction() as session:
+        async with (
+            self.admission_lock(project_id, item.mr_iid),
+            self.db.queue_intent_lock(project_id, item.queue_id),
+            self.db.transaction() as session,
+        ):
             result = await session.execute(
                 text(
                     "DELETE FROM merge_requests WHERE project_id = :project_id AND id = :id "

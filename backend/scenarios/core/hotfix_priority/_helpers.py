@@ -44,6 +44,8 @@ class GitLabServer:
     after_barriers: dict[tuple[str, str], tuple[Event, Event]] = field(default_factory=dict)
     failed_label_iids: set[int] = field(default_factory=set)
     after_mutation_barriers: dict[tuple[str, str], tuple[Event, Event]] = field(default_factory=dict)
+    label_requests: list[httpx.Request] = field(default_factory=list)
+    authenticated_user: dict[str, Any] = field(default_factory=lambda: {"id": 1, "bot": True})
 
     async def respond(self, request: httpx.Request) -> httpx.Response:
         response = self._response(request) if request.method == "GET" else None
@@ -68,6 +70,8 @@ class GitLabServer:
         return result
 
     def _response(self, request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v4/user":
+            return httpx.Response(200, json=self.authenticated_user)
         if "/notes" in request.url.path:
             mr_path = request.url.path.partition("/notes")[0]
             iid = int(mr_path.split("/")[-1])
@@ -94,6 +98,7 @@ class GitLabServer:
         matches = [mr for mr in self.mrs if request.url.path.endswith(f"/merge_requests/{mr['iid']}")]
         if matches:
             if request.method == "PUT":
+                self.label_requests.append(request)
                 if matches[0]["iid"] in self.failed_label_iids:
                     return httpx.Response(503, json={"message": "unavailable"})
                 data = json.loads(request.content)
@@ -136,12 +141,14 @@ class ObservedQueue(QueueManager):
         return item
 
     async def defer_requeue(self, project_id, mr, request):
-        await super().defer_requeue(project_id, mr, request)
+        result = await super().defer_requeue(project_id, mr, request)
         self.requeue_saved.set()
+        return result
 
-    async def cancel_requeue(self, project_id, queue_id, event_at):
-        await super().cancel_requeue(project_id, queue_id, event_at)
+    async def cancel_requeue(self, project_id, queue_id, event_at, **options):
+        result = await super().cancel_requeue(project_id, queue_id, event_at, **options)
         self.requeue_cancelled.set()
+        return result
 
     async def update_mr_state(self, project_id: int, mr_iid: int, state: str, **extra: Any) -> bool:
         result = await super().update_mr_state(project_id, mr_iid, state, **extra)
@@ -199,7 +206,17 @@ async def queue_services(queue: QueueManager, server: GitLabServer) -> AsyncIter
         await gitlab.close()
 
 
-def label_event(action: str, previous: list[str], current: list[str], *, state: str = "opened") -> MergeRequestEvent:
+def label_event(
+    action: str,
+    previous: list[str],
+    current: list[str],
+    *,
+    state: str = "opened",
+    updated_at: str | None = None,
+    event_uuid: str | None = None,
+    message_id: str | None = None,
+    user_id: int = 42,
+) -> MergeRequestEvent:
     return parse_merge_request_event(
         {
             "object_kind": "merge_request",
@@ -211,7 +228,10 @@ def label_event(action: str, previous: list[str], current: list[str], *, state: 
                 "action": action,
                 "source_branch": "urgent-fix",
                 "target_branch": "main",
+                "updated_at": updated_at,
             },
+            "_queue_webhook": {"event_uuid": event_uuid, "message_id": message_id},
+            "user": {"id": user_id},
             "labels": [{"title": label} for label in current],
             "changes": {
                 "labels": {

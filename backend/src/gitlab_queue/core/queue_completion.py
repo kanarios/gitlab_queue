@@ -10,6 +10,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 from gitlab_queue.models.completion import requeue_is_cancelled
 from gitlab_queue.utils.logging import get_logger
@@ -74,9 +75,45 @@ class QueueCompletion:
 
     async def _cleanup(self, project_id: int, item: QueueItem, payload: dict[str, Any]) -> None:
         if payload["request"]["remove_labels"] and not payload["labels_removed"]:
-            event_at = await self.notifier.remove_queue_label(item.mr_iid, strict=True)
+            event_at = await self._mutate_labels(project_id, item, payload, "remove", [])
             payload["labels_removed"] = True
             await self._record_label_event(project_id, item, payload, event_at)
+
+    async def _mutate_labels(
+        self, project_id: int, item: QueueItem, payload: dict[str, Any], action: str, triggers: list[str]
+    ) -> datetime | None:
+        operations = payload.setdefault("label_operations", [])
+        operation = next(
+            (
+                op
+                for op in operations
+                if not op["acknowledged"] and op["action"] == action and op["requested_triggers"] == triggers
+            ),
+            None,
+        )
+        if operation is None:
+            actor = await self.notifier.completion_actor()
+            operation = {
+                "uuid": str(uuid4()),
+                "action": action,
+                "triggers": triggers if action == "restore" else actor["triggers"],
+                "requested_triggers": triggers,
+                "actor_id": actor["id"],
+                "acknowledged": False,
+            }
+            operations.append(operation)
+            # Provenance is durable before the mutation, including lost ACKs.
+            await self.queue.save_completion_progress(project_id, item.queue_id, payload)
+        if action == "remove":
+            result = await self.notifier.remove_queue_label(item.mr_iid, strict=True, operation_id=operation["uuid"])
+        else:
+            result = await self.notifier.restore_queue_labels(item.mr_iid, triggers, operation_id=operation["uuid"])
+        operation["acknowledged"] = True
+        payload["label_events"].append(f"uuid:{operation['uuid']}")
+        # The authenticated account is the bot's service actor, even when
+        # GitLab reports bot=false for an ordinary dedicated service account.
+        payload["label_events"].append(f"actor:{operation['actor_id']}:{action}")
+        return result
 
     async def _finish(self, project_id: int, item: QueueItem) -> None:
         payload: dict[str, Any] = json.loads(item.pending_completion or "{}")
@@ -88,9 +125,9 @@ class QueueCompletion:
         if current.requeue_request is not None:
             requeue = json.loads(current.requeue_request)
             if requeue_is_cancelled(requeue, payload["label_events"]):
-                event_at = await self.notifier.remove_queue_label(item.mr_iid, strict=True)
+                event_at = await self._mutate_labels(project_id, item, payload, "remove", [])
             else:
-                event_at = await self.notifier.restore_queue_labels(item.mr_iid, requeue["triggers"])
+                event_at = await self._mutate_labels(project_id, item, payload, "restore", requeue["triggers"])
             await self._record_label_event(project_id, item, payload, event_at)
         if await self.queue.finalize_completion(project_id, current, payload):
             await self._after_completion(project_id, item, payload)

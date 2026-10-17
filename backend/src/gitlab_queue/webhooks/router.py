@@ -525,6 +525,11 @@ async def handle_gitlab_webhook(
     _validate_webhook_request(state, x_gitlab_token)
 
     payload = await request.json()
+    # Keep trusted transport identity in the same payload persisted for retries.
+    payload["_queue_webhook"] = {
+        "message_id": request.headers.get("webhook-id") or request.headers.get("Idempotency-Key"),
+        "event_uuid": request.headers.get("X-Gitlab-Event-UUID"),
+    }
     raw_project_id = payload.get("project", {}).get("id")
     configured_ids = set(state.project_components) if state.project_components else {state.settings.gitlab_project_id}
     if raw_project_id not in configured_ids:

@@ -48,10 +48,13 @@ class FakeNotifier:
     async def build_pipeline_url(self, pipeline_id: int) -> str:
         return self.pipeline_url_template.format(pipeline_id=pipeline_id)
 
-    async def remove_queue_label(self, mr_iid: int, *, strict: bool = False) -> None:
+    async def completion_actor(self):
+        return {"id": None, "bot": False, "triggers": ["merge_queue", "hotfix"]}
+
+    async def remove_queue_label(self, mr_iid: int, *, strict: bool = False, operation_id: str | None = None) -> None:
         self.remove_label_calls.append(mr_iid)
         if self.call_order_log is not None:
             self.call_order_log.append("remove_queue_label")
 
-    async def restore_queue_labels(self, mr_iid: int, labels: list[str]) -> None:
+    async def restore_queue_labels(self, mr_iid: int, labels: list[str], *, operation_id: str | None = None) -> None:
         pass

@@ -611,7 +611,18 @@ class MRNotifier:
         project_url = await self.gitlab_client.get_project_web_url()
         return f"{project_url}/-/pipelines/{pipeline_id}"
 
-    async def remove_queue_label(self, mr_iid: int, *, strict: bool = False) -> datetime | None:
+    async def completion_actor(self) -> dict[str, Any]:
+        """Authenticate provenance before starting a durable label mutation."""
+        user = await self.gitlab_client.get("/user", project_scoped=False)
+        return {
+            "id": user["id"],
+            "bot": bool(user.get("bot", False)),
+            "triggers": [self.settings.queue_label, self.settings.hotfix_label],
+        }
+
+    async def remove_queue_label(
+        self, mr_iid: int, *, strict: bool = False, operation_id: str | None = None
+    ) -> datetime | None:
         """Remove the queue label from an MR.
 
         Called when MR processing completes (merged, failed, removed)
@@ -624,7 +635,15 @@ class MRNotifier:
             labels = self.settings.queue_label
             if strict:
                 labels = ",".join(dict.fromkeys((self.settings.queue_label, self.settings.hotfix_label)))
-            mr = await self.gitlab_client.remove_mr_label(mr_iid, labels)
+            if operation_id is None:
+                mr = await self.gitlab_client.remove_mr_label(mr_iid, labels)
+            else:
+                response = await self.gitlab_client.put(
+                    f"/merge_requests/{mr_iid}",
+                    json={"remove_labels": labels},
+                    headers={"X-Gitlab-Event-UUID": operation_id},
+                )
+                mr = parse_merge_request(response)
             log.info("Queue label removed from MR", mr_iid=mr_iid, label=self.settings.queue_label)
             return mr.updated_at
         except GitLabNotFoundError:
@@ -642,9 +661,15 @@ class MRNotifier:
 
         return None
 
-    async def restore_queue_labels(self, mr_iid: int, labels: list[str]) -> datetime | None:
+    async def restore_queue_labels(
+        self, mr_iid: int, labels: list[str], *, operation_id: str | None = None
+    ) -> datetime | None:
         """Restore the explicit request only after the old lifecycle's cleanup."""
-        response = await self.gitlab_client.put(f"/merge_requests/{mr_iid}", json={"add_labels": ",".join(labels)})
+        response = await self.gitlab_client.put(
+            f"/merge_requests/{mr_iid}",
+            json={"add_labels": ",".join(labels)},
+            headers={"X-Gitlab-Event-UUID": operation_id} if operation_id else None,
+        )
         return parse_merge_request(response).updated_at
 
 
