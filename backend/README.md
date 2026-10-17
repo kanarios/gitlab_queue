@@ -52,15 +52,73 @@ legacy SQL dates with a space. Naive values represent UTC. Every PostgreSQL
 connection uses UTC; SQLite uses a deterministic parser on every physical
 connection, preserving microseconds at exact due/retention boundaries.
 Migration `a7b8c9d0e1f2` fixes four timestamp defaults and repairs stored literal
-`CURRENT_TIMESTAMP` values using one captured migration instant. Their original
-age is unknown, so the repair conservatively retains them as recent. Missing DLQ
-move dates use that same repair instant; valid dates and optional creation NULLs
-remain unchanged. An unknown retry receipt date remains `null` when moved to DLQ
-and returned by the API. Requeue records a new receipt date. Downgrade to the old
-non-nullable original-date schema refuses before changes while unknown DLQ
-original dates remain; explicitly requeue or delete those entries first.
-SQLite identity high-water marks survive
-rebuilds, including when the highest issued row has been deleted.
+queue/history `CURRENT_TIMESTAMP` values using one captured migration instant.
+Retry/DLQ raw dates are preserved instead: unknown receipt/move dates are returned
+as JSON `null`, and an unknown retry due date is not automatically dispatched.
+Unknown DLQ age is not automatically expired. A known due date remains actionable
+even when its receipt date is unknown. Valid dates and offsets remain unchanged.
+PostgreSQL comparison accepts portable calendar ISO/SQL date syntax, not its
+relative/reserved words, infinities, BC years or normalized 24:00/leap-second
+clocks. Those raw values remain unknown and cannot block a valid retry batch.
+SQLite identity high-water marks survive rebuilds, including deleted highest IDs.
+
+### Automatic retry/DLQ rollback archive
+
+Use the new checkout for both directions of `a7b8c9d0e1f2` ↔ `f6a7b8c9d0e1`.
+The backward-compatible hooks in a7 work even when a7 was already installed;
+no visit to a new revision is required. Older checkouts do not contain these hooks.
+
+Before migration, stop webhook intake, retry processors, scheduled jobs and
+administrative writes. The common file/advisory gate serializes raw Alembic and
+programmatic migrations; it does **not** serialize application writers. Migration
+copy/delete, batch DDL, restore/acknowledgment and the revision marker share a real
+database transaction, including an explicit physical SQLite transaction.
+
+Downgrade moves incompatible retry/DLQ rows to three same-database typed tables:
+`gq_retry_rollback_manifest_v1`, `gq_retry_rollback_rows_v1` and
+`gq_dlq_rollback_rows_v1`. Unknown/unparseable dates are preserved as their exact
+raw TEXT/NULL values, together with every original column, identity, project,
+payload string, attempt count, limit, due time and error. These rows are absent
+from the old runtime's live retry/DLQ tables, so they cannot be delivered there.
+No requeue reset or invented date is used.
+One permanent verified owner/format marker remains after batch acknowledgment.
+Correctly-shaped empty tables without that marker are refused, never adopted.
+
+Upgrade first captures incompatible new writes from the old runtime **before**
+date repair, then restores all verified archive rows **after** schema repair.
+Already completed historical a7 repairs cannot be reconstructed retroactively.
+The versioned migration helper is independent of future application models.
+Archive tables are excluded precisely from model autogeneration and are outside
+managed drops and retention. They survive downgrade to `base`, but only captured
+incompatible retry/DLQ rows are protected: compatible live rows and other managed
+tables are still dropped by full reversal. This archive is not a full backup.
+
+Restore verifies format/ownership, source schema, raw types, counts and digests
+before writes. Any occupied table-global ID, including identical data or a row
+from another project, stops the entire restoration without overwriting/remapping
+or acknowledging the archive. Unsupported archive shapes and source foreign
+references also stop safely. Every row is verified after insertion before any
+archive acknowledgment. Sequences never rewind and include archived/deleted
+high-water marks; PostgreSQL sequence advances can leave harmless gaps after a
+rolled-back migration. Interrupted transactions can be retried after reopening.
+
+Operational order:
+
+1. Stop all runtime writers and retain a verified full database backup. Use the
+   checkout containing these updated a7 hooks for the migration commands.
+2. With the intended database configured, run `uv run alembic downgrade
+   f6a7b8c9d0e1`. Verify the revision and archive counts before starting an
+   application version compatible with f6. Do not let an older copy of a7
+   automatically perform the return upgrade.
+3. For the return upgrade, stop writers again and use the updated checkout:
+   `uv run alembic upgrade head` (or its normal startup migration runner).
+4. If preflight reports an identity/schema/integrity conflict, leave writers
+   stopped. The transaction preserves live rows and the archive. Reconcile the
+   conflict explicitly against the retained backup; do not force acknowledgment,
+   ignore duplicate IDs or fabricate dates. Rerun the migration after resolution.
+5. Verify a7 is installed, restored rows match their original data and any
+   existing archive tables have no pending batch/raw rows (the owner marker
+   remains), then resume the new runtime.
 
 The migration scenarios cover populated previous revisions and legacy schema
 markers, concurrent startup, full reversal and Alembic model consistency. Fresh

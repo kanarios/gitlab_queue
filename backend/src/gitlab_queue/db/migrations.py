@@ -46,7 +46,7 @@ async def _drain_task[T](task: asyncio.Task[T]) -> T:
                 return task.result()
 
 
-def _get_alembic_config(database_url: str) -> Config:
+def _get_alembic_config(database_url: str, *, startup_lock_held: bool = False) -> Config:
     """Create Alembic config with correct paths.
 
     Args:
@@ -69,6 +69,8 @@ def _get_alembic_config(database_url: str) -> Config:
     config = Config(str(alembic_ini))
     config.set_main_option("sqlalchemy.url", database_url)
     config.attributes["database_url_override"] = database_url
+    # Internal ownership handoff only; never sourced from CLI/environment input.
+    config.attributes["_startup_migration_lock_held"] = startup_lock_held
 
     # Ensure script_location is absolute
     migrations_dir = backend_dir / "migrations"
@@ -131,7 +133,7 @@ async def get_pending_migrations(database_url: str) -> list[str]:
     return list(reversed(pending))
 
 
-def _run_upgrade(database_url: str, revision: str = "head") -> None:
+def _run_upgrade(database_url: str, revision: str = "head", *, startup_lock_held: bool = False) -> None:
     """Run alembic upgrade synchronously.
 
     This is called in a thread pool to avoid blocking the event loop.
@@ -140,11 +142,11 @@ def _run_upgrade(database_url: str, revision: str = "head") -> None:
         database_url: SQLAlchemy database URL.
         revision: Target revision (default: "head").
     """
-    config = _get_alembic_config(database_url)
+    config = _get_alembic_config(database_url, startup_lock_held=startup_lock_held)
     command.upgrade(config, revision)
 
 
-async def _stamp_legacy_database_if_needed(database_url: str) -> bool:
+async def _stamp_legacy_database_if_needed(database_url: str, *, startup_lock_held: bool = False) -> bool:
     """Stamp a legacy database at the newest revision its schema satisfies.
 
     Detects databases created before Alembic was introduced: they have
@@ -385,7 +387,7 @@ async def _stamp_legacy_database_if_needed(database_url: str) -> bool:
     if has_merge_requests and not has_alembic_version:
         assert legacy_revision is not None
         log.info("Legacy database detected, stamping schema baseline", revision=legacy_revision)
-        config = _get_alembic_config(database_url)
+        config = _get_alembic_config(database_url, startup_lock_held=startup_lock_held)
         try:
             await asyncio.to_thread(command.stamp, config, legacy_revision)
             log.info("Legacy database stamped successfully", revision=legacy_revision)
@@ -400,7 +402,9 @@ async def _stamp_legacy_database_if_needed(database_url: str) -> bool:
     return False
 
 
-async def _run_migrations_unlocked(database_url: str, revision: str = "head") -> bool:
+async def _run_migrations_unlocked(
+    database_url: str, revision: str = "head", *, startup_lock_held: bool = False
+) -> bool:
     """Run all pending Alembic migrations.
 
     This function should be called at application startup to ensure
@@ -420,7 +424,7 @@ async def _run_migrations_unlocked(database_url: str, revision: str = "head") ->
     log.info("Checking database migrations", database_url=make_url(database_url).render_as_string(hide_password=True))
 
     # Stamp legacy databases that were created before Alembic was introduced
-    await _stamp_legacy_database_if_needed(database_url)
+    await _stamp_legacy_database_if_needed(database_url, startup_lock_held=startup_lock_held)
 
     # Check pending migrations
     pending = await get_pending_migrations(database_url)
@@ -436,7 +440,7 @@ async def _run_migrations_unlocked(database_url: str, revision: str = "head") ->
     )
 
     # Run migrations in thread pool (alembic is synchronous)
-    await asyncio.to_thread(_run_upgrade, database_url, revision)
+    await asyncio.to_thread(_run_upgrade, database_url, revision, startup_lock_held=startup_lock_held)
 
     log.info("Database migrations completed successfully")
     return True
@@ -493,7 +497,7 @@ async def _migration_lock(database_url: str) -> AsyncIterator[None]:
 async def run_migrations(database_url: str, revision: str = "head") -> bool:
     """Run pending migrations while holding a database-specific startup lock."""
     async with _migration_lock(database_url):
-        migration_task = asyncio.create_task(_run_migrations_unlocked(database_url, revision))
+        migration_task = asyncio.create_task(_run_migrations_unlocked(database_url, revision, startup_lock_held=True))
         try:
             return await asyncio.shield(migration_task)
         except asyncio.CancelledError:

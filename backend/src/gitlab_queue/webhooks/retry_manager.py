@@ -29,6 +29,18 @@ if TYPE_CHECKING:
 log = get_logger(__name__)
 
 
+def _optional_timestamp(value: str | datetime | None) -> datetime | None:
+    """Expose an unparseable legacy date as unknown without rewriting storage."""
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    if value is not None and value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value
+
+
 # =============================================================================
 # SQL Statements
 # =============================================================================
@@ -599,11 +611,7 @@ class WebhookRetryManager:
         if next_attempt_at.tzinfo is None:
             next_attempt_at = next_attempt_at.replace(tzinfo=UTC)
 
-        created_at = row["created_at"]
-        if isinstance(created_at, str):
-            created_at = datetime.fromisoformat(created_at)
-        if created_at is not None and created_at.tzinfo is None:
-            created_at = created_at.replace(tzinfo=UTC)
+        created_at = _optional_timestamp(row["created_at"])
 
         payload = row["payload"]
         if isinstance(payload, str):
@@ -623,17 +631,8 @@ class WebhookRetryManager:
 
     def _row_to_dlq_item(self, row: RowMapping | dict[str, Any]) -> DLQItem:
         """Convert a database row to a DLQItem."""
-        original_created_at = row["original_created_at"]
-        if isinstance(original_created_at, str):
-            original_created_at = datetime.fromisoformat(original_created_at)
-        if original_created_at is not None and original_created_at.tzinfo is None:
-            original_created_at = original_created_at.replace(tzinfo=UTC)
-
-        moved_to_dlq_at = row["moved_to_dlq_at"]
-        if isinstance(moved_to_dlq_at, str):
-            moved_to_dlq_at = datetime.fromisoformat(moved_to_dlq_at)
-        if moved_to_dlq_at is not None and moved_to_dlq_at.tzinfo is None:
-            moved_to_dlq_at = moved_to_dlq_at.replace(tzinfo=UTC)
+        original_created_at = _optional_timestamp(row["original_created_at"])
+        moved_to_dlq_at = _optional_timestamp(row["moved_to_dlq_at"])
 
         payload = row["payload"]
         if isinstance(payload, str):

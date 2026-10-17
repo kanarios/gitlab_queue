@@ -17,7 +17,7 @@ from gitlab_queue.webhooks.retry_manager import WebhookRetryManager
 
 
 @scenario()
-async def timestamp_default_repair_and_identity_preserve_legacy_data():
+async def timestamp_defaults_and_identity_preserve_legacy_data_without_rewriting_retry_dates():
     async with isolated_database_url() as database_url:
         with given("the previous schema with literal defaults, valid offsets, optional NULL and deleted high IDs"):
             await run_migrations(database_url)
@@ -93,9 +93,6 @@ async def timestamp_default_repair_and_identity_preserve_legacy_data():
                         for table, column in (
                             ("merge_requests", "created_at"),
                             ("merge_requests_history", "created_at"),
-                            ("webhook_retry_queue", "created_at"),
-                            ("webhook_dlq", "moved_to_dlq_at"),
-                            ("webhook_dlq", "original_created_at"),
                         )
                     ]
                     preserved_valid = (
@@ -104,6 +101,20 @@ async def timestamp_default_repair_and_identity_preserve_legacy_data():
                     preserved_null = (
                         await session.execute(text("SELECT created_at FROM webhook_retry_queue WHERE project_id = 999"))
                     ).scalar_one()
+                    raw_retry_date = (
+                        await session.execute(
+                            text(
+                                "SELECT created_at FROM webhook_retry_queue WHERE project_id = 123 ORDER BY id LIMIT 1"
+                            )
+                        )
+                    ).scalar_one()
+                    raw_dead_dates = (
+                        await session.execute(
+                            text(
+                                "SELECT original_created_at, moved_to_dlq_at FROM webhook_dlq WHERE project_id = 123 ORDER BY id LIMIT 1"
+                            )
+                        )
+                    ).one()
                     await session.commit()
                 async with database.engine.connect() as connection:
                     defaults = await connection.run_sync(
@@ -135,6 +146,8 @@ async def timestamp_default_repair_and_identity_preserve_legacy_data():
             assert before <= datetime.fromisoformat(repaired[0]) <= after
             assert preserved_valid == valid
             assert preserved_null is None
+            assert raw_retry_date == "CURRENT_TIMESTAMP"
+            assert tuple(raw_dead_dates) == ("CURRENT_TIMESTAMP", "CURRENT_TIMESTAMP")
             assert all("'CURRENT_TIMESTAMP'" not in default for default in defaults)
             assert new_queue.queue_id > removed.queue_id
             assert new_retry > retry_high

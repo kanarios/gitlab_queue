@@ -6,6 +6,8 @@ Revises: f6a7b8c9d0e1
 
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from pathlib import Path
+from runpy import run_path
 
 import sqlalchemy as sa
 from alembic import op
@@ -21,6 +23,11 @@ _DEFAULTS = (
     ("webhook_retry_queue", "created_at"),
     ("webhook_dlq", "moved_to_dlq_at"),
 )
+
+
+def _archive_contract():
+    # Frozen migration helper, independent of future application models/readers.
+    return run_path(str(Path(__file__).parents[1] / "retry_archive_v1.py"))
 
 
 def _sequence_high_water() -> dict[str, int]:
@@ -61,6 +68,10 @@ def _alter_defaults(*, executable: bool) -> None:
 
 
 def upgrade() -> None:
+    archive = _archive_contract()
+    # Old-runtime writes can contain unknown/literal dates too. Capture those
+    # BEFORE repairs, then restore their exact raw state after the schema change.
+    archive["capture"](op.get_bind(), "f6a7b8c9d0e1")
     # The original time of a literal is unknowable. Retain these rows as recent
     # rather than expiring them using an invented historical age. Valid dates
     # (including offsets) and optional creation NULLs are left untouched.
@@ -75,19 +86,10 @@ def upgrade() -> None:
         {"repaired": repaired_at},
     )
     _alter_defaults(executable=True)
+    archive["restore"](op.get_bind())
 
 
 def downgrade() -> None:
-    # The old schema cannot represent unknown receipt dates. Refuse before any
-    # schema changes rather than inventing provenance or discarding events.
-    unknown = (
-        op.get_bind()
-        .execute(sa.text("SELECT COUNT(*) FROM webhook_dlq WHERE original_created_at IS NULL"))
-        .scalar_one()
-    )
-    if unknown:
-        raise RuntimeError(
-            "Cannot downgrade DLQ with unknown original dates; explicitly requeue or delete these entries first."
-        )
+    _archive_contract()["capture"](op.get_bind(), "a7b8c9d0e1f2")
     # Reverses defaults; a repaired unknown historical date cannot be recovered.
     _alter_defaults(executable=False)

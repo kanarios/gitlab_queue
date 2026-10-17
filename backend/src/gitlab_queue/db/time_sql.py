@@ -8,6 +8,10 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql.compiler import SQLCompiler
 from sqlalchemy.sql.functions import FunctionElement
 
+_CALENDAR_DATE = r"([0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{8})"
+_CLOCK = r"([01][0-9]|2[0-3])(:?[0-5][0-9](:?[0-5][0-9]([.,][0-9]+)?)?)?"
+_PORTABLE_TIMESTAMP = rf"^{_CALENDAR_DATE}([Tt ]{_CLOCK}(Z|[+-]{_CLOCK})?)?$"
+
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
@@ -29,7 +33,14 @@ def utc_epoch(value: str | None) -> float | None:
 def epoch_sql(column: str, backend: str) -> str:
     """Return Unix seconds for a trusted SQL column/expression, including offsets."""
     if backend == "postgresql":
-        return f"CAST(EXTRACT(EPOCH FROM CAST({column} AS TIMESTAMP WITH TIME ZONE)) AS DOUBLE PRECISION)"
+        # PostgreSQL also accepts relative words, infinities, BC years and
+        # normalized 24:00/leap-second clocks, which Python's ISO reader rejects.
+        # Do not turn those raw unknown values into scheduling/retention times.
+        return (
+            f"CASE WHEN ({column}) ~ '{_PORTABLE_TIMESTAMP}' "
+            f"AND pg_input_is_valid({column}, 'timestamp with time zone') "
+            f"THEN CAST(EXTRACT(EPOCH FROM CAST({column} AS TIMESTAMP WITH TIME ZONE)) AS DOUBLE PRECISION) END"
+        )
     return f"queue_epoch({column})"
 
 
@@ -47,4 +58,4 @@ def _sqlite_epoch(element: TimestampEpoch, compiler: SQLCompiler, **kwargs: Any)
 
 @compiles(TimestampEpoch, "postgresql")
 def _postgres_epoch(element: TimestampEpoch, compiler: SQLCompiler, **kwargs: Any) -> str:
-    return f"CAST(EXTRACT(EPOCH FROM CAST({compiler.process(element.clauses, **kwargs)} AS TIMESTAMP WITH TIME ZONE)) AS DOUBLE PRECISION)"
+    return epoch_sql(compiler.process(element.clauses, **kwargs), "postgresql")

@@ -8,8 +8,8 @@ from alembic import command
 from scenarios.contexts.api_helpers import created_mock_health, created_test_jwt
 from scenarios.contexts.database_backend import isolated_database_url
 from scenarios.core.hotfix_priority._helpers import GitLabServer, queue_services
-from sqlalchemy import null
-from vedro import catched, given, scenario, then, when
+from sqlalchemy import null, text
+from vedro import given, scenario, then, when
 
 from gitlab_queue.core.queue import QueueManager
 from gitlab_queue.db.database import Database
@@ -101,7 +101,7 @@ async def legacy_unknown_retry_creation_survives_dlq_and_requeue():
 
 
 @scenario()
-async def legacy_missing_dlq_move_time_uses_the_shared_repair_instant():
+async def legacy_missing_dlq_move_time_and_literal_creation_remain_unknown():
     async with isolated_database_url() as database_url:
         with given("a previous-schema DLQ entry with a missing move time and a literal timestamp elsewhere"):
             await run_migrations(database_url)
@@ -131,29 +131,33 @@ async def legacy_missing_dlq_move_time_uses_the_shared_repair_instant():
                 )
                 await session.flush()
                 dead_id = dead.id
-            before = datetime.now(UTC)
 
-        with when("migration repairs the missing time and authenticated list/detail read the reopened database"):
+        with when("migration preserves raw unknown dates and authenticated list/detail read the reopened database"):
             await run_migrations(database_url)
-            after = datetime.now(UTC)
             async with Database(database_url) as database:
                 manager = WebhookRetryManager(database)
                 repaired_retry = (await manager.get_events_ready_for_retry(project_id=123))[0]
                 repaired_dead = await manager.get_dlq_entry(dead_id, 123)
+                async with database.session() as session:
+                    raw_date = (
+                        await session.execute(text("SELECT created_at FROM webhook_retry_queue WHERE project_id = 123"))
+                    ).scalar_one()
+                    await session.commit()
                 async with authenticated_dlq_client(database, manager) as client:
                     listing = await client.get("/api/dlq")
                     detail = await client.get(f"/api/dlq/{dead_id}")
 
-        with then("one conservative UTC instant makes both public readers usable without changing the original date"):
-            assert repaired_dead.moved_to_dlq_at == repaired_retry.created_at
-            assert before <= repaired_dead.moved_to_dlq_at <= after
+        with then("no original or move date is fabricated and public readers remain usable"):
+            assert repaired_dead.moved_to_dlq_at is None
+            assert repaired_retry.created_at is None
+            assert raw_date == "CURRENT_TIMESTAMP"
             assert repaired_dead.original_created_at == datetime.fromisoformat(original_at)
             assert listing.status_code == detail.status_code == 200
-            assert detail.json()["moved_to_dlq_at"] == repaired_dead.moved_to_dlq_at.isoformat()
+            assert detail.json()["moved_to_dlq_at"] is None
 
 
 @scenario()
-async def downgrade_refuses_to_discard_unknown_original_dates():
+async def downgrade_archives_unknown_original_dates_without_redelivery():
     async with isolated_database_url() as database_url:
         with given("a current-schema DLQ row whose original receipt date is unknown"):
             await run_migrations(database_url)
@@ -170,25 +174,25 @@ async def downgrade_refuses_to_discard_unknown_original_dates():
                 await session.flush()
                 dead_id = dead.id
 
-        with when("downgrade encounters data that the previous NOT NULL schema cannot represent"):
+        with when("downgrade archives unrepresentable rows and upgrade automatically restores them"):
             config = _get_alembic_config(database_url)
-            with catched(RuntimeError) as refused:
-                await asyncio.to_thread(command.downgrade, config, "f6a7b8c9d0e1")
+            await asyncio.to_thread(command.downgrade, config, "f6a7b8c9d0e1")
             current = await get_current_revision(database_url)
             async with Database(database_url) as database:
                 manager = WebhookRetryManager(database, base_delay_seconds=0)
-                preserved = await manager.get_dlq_entry(dead_id, 123)
-                replacement_id = await manager.retry_dlq_entry(dead_id, 123)
-            await asyncio.to_thread(command.downgrade, config, "f6a7b8c9d0e1")
+                archived = await manager.get_dlq_entries(project_id=123)
             await run_migrations(database_url)
             async with Database(database_url) as database:
-                replacement = (await WebhookRetryManager(database).get_events_ready_for_retry(project_id=123))[0]
+                manager = WebhookRetryManager(database)
+                preserved = await manager.get_dlq_entry(dead_id, 123)
+                retry = await manager.get_events_ready_for_retry(project_id=123)
 
-        with then("the refusal preserves uncertainty and data until an explicit requeue makes downgrade safe"):
-            assert refused.type is RuntimeError
-            assert "unknown original" in str(refused.value)
-            assert current == "a7b8c9d0e1f2"
+        with then("the same DLQ entry returns without resetting attempts or scheduling a new delivery"):
+            assert current == "f6a7b8c9d0e1"
+            assert archived == []
+            assert preserved.id == dead_id
             assert preserved.original_created_at is None
             assert preserved.payload == {"unknown": True}
-            assert replacement.id == replacement_id
-            assert replacement.payload == preserved.payload
+            assert preserved.attempt_count == 1
+            assert preserved.last_error == "legacy"
+            assert retry == []
