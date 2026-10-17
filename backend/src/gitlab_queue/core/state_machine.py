@@ -6,11 +6,14 @@ Per ADR-006, each state transition MUST trigger a notification.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from statemachine import State, StateMachine
 
+from gitlab_queue.core.queue_completion import QueueCompletion
+from gitlab_queue.models.completion import CompletionRequest
 from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -105,6 +108,7 @@ class MRStateMachine(StateMachine):
         websocket_manager: WebSocketManager | None = None,
         position_notifier: QueuePositionNotifier | None = None,
         skip_initial_enter: bool = False,
+        queue_id: int | None = None,
     ) -> None:
         """Initialize state machine for a specific MR.
 
@@ -126,6 +130,7 @@ class MRStateMachine(StateMachine):
         self.websocket_manager: WebSocketManager | None = websocket_manager
         self.position_notifier: QueuePositionNotifier | None = position_notifier
         self._context: dict[str, Any] = {}
+        self._queue_id = queue_id
         self._skip_initial_enter = skip_initial_enter
 
         # Initialize with correct starting state
@@ -256,230 +261,121 @@ class MRStateMachine(StateMachine):
                 self.mr_iid, "testing", "merging", self._project_id
             )
 
+    async def _finish_completion(self, request: CompletionRequest) -> None:
+        positions, old_total = await self._capture_queue_positions_if_enabled()
+        request = replace(request, positions=positions, old_total=old_total, queue_id=self._queue_id)
+        await QueueCompletion(
+            self.queue_manager, self.notifier, self.position_notifier, self.websocket_manager
+        ).complete(self._project_id, self.mr_iid, request)
+
     async def on_enter_merged(self) -> None:
-        """Called when MR is successfully merged."""
+        """Persist and finish the successful lifecycle before its websocket event."""
         if self._skip_on_enter_if_resumed("merged"):
             return
-        log.debug("Entering merged state", mr_iid=self.mr_iid)
-
-        queue_item = await self.queue_manager.get_queue_item(self._project_id, self.mr_iid)
-        duration = self._calculate_duration(queue_item)
-
-        positions_before, old_total = await self._capture_queue_positions_if_enabled()
-
-        now = datetime.now(UTC)
-
-        await self.notifier.notify(
-            self.mr_iid,
-            "merged",
-            terminal_state="merged",
-            merged_at=now,
-            duration=duration,
-            target_branch=self.target_branch,
-        )
-
-        # Broadcast WebSocket completion
-        if self.websocket_manager:
-            await self.websocket_manager.broadcast_mr_completed(
-                self.mr_iid,
+        item = await self.queue_manager.get_queue_item(self._project_id, self.mr_iid)
+        await self._finish_completion(
+            CompletionRequest(
                 "merged",
-                finished_at=now,
-                project_id=self._project_id,
+                "merged",
+                "merged",
+                {
+                    "merged_at": datetime.now(UTC),
+                    "duration": self._calculate_duration(item),
+                    "target_branch": self.target_branch,
+                },
+                pipeline_duration_seconds=self._context.get("pipeline_duration_seconds"),
             )
-
-        # Move MR to history table
-        pipeline_duration = self._context.get("pipeline_duration_seconds")
-        await self.queue_manager.complete_mr(
-            self._project_id,
-            self.mr_iid,
-            status="merged",
-            pipeline_duration_seconds=pipeline_duration,
         )
 
-        await self._notify_position_changes_if_any(positions_before, old_total)
-
-        # Remove queue label AFTER complete_mr to prevent race condition:
-        # webhook from label removal could arrive before MR is completed
-        await self.notifier.remove_queue_label(self.mr_iid)
-
-    async def on_enter_failed(self) -> None:
-        """Called when MR fails (conflict, pipeline, timeout)."""
-        if self._skip_on_enter_if_resumed("failed"):
-            return
-        log.debug("Entering failed state", mr_iid=self.mr_iid)
-
-        positions_before, old_total = await self._capture_queue_positions_if_enabled()
-
-        failure_reason = self._context.get("failure_reason", "unknown")
-        error_message = self._context.get("error_message")
-
-        # Choose template based on failure reason
-        if failure_reason == "conflict":
-            await self.notifier.notify(
-                self.mr_iid,
-                "conflict",
-                terminal_state="failed",
-                failed_at=datetime.now(UTC),
+    def _failure_notification(self) -> tuple[str, dict[str, Any]]:
+        reason = self._context.get("failure_reason", "unknown")
+        context: dict[str, Any] = {"failed_at": datetime.now(UTC)}
+        if reason == "conflict":
+            context.update(
                 target_branch=self.target_branch,
                 conflicted_files=self._context.get("conflicted_files", []),
                 error_message=self._context.get("error_message", ""),
             )
-        elif failure_reason == "pipeline_failed":
-            await self.notifier.notify(
-                self.mr_iid,
-                "pipeline_failed",
-                terminal_state="failed",
+            return "conflict", context
+        if reason == "pipeline_failed":
+            context.update(
                 pipeline_id=self._context.get("pipeline_id"),
                 pipeline_url=self._context.get("pipeline_url"),
-                failed_at=datetime.now(UTC),
                 retried_jobs=self._context.get("retried_jobs", {}),
                 failed_jobs=self._context.get("failed_jobs", []),
             )
-        elif failure_reason == "timeout":
-            queue_item = await self.queue_manager.get_queue_item(self._project_id, self.mr_iid)
-            max_wait_hours = self._context.get("max_wait_hours", 2)
-            await self.notifier.notify(
-                self.mr_iid,
-                "timeout",
-                terminal_state="failed",
-                failed_at=datetime.now(UTC),
-                duration=self._calculate_duration(queue_item),
-                max_wait=max_wait_hours,
-            )
-        elif failure_reason == "merge_failed":
-            await self.notifier.notify(
-                self.mr_iid,
-                "merge_failed",
-                terminal_state="failed",
-                failed_at=datetime.now(UTC),
-                error_message=error_message or "Unknown merge error",
-            )
-        else:
-            await self.notifier.notify(
-                self.mr_iid,
-                "generic_failure",
-                terminal_state="failed",
-                failed_at=datetime.now(UTC),
-                error_message=error_message or "Unknown error",
-            )
+            return "pipeline_failed", context
+        if reason == "timeout":
+            context.update(max_wait=self._context.get("max_wait_hours", 2))
+            return "timeout", context
+        context.update(error_message=self._context.get("error_message") or "Unknown error")
+        return ("merge_failed" if reason == "merge_failed" else "generic_failure"), context
 
-        # Broadcast WebSocket completion
-        if self.websocket_manager:
-            await self.websocket_manager.broadcast_mr_completed(
-                self.mr_iid,
-                "failed",
-                finished_at=datetime.now(UTC),
-                failure_reason=error_message,
-                project_id=self._project_id,
-            )
-
-        # Move MR to history table
-        # Map internal failure_reason to history status
-        history_status = "failed"
-        if failure_reason == "conflict":
-            history_status = "conflict"
-        elif failure_reason == "timeout":
-            history_status = "timeout"
-        elif failure_reason == "merge_failed":
-            history_status = "merge_failed"
-
-        await self.queue_manager.complete_mr(
-            self._project_id,
-            self.mr_iid,
-            status=history_status,
-            failure_reason=error_message,
-            pipeline_duration_seconds=self._context.get("pipeline_duration_seconds"),
-            pipeline_failed_jobs=self._context.get("failed_jobs"),
+    async def on_enter_failed(self) -> None:
+        """Freeze failure details so retries cannot archive another generation."""
+        if self._skip_on_enter_if_resumed("failed"):
+            return
+        reason = self._context.get("failure_reason", "unknown")
+        template, context = self._failure_notification()
+        if reason == "timeout":
+            item = await self.queue_manager.get_queue_item(self._project_id, self.mr_iid)
+            context["duration"] = self._calculate_duration(item)
+        history_status = {"conflict": "conflict", "timeout": "timeout", "merge_failed": "merge_failed"}.get(
+            reason, "failed"
         )
-
-        await self._notify_position_changes_if_any(positions_before, old_total)
-
-        # Remove queue label AFTER complete_mr to prevent race condition:
-        # webhook from label removal could arrive before MR is completed
-        await self.notifier.remove_queue_label(self.mr_iid)
+        await self._finish_completion(
+            CompletionRequest(
+                "failed",
+                history_status,
+                template,
+                context,
+                failure_reason=self._context.get("error_message"),
+                pipeline_duration_seconds=self._context.get("pipeline_duration_seconds"),
+                pipeline_failed_jobs=self._context.get("failed_jobs"),
+            )
+        )
 
     async def on_enter_removed(self) -> None:
-        """Called when MR is removed from queue."""
+        """Finish removal with durable comment, cleanup and history ownership."""
         if self._skip_on_enter_if_resumed("removed"):
             return
-        log.debug("Entering removed state", mr_iid=self.mr_iid)
-
-        removal_reason = self._context.get("removal_reason", "label_removed")
-        position = await self.queue_manager.get_queue_position(self._project_id, self.mr_iid)
-
-        positions_before, old_total = await self._capture_queue_positions_if_enabled()
-
-        if removal_reason == "timeout":
-            queue_item = await self.queue_manager.get_queue_item(self._project_id, self.mr_iid)
-            max_wait_hours = self._context.get("max_wait_hours", 2)
-            await self.notifier.notify(
-                self.mr_iid,
-                "timeout",
-                terminal_state="removed",
-                failed_at=datetime.now(UTC),
-                duration=self._calculate_duration(queue_item),
-                max_wait=max_wait_hours,
-            )
-        elif removal_reason == "closed":
-            await self.notifier.notify(
-                self.mr_iid,
-                "removed_closed",
-                terminal_state="removed",
-                removed_at=datetime.now(UTC),
-            )
-        elif removal_reason == "external_merge":
-            queue_item = await self.queue_manager.get_queue_item(self._project_id, self.mr_iid)
-            duration = self._calculate_duration(queue_item)
-            await self.notifier.notify(
-                self.mr_iid,
-                "merged",
-                terminal_state="removed",
-                merged_at=datetime.now(UTC),
-                duration=duration,
-                target_branch=self.target_branch,
-            )
+        reason = self._context.get("removal_reason", "label_removed")
+        context: dict[str, Any] = {"removed_at": datetime.now(UTC)}
+        template = "removed_label"
+        if reason == "timeout":
+            item = await self.queue_manager.get_queue_item(self._project_id, self.mr_iid)
+            template = "timeout"
+            context = {
+                "failed_at": datetime.now(UTC),
+                "duration": self._calculate_duration(item),
+                "max_wait": self._context.get("max_wait_hours", 2),
+            }
+        elif reason == "closed":
+            template = "removed_closed"
+        elif reason == "external_merge":
+            item = await self.queue_manager.get_queue_item(self._project_id, self.mr_iid)
+            template = "merged"
+            context = {
+                "merged_at": datetime.now(UTC),
+                "duration": self._calculate_duration(item),
+                "target_branch": self.target_branch,
+            }
         else:
-            previous_state = self._context.get("previous_state", "queued")
-            await self.notifier.notify(
-                self.mr_iid,
-                "removed_label",
-                terminal_state="removed",
-                removed_at=datetime.now(UTC),
-                position=position or 0,
-                previous_state=previous_state,
+            context.update(
+                position=await self.queue_manager.get_queue_position(self._project_id, self.mr_iid) or 0,
+                previous_state=self._context.get("previous_state", "queued"),
             )
-
-        # Broadcast WebSocket completion
-        if self.websocket_manager:
-            ws_status = "merged" if removal_reason == "external_merge" else "removed"
-            await self.websocket_manager.broadcast_mr_completed(
-                self.mr_iid,
-                ws_status,
-                finished_at=datetime.now(UTC),
-                project_id=self._project_id,
+        history_status = {"timeout": "timeout", "external_merge": "merged"}.get(reason, "removed")
+        await self._finish_completion(
+            CompletionRequest(
+                "removed",
+                history_status,
+                template,
+                context,
+                failure_reason=None if reason == "external_merge" else f"Removed: {reason}",
+                remove_labels=reason in ("closed", "timeout", "external_merge"),
             )
-
-        # Move MR to history table
-        if removal_reason == "timeout":
-            history_status = "timeout"
-        elif removal_reason == "external_merge":
-            history_status = "merged"
-        else:
-            history_status = "removed"
-        failure_reason = None if removal_reason == "external_merge" else f"Removed: {removal_reason}"
-        await self.queue_manager.complete_mr(
-            self._project_id,
-            self.mr_iid,
-            status=history_status,
-            failure_reason=failure_reason,
         )
-
-        await self._notify_position_changes_if_any(positions_before, old_total)
-
-        # Remove queue label AFTER complete_mr to prevent race condition:
-        # webhook from label removal could arrive before MR is completed
-        if removal_reason in ("closed", "timeout"):
-            await self.notifier.remove_queue_label(self.mr_iid)
 
     async def _capture_queue_positions_if_enabled(self) -> tuple[dict[int, int], int]:
         """Capture current queue positions before MR completion for later notification."""
@@ -940,6 +836,7 @@ async def create_state_machine_for_mr(
             websocket_manager=websocket_manager,
             position_notifier=position_notifier,
             skip_initial_enter=True,
+            queue_id=queue_item.queue_id,
         )
     else:
         log.debug("Creating new state machine", mr_iid=mr_iid)

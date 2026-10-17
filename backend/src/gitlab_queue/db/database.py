@@ -121,6 +121,9 @@ class Database:
     _initialized: bool = field(default=False, init=False, repr=False)
     _init_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
     _queue_metadata_locks: dict[int, asyncio.Lock] = field(default_factory=dict, init=False, repr=False)
+    _queue_completion_locks: WeakValueDictionary[tuple[int, int], asyncio.Lock] = field(
+        default_factory=WeakValueDictionary, init=False, repr=False
+    )
     _queue_notification_locks: WeakValueDictionary[tuple[int, int], asyncio.Lock] = field(
         default_factory=WeakValueDictionary, init=False, repr=False
     )
@@ -130,6 +133,9 @@ class Database:
 
     def queue_notification_lock(self, project_id: int, mr_iid: int) -> asyncio.Lock:
         return self._queue_notification_locks.setdefault((project_id, mr_iid), asyncio.Lock())
+
+    def queue_completion_lock(self, project_id: int, mr_iid: int) -> asyncio.Lock:
+        return self._queue_completion_locks.setdefault((project_id, mr_iid), asyncio.Lock())
 
     def _build_engine_kwargs(self, is_memory_db: bool) -> dict[str, Any]:
         """Build engine keyword arguments based on database type."""

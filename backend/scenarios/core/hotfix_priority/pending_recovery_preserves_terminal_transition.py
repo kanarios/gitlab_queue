@@ -74,14 +74,14 @@ async def pending_recovery_preserves_terminal_transition(initial_state, terminal
             await asyncio.wait_for(socket.entered.wait(), 5)
             terminal_comment = env.server.notes[3]
             await retry()
-            state_during_completion = (await env.queue.get_queue_item(123, 3)).state
+            state_during_completion = (await env.queue.get_mr_state(123, 3))["status"]
             socket.release.set()
             await asyncio.wait_for(completion, 5)
 
         with then("the final comment describes completion and other waiting positions are refreshed"):
             assert expected_status in env.server.notes[3]
             assert env.server.notes[3] == terminal_comment
-            assert state_during_completion == {"timeout": "removed", "failed": "failed", "merged": "merged"}[terminal]
+            assert state_during_completion == {"timeout": "timeout", "failed": "conflict", "merged": "merged"}[terminal]
             assert await env.queue.get_queue_item(123, 3) is None
             assert (await env.queue.get_mr_state(123, 3))["started_at"] == original.started_at
             assert "**Position:** 1 of 1" in env.server.notes[1]

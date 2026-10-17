@@ -5,17 +5,18 @@ from __future__ import annotations
 import vedro
 
 from gitlab_queue.core.state_machine import MRStateMachine
+from scenarios.fakes import create_mr
 
-from ._helpers import MockQueueItem, create_mock_notifier, create_mock_queue_manager
+from ._helpers import create_mock_notifier, create_mock_queue_manager
 
 
 class Scenario(vedro.Scenario):
     subject = "trigger_timeout passes max_wait_hours through to notification"
 
-    def given_state_machine_in_merging_state(self):
+    async def given_state_machine_in_merging_state(self):
         self.notifier = create_mock_notifier()
         self.queue_manager = create_mock_queue_manager()
-        self.queue_manager.get_queue_item_sequence = [MockQueueItem(mr_iid=42)]
+        await self.queue_manager.add_to_queue(99999, create_mr(iid=42))
 
         self.sm = MRStateMachine(
             notifier=self.notifier,

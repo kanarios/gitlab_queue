@@ -132,6 +132,7 @@ def parse_merge_request(data: dict[str, Any]) -> MergeRequest:
         merge_error=data.get("merge_error"),
         detailed_merge_status=data.get("detailed_merge_status"),
         diverged_commits_count=data.get("diverged_commits_count"),
+        updated_at=_parse_datetime(data.get("updated_at")),
     )
 
 
@@ -351,6 +352,7 @@ def parse_merge_request_event(data: dict[str, Any]) -> MergeRequestEvent:
             has_conflicts=attrs.get("has_conflicts", False),
             rebase_in_progress=attrs.get("rebase_in_progress", False),
             web_url=attrs.get("url"),
+            updated_at=_parse_datetime(attrs.get("updated_at")),
         ),
         user_id=user.get("id", 0),
         user_name=user.get("name", ""),

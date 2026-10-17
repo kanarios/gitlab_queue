@@ -12,6 +12,8 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from weakref import WeakValueDictionary
 
+from gitlab_queue.clients.gitlab import GitLabNotFoundError
+from gitlab_queue.models.retorts import parse_merge_request
 from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -443,8 +445,6 @@ class MRNotifier:
         self,
         mr_iid: int,
         status: str,
-        *,
-        terminal_state: str | None = None,
         **context: Any,
     ) -> Note | None:
         """Update or create pinned comment for MR.
@@ -452,8 +452,6 @@ class MRNotifier:
         Args:
             mr_iid: Merge request internal ID.
             status: Template key (queued, rebasing, testing, etc.).
-            terminal_state: Persist completion after successful delivery, before
-                releasing comment ordering. Failed HTTP delivery remains retryable.
             **context: Template variables to render.
 
         Returns:
@@ -473,8 +471,6 @@ class MRNotifier:
             )
         async with self._notification_lock(mr_iid):
             note = await self._send_notification(mr_iid, status, **context)
-            if terminal_state is not None and self.queue_manager is not None:
-                await self.queue_manager.update_mr_state(self.gitlab_client.project_id, mr_iid, terminal_state)
             return note
 
     async def _send_notification(self, mr_iid: int, status: str, **context: Any) -> Note:
@@ -615,7 +611,7 @@ class MRNotifier:
         project_url = await self.gitlab_client.get_project_web_url()
         return f"{project_url}/-/pipelines/{pipeline_id}"
 
-    async def remove_queue_label(self, mr_iid: int) -> None:
+    async def remove_queue_label(self, mr_iid: int, *, strict: bool = False) -> datetime | None:
         """Remove the queue label from an MR.
 
         Called when MR processing completes (merged, failed, removed)
@@ -625,9 +621,17 @@ class MRNotifier:
             mr_iid: Internal ID of the merge request.
         """
         try:
-            await self.gitlab_client.remove_mr_label(mr_iid, self.settings.queue_label)
+            labels = self.settings.queue_label
+            if strict:
+                labels = ",".join(dict.fromkeys((self.settings.queue_label, self.settings.hotfix_label)))
+            mr = await self.gitlab_client.remove_mr_label(mr_iid, labels)
             log.info("Queue label removed from MR", mr_iid=mr_iid, label=self.settings.queue_label)
+            return mr.updated_at
+        except GitLabNotFoundError:
+            return None
         except Exception as e:
+            if strict:
+                raise
             # Don't fail the whole operation if label removal fails
             log.warning(
                 "Failed to remove queue label from MR",
@@ -635,6 +639,13 @@ class MRNotifier:
                 label=self.settings.queue_label,
                 error=str(e),
             )
+
+        return None
+
+    async def restore_queue_labels(self, mr_iid: int, labels: list[str]) -> datetime | None:
+        """Restore the explicit request only after the old lifecycle's cleanup."""
+        response = await self.gitlab_client.put(f"/merge_requests/{mr_iid}", json={"add_labels": ",".join(labels)})
+        return parse_merge_request(response).updated_at
 
 
 __all__: list[str] = [

@@ -25,6 +25,7 @@ from gitlab_queue.clients.gitlab import (
 )
 from gitlab_queue.core.handler_utils import interruptible_sleep, verify_mr_in_queue
 from gitlab_queue.core.polling import poll_until_done
+from gitlab_queue.core.queue_completion import QueueCompletion
 from gitlab_queue.core.queue_metadata import QueueMetadataUpdater
 from gitlab_queue.core.state_machine import create_state_machine_for_mr
 from gitlab_queue.core.types import ProcessingContext, ProcessingResult, RetrySignal, VerifyResult
@@ -151,6 +152,11 @@ class MergeProcessor:
 
         try:
             # Recovery on startup: clean up interrupted state and sync with GitLab
+            recovered = await QueueCompletion(
+                self.queue_manager, self.notifier, self.position_notifier, self._websocket_manager
+            ).recover_all(self.settings.gitlab_project_id)
+            if recovered:
+                await self._broadcast_queue_update()
             await self._recover_interrupted_state()
             await self._sync_missing_mrs_from_gitlab()
 
@@ -289,6 +295,10 @@ class MergeProcessor:
         queue_item_now = await self.queue_manager.get_queue_item(self.settings.gitlab_project_id, mr_iid)
         if queue_item_now is None:
             log.warning("MR no longer in queue during error recovery", mr_iid=mr_iid)
+            return
+
+        if queue_item_now.pending_completion is not None:
+            log.info("Completion remains pending for recovery", mr_iid=mr_iid)
             return
 
         attempts = queue_item_now.processing_attempts + 1
@@ -614,6 +624,7 @@ class MergeProcessor:
                         self.settings.gitlab_project_id,
                         item.mr_iid,
                         status="merged",
+                        expected_queue_id=item.queue_id,
                     )
                     log.info("MR was already merged", mr_iid=item.mr_iid)
 
@@ -624,6 +635,7 @@ class MergeProcessor:
                         item.mr_iid,
                         status="removed",
                         failure_reason="closed_during_recovery",
+                        expected_queue_id=item.queue_id,
                     )
                     log.info("MR was closed", mr_iid=item.mr_iid)
 
@@ -634,6 +646,7 @@ class MergeProcessor:
                         item.mr_iid,
                         status="removed",
                         failure_reason="label_removed",
+                        expected_queue_id=item.queue_id,
                     )
                     log.info("MR label was removed", mr_iid=item.mr_iid)
 
@@ -664,6 +677,7 @@ class MergeProcessor:
                     item.mr_iid,
                     status="removed",
                     failure_reason="not_found",
+                    expected_queue_id=item.queue_id,
                 )
                 log.warning("MR not found during recovery", mr_iid=item.mr_iid)
 
@@ -755,7 +769,8 @@ class MergeProcessor:
 
     async def _add_discovered_mr(self, mr: MergeRequest) -> bool:
         """Add an absent MR without replacing a row whose terminal callback is in flight."""
-        if await self.queue_manager.get_queue_item(self.settings.gitlab_project_id, mr.iid) is not None:
+        existing = await self.queue_manager.get_queue_item(self.settings.gitlab_project_id, mr.iid)
+        if existing is not None and existing.pending_completion is not None:
             return False
         is_hotfix = self.settings.hotfix_label in mr.labels
         await self.queue_manager.add_to_queue(self.settings.gitlab_project_id, mr, is_hotfix=is_hotfix)

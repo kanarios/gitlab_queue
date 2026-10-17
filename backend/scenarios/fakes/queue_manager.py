@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import json
 from asyncio import Lock
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -15,12 +16,66 @@ if TYPE_CHECKING:
 class FakeQueueManager:
     _metadata_locks: dict[int, Lock] = field(default_factory=dict)
     _notification_locks: dict[tuple[int, int], Lock] = field(default_factory=dict)
+    _completion_locks: dict[tuple[int, int], Lock] = field(default_factory=dict)
 
     def metadata_lock(self, project_id: int) -> Lock:
         return self._metadata_locks.setdefault(project_id, Lock())
 
     def notification_lock(self, project_id: int, mr_iid: int) -> Lock:
         return self._notification_locks.setdefault((project_id, mr_iid), Lock())
+
+    def completion_lock(self, project_id: int, mr_iid: int) -> Lock:
+        return self._completion_locks.setdefault((project_id, mr_iid), Lock())
+
+    async def prepare_completion(self, project_id, mr_iid, request):
+        item = self._items.get(mr_iid)
+        if item is None:
+            return None
+        if item.pending_completion is None:
+            item.pending_completion = json.dumps(
+                {
+                    "queue_id": item.queue_id,
+                    "request": asdict(request),
+                    "history": {},
+                    "finished_at": request.context.get("merged_at", datetime.now(UTC)).isoformat(),
+                    "comment_sent": False,
+                    "labels_removed": False,
+                    "label_events": [],
+                },
+                default=lambda value: value.isoformat(),
+            )
+            item.state = request.state
+        return item
+
+    async def get_pending_completions(self, project_id):
+        return [item for item in self._items.values() if item.pending_completion is not None]
+
+    async def save_completion_progress(self, project_id, queue_id, payload):
+        for item in self._items.values():
+            if item.queue_id == queue_id:
+                item.pending_completion = json.dumps(payload)
+
+    async def finalize_completion(self, project_id, item, payload):
+        request = payload["request"]
+        result = await self.complete_mr(
+            project_id,
+            item.mr_iid,
+            request["history_status"],
+            request["failure_reason"],
+            request["pipeline_duration_seconds"],
+            request["pipeline_failed_jobs"],
+        )
+        item.pending_completion = None
+        return result
+
+    async def stage_completion_positions(self, project_id, positions, old_total):
+        pass
+
+    async def defer_requeue(self, project_id, mr, request):
+        pass
+
+    async def cancel_requeue(self, project_id, queue_id, event_at):
+        pass
 
     async def clear_pending_notification(self, project_id: int, mr_iid: int, pending: str) -> None:
         item = self._items.get(mr_iid)
@@ -169,6 +224,8 @@ class FakeQueueManager:
         failure_reason: str | None = None,
         pipeline_duration_seconds: int | None = None,
         pipeline_failed_jobs: list[str] | None = None,
+        *,
+        expected_queue_id: int | None = None,
     ) -> bool:
         self.complete_calls.append(
             {

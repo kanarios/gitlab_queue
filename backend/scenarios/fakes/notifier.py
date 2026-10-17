@@ -33,7 +33,7 @@ class FakeNotifier:
     ) -> Note:
         return await self.notify(mr_iid, status, **context)
 
-    async def notify(self, mr_iid: int, status: str, *, terminal_state: str | None = None, **context: Any) -> Note:
+    async def notify(self, mr_iid: int, status: str, **context: Any) -> Note:
         if self.notify_error:
             raise self.notify_error
         self.notify_calls.append(
@@ -48,7 +48,10 @@ class FakeNotifier:
     async def build_pipeline_url(self, pipeline_id: int) -> str:
         return self.pipeline_url_template.format(pipeline_id=pipeline_id)
 
-    async def remove_queue_label(self, mr_iid: int) -> None:
+    async def remove_queue_label(self, mr_iid: int, *, strict: bool = False) -> None:
         self.remove_label_calls.append(mr_iid)
         if self.call_order_log is not None:
             self.call_order_log.append("remove_queue_label")
+
+    async def restore_queue_labels(self, mr_iid: int, labels: list[str]) -> None:
+        pass

@@ -6,14 +6,17 @@ operations based on label changes and MR state transitions.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from statemachine.exceptions import TransitionNotAllowed
 
+from gitlab_queue.core.queue_completion import QueueCompletion
 from gitlab_queue.core.queue_metadata import QueueMetadataUpdater
 from gitlab_queue.core.state_machine import calculate_duration, create_state_machine_for_mr
+from gitlab_queue.models.completion import CompletionRequest
 from gitlab_queue.models.events import MergeRequestEvent, PipelineEvent
 from gitlab_queue.utils.logging import get_logger
 
@@ -121,6 +124,69 @@ class MRWebhookHandler:
         else:
             log.debug("Ignoring unhandled action", action=action, mr_iid=mr_iid)
 
+    async def _defer_completion_requeue(self, event: MergeRequestEvent, item: QueueItem) -> None:
+        triggers = [label for label in event.labels if label in (self.settings.queue_label, self.settings.hotfix_label)]
+        previous = json.loads(item.requeue_request) if item.requeue_request is not None else {}
+        if triggers == previous.get("triggers") and not previous.get("cancelled_events"):
+            return
+        mr = await self.gitlab_client.get_mr(item.mr_iid)
+        event_at = event.object_attributes.updated_at
+        await self.queue_manager.defer_requeue(
+            event.project_id,
+            mr,
+            {
+                "queue_id": item.queue_id,
+                "triggers": triggers,
+                "labels": event.labels,
+                "is_hotfix": self.settings.hotfix_label in triggers,
+                "requested_at": event_at.isoformat() if event_at is not None else None,
+                "cancelled_events": [],
+            },
+        )
+
+    async def _change_completion_requeue(self, event: MergeRequestEvent, item: QueueItem) -> None:
+        added = self._was_queue_label_added(event) or self._was_hotfix_label_added(event)
+        if added and event.object_attributes.state == "opened":
+            await self._defer_completion_requeue(event, item)
+            return
+        if event.object_attributes.updated_at is None or item.requeue_request is None:
+            return
+        removed = self._was_queue_label_removed(event) or self._was_hotfix_label_removed(event)
+        if not removed and event.object_attributes.state == "opened":
+            return
+        if self._has_queue_trigger(event.labels) and event.object_attributes.state == "opened":
+            await self._defer_completion_requeue(event, item)
+        else:
+            await self.queue_manager.cancel_requeue(event.project_id, item.queue_id, event.object_attributes.updated_at)
+
+    async def _resume_completion(self, event: MergeRequestEvent, item: QueueItem | None) -> bool:
+        if item is None:
+            return False
+        event_at = event.object_attributes.updated_at
+        if event_at is not None and event_at.isoformat() in item.ignored_label_events:
+            return True
+        if item.pending_completion is None or self.notifier is None:
+            return False
+        started = datetime.fromisoformat(json.loads(item.pending_completion)["finished_at"])
+        if event_at is None or event_at > started:
+            await self._change_completion_requeue(event, item)
+        await QueueCompletion(
+            self.queue_manager, self.notifier, self.position_notifier, self.websocket_manager
+        ).recover(event.project_id, item.mr_iid, item.queue_id)
+        await self._broadcast_queue_update()
+        return True
+
+    async def _stale_enqueue(self, event: MergeRequestEvent) -> bool:
+        event_at = event.object_attributes.updated_at
+        if event_at is None:
+            return False
+        state = await self.queue_manager.get_mr_state(event.project_id, event.object_attributes.iid)
+        finished = state.get("finished_at") if state is not None else None
+        return isinstance(finished, datetime) and event_at <= finished
+
+    def _has_queue_trigger(self, labels: list[str]) -> bool:
+        return self.settings.queue_label in labels or self.settings.hotfix_label in labels
+
     async def _handle_labeled(self, event: MergeRequestEvent) -> None:
         """Handle label addition to MR.
 
@@ -150,9 +216,14 @@ class MRWebhookHandler:
         # Check if MR is already in queue
         existing_item = await self.queue_manager.get_queue_item(event.project_id, mr_iid)
 
-        if existing_item is not None:
+        if await self._resume_completion(event, existing_item):
+            return
+        if existing_item is not None and existing_item.state in ("queued", "rebasing", "testing", "merging"):
             # MR already in queue - refresh metadata to keep it current
             await self._refresh_queue_item_metadata(event.project_id, mr_iid, event)
+            return
+
+        if await self._stale_enqueue(event):
             return
 
         # Capture positions before adding (for notifying existing MRs about queue changes)
@@ -164,6 +235,9 @@ class MRWebhookHandler:
 
         # Fetch full MR data from API for new queue entry
         mr = await self.gitlab_client.get_mr(mr_iid)
+        if mr.state != "opened" or not self._has_queue_trigger(mr.labels):
+            return
+        is_hotfix = self.settings.hotfix_label in mr.labels
 
         # Add to queue
         await self.queue_manager.add_to_queue(event.project_id, mr, is_hotfix=is_hotfix)
@@ -201,14 +275,17 @@ class MRWebhookHandler:
         hotfix_trigger_lost = hotfix_label_removed and not has_queue_label
         should_remove = queue_trigger_lost or hotfix_trigger_lost
 
+        mr_iid = event.object_attributes.iid
+
+        queue_item = await self.queue_manager.get_queue_item(event.project_id, mr_iid)
+        if await self._resume_completion(event, queue_item):
+            return
+
         if not should_remove:
             # MR stays in queue - refresh metadata to keep it current
             await self._refresh_queue_item_metadata(event.project_id, event.object_attributes.iid, event)
             return
 
-        mr_iid = event.object_attributes.iid
-
-        queue_item = await self.queue_manager.get_queue_item(event.project_id, mr_iid)
         if queue_item is None:
             log.debug("MR was not in queue", mr_iid=mr_iid)
             return
@@ -232,13 +309,15 @@ class MRWebhookHandler:
                     mr_iid=mr_iid,
                     current_state=state_machine.current_state.id,
                 )
-                await self.queue_manager.complete_mr(
+                completed = await self.queue_manager.complete_mr(
                     event.project_id,
                     mr_iid,
                     status="removed",
                     failure_reason="label_removed",
+                    expected_queue_id=queue_item.queue_id,
                 )
-                await self._remove_queue_label(mr_iid)
+                if completed:
+                    await self._remove_queue_label(mr_iid)
                 log.info("MR removed from queue via fallback", mr_iid=mr_iid)
         else:
             removed = await self.queue_manager.remove_from_queue(event.project_id, mr_iid)
@@ -259,6 +338,8 @@ class MRWebhookHandler:
         mr_iid = event.object_attributes.iid
 
         queue_item = await self.queue_manager.get_queue_item(event.project_id, mr_iid)
+        if await self._resume_completion(event, queue_item):
+            return
         if queue_item is None:
             log.debug("Merged MR was not in queue", mr_iid=mr_iid)
             return
@@ -283,54 +364,37 @@ class MRWebhookHandler:
                         mr_iid=mr_iid,
                         current_state=state_machine.current_state.id,
                     )
-                    await self.queue_manager.complete_mr(event.project_id, mr_iid, status="merged")
-                    await self._remove_queue_label(mr_iid)
+                    completed = await self.queue_manager.complete_mr(
+                        event.project_id, mr_iid, status="merged", expected_queue_id=queue_item.queue_id
+                    )
+                    if completed:
+                        await self._remove_queue_label(mr_iid)
                 finally:
                     await self._broadcast_queue_update()
                     log.info("MR cleaned up from queue after merge", mr_iid=mr_iid)
             elif current_state in ("queued", "rebasing", "testing"):
-                # MR merged externally while still active in queue.
-                # Can't use trigger_merge_success (requires merging state),
-                # and trigger_mark_removed sends wrong notification.
-                # Replicate on_enter_merged behavior manually.
-                duration = calculate_duration(queue_item.queued_at)
-
                 positions_before: dict[int, int] = {}
-                old_total: int = 0
+                old_total = 0
                 if self.position_notifier:
                     positions_before = await self.position_notifier.capture_queue_positions(event.project_id)
                     old_total = await self.queue_manager.get_queue_length(event.project_id)
-
-                await self.notifier.notify(
-                    mr_iid,
+                request = CompletionRequest(
                     "merged",
-                    terminal_state="merged",
-                    merged_at=datetime.now(UTC),
-                    duration=duration,
-                    target_branch=event.object_attributes.target_branch,
+                    "merged",
+                    "merged",
+                    {
+                        "merged_at": datetime.now(UTC),
+                        "duration": calculate_duration(queue_item.queued_at),
+                        "target_branch": event.object_attributes.target_branch,
+                    },
+                    positions=positions_before,
+                    old_total=old_total,
+                    queue_id=queue_item.queue_id,
                 )
-
-                if self.websocket_manager:
-                    await self.websocket_manager.broadcast_mr_completed(
-                        mr_iid,
-                        "merged",
-                        finished_at=datetime.now(UTC),
-                        project_id=event.project_id,
-                    )
-
-                await self.queue_manager.complete_mr(event.project_id, mr_iid, status="merged")
-                await self._remove_queue_label(mr_iid)
-
-                if self.position_notifier and positions_before:
-                    await self.position_notifier.notify_affected_mrs_after_completion(
-                        event.project_id,
-                        mr_iid,
-                        positions_before,
-                        old_total,
-                    )
-
+                await QueueCompletion(
+                    self.queue_manager, self.notifier, self.position_notifier, self.websocket_manager
+                ).complete(event.project_id, mr_iid, request)
                 await self._broadcast_queue_update()
-                log.info("MR cleaned up from queue after merge", mr_iid=mr_iid)
             else:
                 # Terminal state (race condition) — MR is already being handled
                 log.debug(
@@ -354,6 +418,8 @@ class MRWebhookHandler:
         mr_iid = event.object_attributes.iid
 
         queue_item = await self.queue_manager.get_queue_item(event.project_id, mr_iid)
+        if await self._resume_completion(event, queue_item):
+            return
         if queue_item is None:
             log.debug("Closed MR was not in queue", mr_iid=mr_iid)
             return
@@ -376,13 +442,15 @@ class MRWebhookHandler:
                     mr_iid=mr_iid,
                     current_state=state_machine.current_state.id,
                 )
-                await self.queue_manager.complete_mr(
+                completed = await self.queue_manager.complete_mr(
                     event.project_id,
                     mr_iid,
                     status="removed",
                     failure_reason="closed",
+                    expected_queue_id=queue_item.queue_id,
                 )
-                await self._remove_queue_label(mr_iid)
+                if completed:
+                    await self._remove_queue_label(mr_iid)
             log.info("MR removed from queue after close", mr_iid=mr_iid)
         else:
             removed = await self.queue_manager.remove_from_queue(event.project_id, mr_iid)
@@ -416,6 +484,8 @@ class MRWebhookHandler:
 
         # Check if MR is in queue
         queue_item = await self.queue_manager.get_queue_item(event.project_id, mr_iid)
+        if await self._resume_completion(event, queue_item):
+            return
 
         # Terminal states - MR is not actively in queue
         terminal_states = ("removed", "failed", "merged")
@@ -423,6 +493,8 @@ class MRWebhookHandler:
 
         if not is_in_active_queue:
             if has_trigger_label:
+                if await self._stale_enqueue(event):
+                    return
                 # Capture positions before adding (for notifying existing MRs about queue changes)
                 positions_before: dict[int, int] = {}
                 old_total: int = 0
@@ -432,7 +504,9 @@ class MRWebhookHandler:
 
                 # MR has label but not in active queue - add it
                 mr = await self.gitlab_client.get_mr(mr_iid)
-                is_hotfix = has_hotfix_label
+                if mr.state != "opened" or not self._has_queue_trigger(mr.labels):
+                    return
+                is_hotfix = self.settings.hotfix_label in mr.labels
                 await self.queue_manager.add_to_queue(event.project_id, mr, is_hotfix=is_hotfix)
                 log.info(
                     "MR added to queue via update webhook",

@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from gitlab_queue.clients.gitlab import GitLabAPIError, GitLabNotFoundError
+from gitlab_queue.core.notifier import MRNotifier
+from gitlab_queue.core.queue_completion import QueueCompletion
 from gitlab_queue.core.queue_metadata import QueueMetadataUpdater
 from gitlab_queue.utils.logging import get_logger
 
@@ -187,7 +189,18 @@ class QueueScheduler:
             SyncStats with counts of changes made.
         """
         async with self._sync_lock:
-            return await self._do_sync()
+            notifier = (
+                self.position_notifier.notifier
+                if self.position_notifier
+                else MRNotifier(self.gitlab_client, self.settings, self.queue_manager)
+            )
+            recovered = await QueueCompletion(
+                self.queue_manager, notifier, self.position_notifier, self._websocket_manager
+            ).recover_all(self.settings.gitlab_project_id)
+            stats = await self._do_sync()
+            if recovered:
+                await self._broadcast_queue_update()
+            return stats
 
     async def _do_sync(self) -> SyncStats:
         """Internal sync implementation.
@@ -279,7 +292,8 @@ class QueueScheduler:
         added_count = 0
         for mr in mrs_to_add:
             # A terminal callback may still own this row until history is written.
-            if await self.queue_manager.get_queue_item(self.settings.gitlab_project_id, mr.iid) is not None:
+            existing = await self.queue_manager.get_queue_item(self.settings.gitlab_project_id, mr.iid)
+            if existing is not None and existing.pending_completion is not None:
                 continue
             await self._add_mr_to_queue(mr)
             added_count += 1

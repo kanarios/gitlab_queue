@@ -4,6 +4,7 @@ import asyncio
 import json
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Any
@@ -40,6 +41,9 @@ class GitLabServer:
     comment_attempts: list[int] = field(default_factory=list)
     barriers: dict[tuple[str, str], tuple[Event, Event]] = field(default_factory=dict)
     label_snapshots: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    after_barriers: dict[tuple[str, str], tuple[Event, Event]] = field(default_factory=dict)
+    failed_label_iids: set[int] = field(default_factory=set)
+    after_mutation_barriers: dict[tuple[str, str], tuple[Event, Event]] = field(default_factory=dict)
 
     async def respond(self, request: httpx.Request) -> httpx.Response:
         response = self._response(request) if request.method == "GET" else None
@@ -48,7 +52,20 @@ class GitLabServer:
             entered, release = barrier
             entered.set()
             await release.wait()
-        return response if response is not None else self._response(request)
+        result = response if response is not None else self._response(request)
+        after = self.after_barriers.get((request.method, request.url.path))
+        if after is not None:
+            entered, release = after
+            entered.set()
+            await release.wait()
+        if request.method == "PUT" and "/notes" not in request.url.path:
+            mutation = next(iter(json.loads(request.content)), "")
+            after_mutation = self.after_mutation_barriers.get((mutation, request.url.path))
+            if after_mutation is not None:
+                entered, release = after_mutation
+                entered.set()
+                await release.wait()
+        return result
 
     def _response(self, request: httpx.Request) -> httpx.Response:
         if "/notes" in request.url.path:
@@ -76,6 +93,19 @@ class GitLabServer:
             )
         matches = [mr for mr in self.mrs if request.url.path.endswith(f"/merge_requests/{mr['iid']}")]
         if matches:
+            if request.method == "PUT":
+                if matches[0]["iid"] in self.failed_label_iids:
+                    return httpx.Response(503, json={"message": "unavailable"})
+                data = json.loads(request.content)
+                removed = data.get("remove_labels", "").split(",")
+                added = data.get("add_labels", "").split(",")
+                matches[0]["labels"] = list(
+                    dict.fromkeys(
+                        [label for label in matches[0]["labels"] if label not in removed]
+                        + [label for label in added if label]
+                    )
+                )
+                matches[0]["updated_at"] = datetime.now(UTC).isoformat()
             return httpx.Response(200, json=matches[0])
         return httpx.Response(404)
 
@@ -96,6 +126,22 @@ class ObservedQueue(QueueManager):
     state_updated: asyncio.Event = field(default_factory=asyncio.Event)
     queue_read: asyncio.Event = field(default_factory=asyncio.Event)
     metadata_updated: asyncio.Event = field(default_factory=asyncio.Event)
+    requeue_saved: asyncio.Event = field(default_factory=asyncio.Event)
+    requeue_cancelled: asyncio.Event = field(default_factory=asyncio.Event)
+    item_read: asyncio.Event = field(default_factory=asyncio.Event)
+
+    async def get_queue_item(self, project_id, mr_iid):
+        item = await super().get_queue_item(project_id, mr_iid)
+        self.item_read.set()
+        return item
+
+    async def defer_requeue(self, project_id, mr, request):
+        await super().defer_requeue(project_id, mr, request)
+        self.requeue_saved.set()
+
+    async def cancel_requeue(self, project_id, queue_id, event_at):
+        await super().cancel_requeue(project_id, queue_id, event_at)
+        self.requeue_cancelled.set()
 
     async def update_mr_state(self, project_id: int, mr_iid: int, state: str, **extra: Any) -> bool:
         result = await super().update_mr_state(project_id, mr_iid, state, **extra)

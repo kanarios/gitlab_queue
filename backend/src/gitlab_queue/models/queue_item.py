@@ -74,6 +74,9 @@ class QueueItem:
     queue_id: int = 0
     metadata_version: int = 0
     pending_notification: str | None = None
+    pending_completion: str | None = None
+    requeue_request: str | None = None
+    ignored_label_events: list[str] = field(default_factory=list)
 
     def get_max_job_retry_count(self) -> int:
         """Return the highest retry count across all retried jobs.

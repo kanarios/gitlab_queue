@@ -7,15 +7,15 @@ FIFO ordering with hotfix priority support.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
 
 from gitlab_queue.metrics import OPERATIONS_TOTAL
+from gitlab_queue.models.completion import CompletionRequest, requeue_is_cancelled
 from gitlab_queue.models.queue_item import DashboardStats, QueueItem
 from gitlab_queue.utils.logging import get_logger
 
@@ -61,6 +61,9 @@ CREATE TABLE IF NOT EXISTS merge_requests (
     labels TEXT,
     metadata_version INTEGER NOT NULL DEFAULT 0,
     pending_notification TEXT,
+    pending_completion TEXT,
+    requeue_request TEXT,
+    ignored_label_events TEXT,
     target_branch TEXT NOT NULL,
     queued_at TEXT NOT NULL,
     started_at TEXT,
@@ -366,6 +369,9 @@ class QueueManager:
     def notification_lock(self, project_id: int, mr_iid: int) -> Lock:
         return self.db.queue_notification_lock(project_id, mr_iid)
 
+    def completion_lock(self, project_id: int, mr_iid: int) -> Lock:
+        return self.db.queue_completion_lock(project_id, mr_iid)
+
     async def ensure_schema(self) -> None:
         """Create the merge_requests and history tables if they don't exist.
 
@@ -429,7 +435,7 @@ class QueueManager:
             existing = result.mappings().one_or_none()
 
             # If exists in terminal state, delete it first (should have been in history)
-            if existing and existing["status"] in terminal_states:
+            if existing and existing["status"] in terminal_states and existing["pending_completion"] is None:
                 log.info(
                     "Removing stale terminal-state MR before re-adding",
                     mr_iid=mr.iid,
@@ -749,7 +755,7 @@ class QueueManager:
                 set_clauses.append("retry_count = :retry_count")
                 params["retry_count"] = max(rj.values()) if rj else 0
 
-        sql = f"UPDATE merge_requests SET {', '.join(set_clauses)} WHERE iid = :iid AND project_id = :project_id"
+        sql = f"UPDATE merge_requests SET {', '.join(set_clauses)} WHERE iid = :iid AND project_id = :project_id AND pending_completion IS NULL"
 
         async with self.db.transaction() as session:
             cursor_result = await session.execute(text(sql), params)
@@ -867,6 +873,229 @@ class QueueManager:
             )
         self._cache.invalidate()
 
+    def _history_params(self, mr: QueueItem, request: CompletionRequest, finished: datetime) -> dict[str, Any]:
+        wait, processing = self._compute_timing(mr, finished)
+        return {
+            "project_id": mr.project_id,
+            "iid": mr.mr_iid,
+            "title": mr.title,
+            "author_name": mr.author_name,
+            "author_username": mr.author_username,
+            "author_avatar": mr.author_avatar,
+            "status": request.history_status,
+            "is_hotfix": int(mr.is_hotfix),
+            "labels": json.dumps(mr.labels) if mr.labels else None,
+            "target_branch": mr.target_branch,
+            "queued_at": mr.queued_at.isoformat(),
+            "started_at": mr.started_at.isoformat() if mr.started_at else None,
+            "finished_at": finished.isoformat(),
+            "wait_time_seconds": wait,
+            "processing_time_seconds": processing,
+            "failure_reason": request.failure_reason,
+            "pipeline_id": mr.pipeline_id,
+            "pipeline_status": mr.pipeline_status,
+            "pipeline_duration_seconds": request.pipeline_duration_seconds,
+            "pipeline_failed_jobs": json.dumps(request.pipeline_failed_jobs) if request.pipeline_failed_jobs else None,
+        }
+
+    async def prepare_completion(self, project_id: int, mr_iid: int, request: CompletionRequest) -> QueueItem | None:
+        """Freeze the original outcome before any completion HTTP request."""
+        async with self.db.transaction() as session:
+            result = await session.execute(text(_SELECT_MR_BY_IID_SQL), {"project_id": project_id, "iid": mr_iid})
+            row = result.mappings().one_or_none()
+            if row is None or (request.queue_id is not None and row["id"] != request.queue_id):
+                return None
+            item = self._row_to_queue_item(row)
+            if item.pending_completion is not None:
+                return item
+            now = next(
+                (
+                    value
+                    for key, value in request.context.items()
+                    if key in ("merged_at", "failed_at", "removed_at") and isinstance(value, datetime)
+                ),
+                datetime.now(UTC),
+            )
+            payload = {
+                "queue_id": item.queue_id,
+                "request": asdict(request),
+                "history": self._history_params(item, request, now),
+                "finished_at": now.isoformat(),
+                "comment_sent": False,
+                "labels_removed": False,
+                "label_events": [],
+            }
+            pending = json.dumps(payload, default=lambda value: value.isoformat())
+            await session.execute(
+                text(
+                    "UPDATE merge_requests SET pending_completion = :pending, status = :status, "
+                    "finished_at = :finished, pending_notification = NULL WHERE id = :id AND pending_completion IS NULL"
+                ),
+                {"pending": pending, "status": request.state, "finished": now.isoformat(), "id": item.queue_id},
+            )
+            item.pending_completion = pending
+            item.state = request.state
+            item.finished_at = now
+        self._cache.invalidate()
+        return item
+
+    async def get_pending_completions(self, project_id: int) -> list[QueueItem]:
+        async with self.db.session() as session:
+            result = await session.execute(
+                text("SELECT * FROM merge_requests WHERE project_id = :project_id AND pending_completion IS NOT NULL"),
+                {"project_id": project_id},
+            )
+            items = [self._row_to_queue_item(row) for row in result.mappings()]
+            await session.commit()
+            return items
+
+    async def save_completion_progress(self, project_id: int, queue_id: int, payload: dict[str, Any]) -> None:
+        async with self.db.transaction() as session:
+            await session.execute(
+                text(
+                    "UPDATE merge_requests SET pending_completion = :pending "
+                    "WHERE project_id = :project_id AND id = :id AND pending_completion IS NOT NULL"
+                ),
+                {"pending": json.dumps(payload), "project_id": project_id, "id": queue_id},
+            )
+
+    async def defer_requeue(self, project_id: int, mr: MergeRequest, request: dict[str, Any]) -> None:
+        params = {
+            "project_id": project_id,
+            "iid": mr.iid,
+            "title": mr.title,
+            "author_name": mr.author.name,
+            "author_username": mr.author.username,
+            "author_avatar": mr.author.avatar_url,
+            "target_branch": mr.target_branch,
+            "labels": json.dumps(request.get("labels", mr.labels)),
+            "is_hotfix": int(request["is_hotfix"]),
+        }
+        pending = json.dumps({**request, "token": uuid4().hex, "params": params})
+        async with self.db.transaction() as session:
+            result = await session.execute(
+                text("SELECT requeue_request FROM merge_requests WHERE project_id = :project_id AND id = :id"),
+                {"project_id": project_id, "id": request["queue_id"]},
+            )
+            saved = result.scalar_one_or_none()
+            if self._older_requeue_request(request, saved):
+                return
+            await session.execute(
+                text(
+                    "UPDATE merge_requests SET requeue_request = :pending WHERE project_id = :project_id "
+                    "AND id = :id AND pending_completion IS NOT NULL AND (requeue_request = :saved "
+                    "OR (requeue_request IS NULL AND :saved IS NULL))"
+                ),
+                {"pending": pending, "project_id": project_id, "id": request["queue_id"], "saved": saved},
+            )
+
+    def _older_requeue_request(self, request: dict[str, Any], saved: str | None) -> bool:
+        event_at = request.get("requested_at")
+        if saved is None or event_at is None:
+            return False
+        previous = json.loads(saved)
+        times = [
+            time for time in [previous.get("requested_at"), *previous.get("cancelled_events", [])] if time is not None
+        ]
+        return bool(times) and event_at <= max(times)
+
+    async def cancel_requeue(self, project_id: int, queue_id: int, event_at: datetime) -> None:
+        async with self.db.transaction() as session:
+            result = await session.execute(
+                text("SELECT requeue_request FROM merge_requests WHERE project_id = :project_id AND id = :id"),
+                {"project_id": project_id, "id": queue_id},
+            )
+            saved = result.scalar_one_or_none()
+            if saved is None:
+                return
+            request = json.loads(saved)
+            requested_at = request.get("requested_at")
+            if requested_at is not None and event_at <= datetime.fromisoformat(requested_at):
+                return
+            request["cancelled_events"] = [*request.get("cancelled_events", []), event_at.isoformat()]
+            request["token"] = uuid4().hex
+            await session.execute(
+                text(
+                    "UPDATE merge_requests SET requeue_request = :request WHERE project_id = :project_id AND id = :id "
+                    "AND requeue_request = :saved AND pending_completion IS NOT NULL"
+                ),
+                {"request": json.dumps(request), "saved": saved, "project_id": project_id, "id": queue_id},
+            )
+
+    async def _stage_completion_positions(
+        self, session: Any, project_id: int, positions: dict[str, int], old_total: int
+    ) -> None:
+        result = await session.execute(
+            text(_SELECT_ACTIVE_QUEUE_PROJECT_SQL + _SELECT_ACTIVE_QUEUE_ORDER_SQL), {"project_id": project_id}
+        )
+        rows = list(result.mappings())
+        for position, row in enumerate(rows, 1):
+            previous = positions.get(str(row["iid"]))
+            if row["status"] != "queued" or previous is None or row["pending_notification"] is not None:
+                continue
+            if previous == position and old_total == len(rows):
+                continue
+            pending = json.dumps(
+                {
+                    "token": uuid4().hex,
+                    "status": "position_changed" if previous != position else "total_changed",
+                    "old_position": previous,
+                    "old_total": old_total,
+                }
+            )
+            await session.execute(
+                text("UPDATE merge_requests SET pending_notification = :pending WHERE id = :id"),
+                {"pending": pending, "id": row["id"]},
+            )
+
+    async def stage_completion_positions(self, project_id: int, positions: dict[int, int], old_total: int) -> None:
+        async with self.db.transaction() as session:
+            await self._stage_completion_positions(
+                session, project_id, {str(k): v for k, v in positions.items()}, old_total
+            )
+
+    async def finalize_completion(self, project_id: int, item: QueueItem, payload: dict[str, Any]) -> bool:
+        """Archive and delete only this intent's incarnation; transfer any requeue atomically."""
+        async with self.db.transaction() as session:
+            result = await session.execute(
+                text(
+                    "DELETE FROM merge_requests WHERE project_id = :project_id AND id = :id "
+                    "AND pending_completion = :pending AND (requeue_request = :requeue "
+                    "OR (requeue_request IS NULL AND :requeue IS NULL)) RETURNING id"
+                ),
+                {
+                    "project_id": project_id,
+                    "id": item.queue_id,
+                    "pending": json.dumps(payload),
+                    "requeue": item.requeue_request,
+                },
+            )
+            if result.first() is None:
+                return False
+            await session.execute(
+                text(_INSERT_HISTORY_SQL + " ON CONFLICT(project_id, iid) DO NOTHING"), payload["history"]
+            )
+            requeue = json.loads(item.requeue_request) if item.requeue_request is not None else None
+            if requeue is not None and not requeue_is_cancelled(requeue, payload["label_events"]):
+                await session.execute(
+                    text(_INSERT_MR_SQL), {**requeue["params"], "queued_at": datetime.now(UTC).isoformat()}
+                )
+                await session.execute(
+                    text(
+                        "UPDATE merge_requests SET pending_notification = :pending, ignored_label_events = :ignored WHERE project_id = :project_id AND iid = :iid"
+                    ),
+                    {
+                        "pending": json.dumps({"token": uuid4().hex, "status": "queued", "old_position": 0}),
+                        "ignored": json.dumps(payload["label_events"]),
+                        "project_id": project_id,
+                        "iid": item.mr_iid,
+                    },
+                )
+            request = payload["request"]
+            await self._stage_completion_positions(session, project_id, request["positions"], request["old_total"])
+        self._cache.invalidate()
+        return True
+
     async def complete_mr(
         self,
         project_id: int,
@@ -875,112 +1104,30 @@ class QueueManager:
         failure_reason: str | None = None,
         pipeline_duration_seconds: int | None = None,
         pipeline_failed_jobs: list[str] | None = None,
+        *,
+        expected_queue_id: int | None = None,
     ) -> bool:
-        """Move MR from active queue to history table.
-
-        This is an atomic operation that:
-        1. Reads the MR from active queue
-        2. Creates history record with computed timing fields
-        3. Deletes from active queue
-
-        Should be called after MR reaches terminal state (merged, failed, removed).
-
-        Args:
-            project_id: The GitLab project ID.
-            mr_iid: MR internal ID.
-            status: Final status (merged, failed, conflict, timeout, removed).
-            failure_reason: Reason for failure if applicable.
-            pipeline_duration_seconds: Total pipeline duration.
-            pipeline_failed_jobs: List of failed job names.
-
-        Returns:
-            True if MR was moved to history, False if not found.
-        """
-        log.debug(
-            "Completing MR and moving to history",
-            project_id=project_id,
-            mr_iid=mr_iid,
-            status=status,
-            failure_reason=failure_reason,
+        """Atomically archive the requested incarnation, never an owned completion or replacement."""
+        request = CompletionRequest(
+            status, status, "", {}, failure_reason, pipeline_duration_seconds, pipeline_failed_jobs
         )
-
-        # First get the MR data
-        mr = await self.get_queue_item(project_id, mr_iid)
-        if not mr:
-            log.debug(
-                "MR not found for completion (already completed)",
-                mr_iid=mr_iid,
-                status=status,
+        async with self.db.transaction() as session:
+            result = await session.execute(
+                text(
+                    "DELETE FROM merge_requests WHERE project_id = :project_id AND iid = :iid "
+                    "AND pending_completion IS NULL AND (:expected_id IS NULL OR id = :expected_id) RETURNING *"
+                ),
+                {"project_id": project_id, "iid": mr_iid, "expected_id": expected_queue_id},
             )
-            # Invalidate cache in case it contains stale data for this MR
-            self._cache.invalidate()
-            return False
-
-        now = datetime.now(UTC)
-        finished_at = now.isoformat()
-
-        wait_time_seconds, processing_time_seconds = self._compute_timing(mr, now)
-
-        # Prepare history record params
-        history_params = {
-            "project_id": mr.project_id,
-            "iid": mr.mr_iid,
-            "title": mr.title,
-            "author_name": mr.author_name,
-            "author_username": mr.author_username,
-            "author_avatar": mr.author_avatar,
-            "status": status,
-            "is_hotfix": 1 if mr.is_hotfix else 0,
-            "labels": json.dumps(mr.labels) if mr.labels else None,
-            "target_branch": mr.target_branch,
-            "queued_at": mr.queued_at.isoformat() if mr.queued_at else finished_at,
-            "started_at": mr.started_at.isoformat() if mr.started_at else None,
-            "finished_at": finished_at,
-            "wait_time_seconds": wait_time_seconds,
-            "processing_time_seconds": processing_time_seconds,
-            "failure_reason": failure_reason,
-            "pipeline_id": mr.pipeline_id,
-            "pipeline_status": mr.pipeline_status,
-            "pipeline_duration_seconds": pipeline_duration_seconds,
-            "pipeline_failed_jobs": json.dumps(pipeline_failed_jobs) if pipeline_failed_jobs else None,
-        }
-
-        try:
-            async with self.db.transaction() as session:
-                # Insert into history
-                await session.execute(text(_INSERT_HISTORY_SQL), history_params)
-                # Delete from active queue
-                await session.execute(text(_DELETE_MR_SQL), {"iid": mr_iid, "project_id": project_id})
-        except IntegrityError as e:
-            # Only suppress the expected duplicate-key race condition on history table
-            error_msg = str(e).lower()
-            is_history_duplicate = "merge_requests_history" in error_msg and (
-                "unique constraint" in error_msg or "duplicate" in error_msg
-            )
-            if not is_history_duplicate:
-                # Unexpected integrity error - re-raise to avoid hiding real issues
-                raise
-
-            log.debug(
-                "MR completion race: already in history",
-                mr_iid=mr_iid,
-                status=status,
-            )
-            # Explicitly delete from active table in a separate transaction
-            async with self.db.transaction() as session:
-                await session.execute(text(_DELETE_MR_SQL), {"iid": mr_iid, "project_id": project_id})
-            self._cache.invalidate()
-            return False
-
+            row = result.mappings().one_or_none()
+            if row is None:
+                self._cache.invalidate()
+                return False
+            item = self._row_to_queue_item(row)
+            params = self._history_params(item, request, datetime.now(UTC))
+            await session.execute(text(_INSERT_HISTORY_SQL + " ON CONFLICT(project_id, iid) DO NOTHING"), params)
         self._cache.invalidate()
         OPERATIONS_TOTAL.labels(project_id=str(project_id), type="complete", status="success").inc()
-        log.info(
-            "MR completed and moved to history",
-            mr_iid=mr_iid,
-            status=status,
-            wait_time_seconds=wait_time_seconds,
-            processing_time_seconds=processing_time_seconds,
-        )
         return True
 
     async def get_queue_stats(self, project_id: int | None = None) -> dict[str, int]:
@@ -1299,6 +1446,9 @@ class QueueManager:
             queue_id=row.get("id", 0),
             metadata_version=row.get("metadata_version", 0),
             pending_notification=row.get("pending_notification"),
+            pending_completion=row.get("pending_completion"),
+            requeue_request=row.get("requeue_request"),
+            ignored_label_events=json.loads(row.get("ignored_label_events") or "[]"),
         )
 
 

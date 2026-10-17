@@ -42,6 +42,7 @@ class MergeRequestAttributes:
     has_conflicts: bool = False
     rebase_in_progress: bool = False
     web_url: str | None = None
+    updated_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)

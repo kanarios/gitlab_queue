@@ -122,6 +122,7 @@ class QueuePositionNotifier:
                     self.queue_manager,
                     pending=pending,
                     old_position=payload["old_position"],
+                    old_total=payload.get("old_total", 0),
                 )
             except Exception as error:
                 log.warning("Failed to send pending priority notification", mr_iid=item.mr_iid, error=str(error))
@@ -240,13 +241,9 @@ class QueuePositionNotifier:
             positions_before: Positions captured before completion.
             old_total: Total queue size before the completion.
         """
-        notified_count = await self._notify_position_changes(
-            project_id=project_id,
-            excluded_mr_iid=completed_mr_iid,
-            positions_before=positions_before,
-            old_total=old_total,
-            log_context="",
-        )
+        await self.queue_manager.stage_completion_positions(project_id, positions_before, old_total)
+        await self.retry_pending(project_id)
+        notified_count = len(positions_before)
 
         if notified_count > 0:
             log.info(
