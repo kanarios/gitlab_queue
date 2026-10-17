@@ -89,6 +89,15 @@ def _digest(source, rows):
     return hashlib.sha256(_json(raw).encode("utf-8")).hexdigest()
 
 
+def _batch_digest(manifest, source, rows):
+    # Bind both high-water marks and all other manifest context to the raw data.
+    # The permanent empty owner marker keeps its original v1 representation;
+    # pending batches without this binding are refused, never silently adopted.
+    context = {key: manifest[key] for key in sorted(manifest) if key not in ("retry_digest", "dlq_digest")}
+    raw = _json([context, source, _digest(source, rows)])
+    return "bound-sha256-v1:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
 def _schema(revision):
     result = {source: [list(column) for column in columns] for source, columns in RAW_COLUMNS.items()}
     if revision == PREVIOUS:
@@ -129,7 +138,41 @@ def _check_shape(bind, name, columns, primary):
         raise RuntimeError(f"Rollback archive refuses foreign keys in {name}")
 
 
+def _check_mutation_safety(bind):
+    targets = {f"target{index}": name for index, name in enumerate((*SOURCES, *ARCHIVE_NAMES))}
+    if bind.dialect.name == "sqlite":
+        trigger_sql = (
+            "SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name IN "
+            f"({', '.join(':' + key for key in targets)})"
+        )
+    else:
+        trigger_sql = (
+            "SELECT tgname FROM pg_trigger WHERE NOT tgisinternal AND tgrelid IN "
+            f"({', '.join('to_regclass(:' + key + ')' for key in targets)})"
+        )
+    if bind.execute(sa.text(trigger_sql), targets).first():
+        raise RuntimeError("Rollback archive refuses user triggers on mutation targets")
+    if bind.dialect.name == "sqlite":
+        inspector = sa.inspect(bind)
+        referenced = any(
+            key["referred_table"] in targets.values()
+            for name in inspector.get_table_names()
+            for key in inspector.get_foreign_keys(name)
+        )
+    else:
+        # pg_constraint sees incoming ownership even from another schema. The
+        # archive ACK is a deletion boundary just like source capture.
+        references_sql = (
+            "SELECT conname FROM pg_constraint WHERE contype = 'f' AND confrelid IN "
+            f"({', '.join('to_regclass(:' + key + ')' for key in targets)})"
+        )
+        referenced = bind.execute(sa.text(references_sql), targets).first() is not None
+    if referenced:
+        raise RuntimeError("Rollback archive refuses references to mutation targets")
+
+
 def _check_sources(bind, revision):
+    _check_mutation_safety(bind)
     schema = _schema(revision)
     if revision == PREVIOUS:
         # Canonical create_all helpers can be legacy-stamped through f6 while
@@ -141,10 +184,6 @@ def _check_sources(bind, revision):
         schema[SOURCES[1]][6][2] = original["nullable"]
     for source, columns in schema.items():
         _check_shape(bind, source, columns, ("id",))
-    inspector = sa.inspect(bind)
-    for name in inspector.get_table_names():
-        if any(key["referred_table"] in SOURCES for key in inspector.get_foreign_keys(name)):
-            raise RuntimeError("Rollback archive refuses references to retry/DLQ rows")
     return schema
 
 
@@ -238,7 +277,7 @@ def _read_archive(bind, tables):
             _validate_rows(source, rows, source_schema[source])
             if (
                 len(rows) != manifest[f"{kind}_count"]
-                or _digest(source, rows) != manifest[f"{kind}_digest"]
+                or _batch_digest(manifest, source, rows) != manifest[f"{kind}_digest"]
                 or any(_digest(source, [row]) != row["row_digest"] for row in rows)
                 or manifest[f"{kind}_high_water"] < max((row["id"] for row in rows), default=0)
             ):
@@ -328,6 +367,8 @@ def capture(bind, source_revision):
             )
             if len(copied) != len(rows) or _digest(source, copied) != _digest(source, rows):
                 raise RuntimeError("Rollback archive copy verification failed")
+    for kind, source in zip(("retry", "dlq"), SOURCES, strict=True):
+        manifest[f"{kind}_digest"] = _batch_digest(manifest, source, captured[source])
     bind.execute(tables[MANIFEST].insert(), manifest)
     for kind, source in zip(("retry", "dlq"), SOURCES, strict=True):
         for row in captured[source]:
@@ -359,7 +400,7 @@ def restore(bind):
                     bind.execute(sa.text(f"SELECT * FROM {source} WHERE id = :id"), {"id": row["id"]}).mappings().one()
                     for row in rows
                 ]
-                if _digest(source, restored) != manifest[f"{kind}_digest"]:
+                if _batch_digest(manifest, source, restored) != manifest[f"{kind}_digest"]:
                     raise RuntimeError("Rollback archive restoration verification failed")
             _advance(bind, source, manifest[f"{kind}_high_water"])
     for manifest, _ in batches:

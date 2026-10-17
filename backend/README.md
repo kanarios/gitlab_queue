@@ -94,10 +94,18 @@ incompatible retry/DLQ rows are protected: compatible live rows and other manage
 tables are still dropped by full reversal. This archive is not a full backup.
 
 Restore verifies format/ownership, source schema, raw types, counts and digests
-before writes. Any occupied table-global ID, including identical data or a row
+before writes. Batch digests bind the raw rows to all manifest context, including
+both sequence high-water marks. A pending batch from an earlier helper with only
+raw-row digests is refused intact rather than trusted or automatically signed;
+the permanent empty owner marker remains compatible. Reconcile such an unbound
+pending archive against a verified backup before attempting the return upgrade.
+Any occupied table-global ID, including identical data or a row
 from another project, stops the entire restoration without overwriting/remapping
-or acknowledging the archive. Unsupported archive shapes and source foreign
-references also stop safely. Every row is verified after insertion before any
+or acknowledging the archive. Unsupported archive shapes, user triggers and
+incoming foreign references on either live table or any of the three archive
+tables also stop before mutations, including archive acknowledgment. PostgreSQL
+incoming references are checked across schemas. Every row is verified after
+insertion before any
 archive acknowledgment. Sequences never rewind and include archived/deleted
 high-water marks; PostgreSQL sequence advances can leave harmless gaps after a
 rolled-back migration. Interrupted transactions can be retried after reopening.

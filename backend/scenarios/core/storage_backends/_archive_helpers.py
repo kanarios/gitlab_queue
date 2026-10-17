@@ -35,7 +35,7 @@ async def seed_dead(url, entry_id=4, project_id=123, original=None, moved="2026-
         )
 
 
-async def snapshot(url):
+async def snapshot(url, *, include_sequences=False):
     async with Database(url) as database, database.engine.connect() as connection:
         tables = await connection.run_sync(lambda sync: inspect(sync).get_table_names())
         result = {}
@@ -50,11 +50,53 @@ async def snapshot(url):
                     [dict(row) for row in (await connection.execute(text(f"SELECT * FROM {table}"))).mappings()],
                     key=repr,
                 ),
+                "constraints": await connection.run_sync(
+                    lambda sync, name=table: {
+                        "primary": inspect(sync).get_pk_constraint(name),
+                        "foreign": inspect(sync).get_foreign_keys(name),
+                        "unique": inspect(sync).get_unique_constraints(name),
+                        "check": inspect(sync).get_check_constraints(name),
+                        "indexes": inspect(sync).get_indexes(name),
+                    }
+                ),
             }
         if database.engine.dialect.name == "sqlite":
+            result["triggers"] = list(
+                (
+                    await connection.execute(
+                        text("SELECT name, sql FROM sqlite_master WHERE type = 'trigger' ORDER BY name")
+                    )
+                ).all()
+            )
             result["sqlite_sequence"] = list(
                 (await connection.execute(text("SELECT name, seq FROM sqlite_sequence ORDER BY name"))).all()
             )
+        else:
+            result["triggers"] = list(
+                (
+                    await connection.execute(
+                        text(
+                            "SELECT t.tgname, pg_get_triggerdef(t.oid), pg_get_functiondef(t.tgfoid) "
+                            "FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid "
+                            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                            "WHERE n.nspname = current_schema() AND NOT t.tgisinternal ORDER BY t.tgname"
+                        )
+                    )
+                ).all()
+            )
+            if include_sequences:
+                names = (
+                    await connection.execute(
+                        text(
+                            "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+                            "WHERE c.relkind = 'S' AND n.nspname = current_schema() ORDER BY c.relname"
+                        )
+                    )
+                ).scalars()
+                result["postgres_sequences"] = {
+                    name: tuple((await connection.execute(text(f'SELECT last_value, is_called FROM "{name}"'))).one())
+                    for name in names
+                }
         return result
 
 
