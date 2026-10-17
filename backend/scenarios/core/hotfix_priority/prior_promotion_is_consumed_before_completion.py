@@ -17,6 +17,7 @@ from ._helpers import label_event, queue_environment
         params("millisecond", "failure"),
         params("second", "remove"),
         params("millisecond", "remove"),
+        params("unknown", "failure"),
     ]
 )
 async def prior_promotion_is_consumed_before_completion(precision, outcome):
@@ -31,6 +32,8 @@ async def prior_promotion_is_consumed_before_completion(precision, outcome):
                 if precision == "second"
                 else finished.isoformat(timespec="milliseconds")
             )
+            if precision == "unknown":
+                source = None
             event = label_event(
                 "labeled",
                 ["merge_queue"],

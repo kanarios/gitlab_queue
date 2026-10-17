@@ -930,7 +930,7 @@ class QueueManager:
         admission = json.loads(item.requeue_request)
         source, applied = admission.get("requested_at"), admission.get("applied_at")
         known_prior = applied is not None and datetime.fromisoformat(applied) <= finished
-        source_prior = source is None or definitely_before(
+        source_prior = source is not None and definitely_before(
             datetime.fromisoformat(source), admission.get("precision_us", 1), finished
         )
         if not known_prior and not source_prior:

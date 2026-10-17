@@ -31,8 +31,19 @@ class PausedActiveQueue(QueueManager):
         return item
 
 
-@scenario([params("labeled", 1), params("update", 1), params("labeled", 2), params("update", 2)])
-async def admission_survives_completion_between_active_reads(action, boundary):
+@scenario(
+    [
+        params("labeled", 1, True),
+        params("update", 1, True),
+        params("labeled", 2, True),
+        params("update", 2, True),
+        params("labeled", 2, False),
+        params("update", 2, False),
+        params("labeled", 3, False),
+        params("update", 3, False),
+    ]
+)
+async def admission_survives_completion_between_active_reads(action, boundary, timestamped):
     async with queue_environment() as base, queue_services(PausedActiveQueue(base.queue.db), base.server) as env:
         with given("a later explicit hotfix event paused after a real active snapshot"):
             await env.queue.add_to_queue(123, create_mr(iid=3))
@@ -44,9 +55,9 @@ async def admission_survives_completion_between_active_reads(action, boundary):
                 action,
                 ["merge_queue"],
                 ["merge_queue", "hotfix"],
-                updated_at=(outcome_at + timedelta(seconds=1)).isoformat(),
+                updated_at=(outcome_at + timedelta(seconds=1)).isoformat() if timestamped else None,
                 user_id=99,
-                message_id=f"{action}-{boundary}",
+                message_id=f"{action}-{boundary}-{timestamped}",
             )
             env.queue.pause_read = boundary
             handling = asyncio.create_task(env.handler.handle(event))
