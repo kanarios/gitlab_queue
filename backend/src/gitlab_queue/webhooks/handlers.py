@@ -127,7 +127,25 @@ class MRWebhookHandler:
         else:
             log.debug("Ignoring unhandled action", action=action, mr_iid=mr_iid)
 
-    async def _defer_completion_requeue(self, event: MergeRequestEvent, item: QueueItem) -> bool:
+    def _admission_key(self, event: MergeRequestEvent) -> str:
+        if event.message_id is not None:
+            return event.message_id
+        attrs = event.object_attributes
+        delta = event.label_changes
+        return json.dumps(
+            [
+                event.user_id,
+                attrs.action,
+                attrs.updated_at.isoformat() if attrs.updated_at else None,
+                attrs.updated_at_precision_us,
+                sorted(delta.previous) if delta else [],
+                sorted(event.labels),
+            ]
+        )
+
+    async def _defer_completion_requeue(
+        self, event: MergeRequestEvent, item: QueueItem, *, allow_active: bool = False
+    ) -> bool:
         triggers = [label for label in event.labels if label in (self.settings.queue_label, self.settings.hotfix_label)]
         event_at = event.object_attributes.updated_at
         return await self.queue_manager.defer_requeue(
@@ -142,23 +160,27 @@ class MRWebhookHandler:
                 "precision_us": event.object_attributes.updated_at_precision_us,
                 "message_id": event.message_id,
                 "actor_id": event.user_id,
+                "admission_key": self._admission_key(event),
                 "title": event.object_attributes.title,
                 "target_branch": event.object_attributes.target_branch,
                 "cancelled_events": [],
             },
+            allow_active=allow_active,
         )
 
-    async def _change_completion_requeue(self, event: MergeRequestEvent, item: QueueItem) -> bool:
+    async def _change_completion_requeue(
+        self, event: MergeRequestEvent, item: QueueItem, *, allow_active: bool = False
+    ) -> bool:
         added = self._was_queue_label_added(event) or self._was_hotfix_label_added(event)
         if added and event.object_attributes.state == "opened":
-            return await self._defer_completion_requeue(event, item)
+            return await self._defer_completion_requeue(event, item, allow_active=allow_active)
         if event.object_attributes.updated_at is None:
             return True
         removed = self._was_queue_label_removed(event) or self._was_hotfix_label_removed(event)
         if not removed and event.object_attributes.state == "opened":
             return True
         if self._has_queue_trigger(event.labels) and event.object_attributes.state == "opened":
-            return await self._defer_completion_requeue(event, item)
+            return await self._defer_completion_requeue(event, item, allow_active=allow_active)
         else:
             return await self.queue_manager.cancel_requeue(
                 event.project_id,
@@ -166,6 +188,7 @@ class MRWebhookHandler:
                 event.object_attributes.updated_at,
                 precision_us=event.object_attributes.updated_at_precision_us,
                 message_id=event.message_id,
+                allow_active=allow_active,
             )
 
     def _own_completion_event(self, event: MergeRequestEvent, payload: dict[str, Any]) -> bool:
@@ -190,6 +213,8 @@ class MRWebhookHandler:
         return False
 
     def _ignored_completion_event(self, event: MergeRequestEvent, item: QueueItem) -> bool:
+        if f"admission:{self._admission_key(event)}" in item.ignored_label_events:
+            return True
         event_at = event.object_attributes.updated_at
         delta = event.label_changes
         label_change = (
@@ -225,8 +250,11 @@ class MRWebhookHandler:
             if self._ignored_completion_event(event, item):
                 return True
             if item.pending_completion is None:
+                await self._admit_active_trigger(event, item)
                 return False
             payload = json.loads(item.pending_completion)
+            if self._admission_key(event) in payload.get("consumed_admissions", []):
+                return True
             if self._own_completion_event(event, payload):
                 return True
             started = datetime.fromisoformat(payload["finished_at"])
@@ -241,6 +269,15 @@ class MRWebhookHandler:
         ).recover(project_id, iid, item.queue_id)
         await self._broadcast_queue_update()
         return True
+
+    async def _admit_active_trigger(self, event: MergeRequestEvent, item: QueueItem) -> None:
+        added = self._was_queue_label_added(event) or self._was_hotfix_label_added(event)
+        if not added and item.requeue_request is None:
+            return
+        if item.state in ("queued", "rebasing", "testing", "merging") and not await self._change_completion_requeue(
+            event, item, allow_active=True
+        ):
+            raise RuntimeError("Queue ownership changed during trigger admission")
 
     async def _stale_enqueue(self, event: MergeRequestEvent) -> bool:
         event_at = event.object_attributes.updated_at
@@ -679,7 +716,7 @@ class MRWebhookHandler:
             self.settings.hotfix_label,
             self.position_notifier,
         )
-        if await updater.refresh(project_id, mr_iid, list(event.labels)):
+        if await updater.refresh(project_id, mr_iid, list(event.labels), admission_key=self._admission_key(event)):
             await self._broadcast_queue_update()
 
     def _was_label_changed(

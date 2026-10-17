@@ -140,8 +140,8 @@ class ObservedQueue(QueueManager):
         self.item_read.set()
         return item
 
-    async def defer_requeue(self, project_id, mr, request):
-        result = await super().defer_requeue(project_id, mr, request)
+    async def defer_requeue(self, project_id, mr, request, **options):
+        result = await super().defer_requeue(project_id, mr, request, **options)
         self.requeue_saved.set()
         return result
 

@@ -75,7 +75,7 @@ class FakeQueueManager:
     async def stage_completion_positions(self, project_id, positions, old_total):
         pass
 
-    async def defer_requeue(self, project_id, mr, request):
+    async def defer_requeue(self, project_id, mr, request, **options):
         return True
 
     async def cancel_requeue(self, project_id, queue_id, event_at, **options):
@@ -201,6 +201,7 @@ class FakeQueueManager:
         *,
         expected_revision: tuple[int, int] | None = None,
         notify_positions: bool = False,
+        admission_key: str | None = None,
     ) -> bool:
         self.update_hotfix_calls.append(
             {

@@ -16,7 +16,7 @@ from sqlalchemy import text
 
 from gitlab_queue.metrics import OPERATIONS_TOTAL
 from gitlab_queue.models.completion import CompletionRequest, requeue_is_cancelled
-from gitlab_queue.models.event_order import compare_event, preserve_uncertainty
+from gitlab_queue.models.event_order import compare_event, definitely_before, preserve_uncertainty
 from gitlab_queue.models.queue_item import DashboardStats, QueueItem
 from gitlab_queue.utils.logging import get_logger
 
@@ -784,6 +784,7 @@ class QueueManager:
         *,
         expected_revision: tuple[int, int] | None = None,
         notify_positions: bool = False,
+        admission_key: str | None = None,
     ) -> bool:
         """Update the hotfix status and labels of an MR in the queue.
 
@@ -829,6 +830,7 @@ class QueueManager:
             }
             cursor_result = await session.execute(text(_UPDATE_HOTFIX_STATUS_SQL), params)
             changed: bool = cursor_result.rowcount > 0  # type: ignore[attr-defined]
+            await self._acknowledge_active_admission(session, project_id, mr_iid, admission_key)
             if changed and notify_positions:
                 rows = await session.execute(
                     text(_SELECT_ACTIVE_QUEUE_PROJECT_SQL + _SELECT_ACTIVE_QUEUE_ORDER_SQL),
@@ -902,46 +904,95 @@ class QueueManager:
             "pipeline_failed_jobs": json.dumps(request.pipeline_failed_jobs) if request.pipeline_failed_jobs else None,
         }
 
+    async def _acknowledge_active_admission(self, session: Any, project_id: int, mr_iid: int, key: str | None) -> None:
+        if key is None:
+            return
+        result = await session.execute(text(_SELECT_MR_BY_IID_SQL), {"project_id": project_id, "iid": mr_iid})
+        row = result.mappings().one_or_none()
+        if row is None or row["pending_completion"] is not None or row["requeue_request"] is None:
+            return
+        admission = json.loads(row["requeue_request"])
+        if admission.get("admission_key") != key or admission.get("cancelled_events"):
+            return
+        if set(json.loads(row["labels"] or "[]")) != set(json.loads(admission["params"]["labels"])):
+            return
+        admission["applied_at"] = datetime.now(UTC).isoformat()
+        await session.execute(
+            text(
+                "UPDATE merge_requests SET requeue_request = :admission WHERE id = :id AND requeue_request = :previous AND pending_completion IS NULL"
+            ),
+            {"admission": json.dumps(admission), "id": row["id"], "previous": row["requeue_request"]},
+        )
+
+    def _completion_admission(self, item: QueueItem, finished: datetime) -> tuple[str | None, list[str]]:
+        if item.requeue_request is None:
+            return None, []
+        admission = json.loads(item.requeue_request)
+        source, applied = admission.get("requested_at"), admission.get("applied_at")
+        known_prior = applied is not None and datetime.fromisoformat(applied) <= finished
+        source_prior = source is None or definitely_before(
+            datetime.fromisoformat(source), admission.get("precision_us", 1), finished
+        )
+        if not known_prior and not source_prior:
+            return item.requeue_request, []
+        return None, self._admission_receipts(admission)
+
+    def _admission_receipts(self, admission: dict[str, Any]) -> list[str]:
+        keys = [admission.get("admission_key"), *admission.get("seen_messages", [])]
+        return list(dict.fromkeys(key for key in keys if key is not None))
+
     async def prepare_completion(self, project_id: int, mr_iid: int, request: CompletionRequest) -> QueueItem | None:
-        """Freeze the original outcome before any completion HTTP request."""
-        async with self.db.transaction() as session:
-            result = await session.execute(text(_SELECT_MR_BY_IID_SQL), {"project_id": project_id, "iid": mr_iid})
-            row = result.mappings().one_or_none()
-            if row is None or (request.queue_id is not None and row["id"] != request.queue_id):
-                return None
-            item = self._row_to_queue_item(row)
-            if item.pending_completion is not None:
-                return item
-            now = next(
-                (
-                    value
-                    for key, value in request.context.items()
-                    if key in ("merged_at", "failed_at", "removed_at") and isinstance(value, datetime)
-                ),
-                datetime.now(UTC),
-            )
-            payload = {
-                "queue_id": item.queue_id,
-                "request": asdict(request),
-                "history": self._history_params(item, request, now),
-                "finished_at": now.isoformat(),
-                "comment_sent": False,
-                "labels_removed": False,
-                "label_events": [],
-            }
-            pending = json.dumps(payload, default=lambda value: value.isoformat())
-            await session.execute(
-                text(
-                    "UPDATE merge_requests SET pending_completion = :pending, status = :status, "
-                    "finished_at = :finished, pending_notification = NULL WHERE id = :id AND pending_completion IS NULL"
-                ),
-                {"pending": pending, "status": request.state, "finished": now.isoformat(), "id": item.queue_id},
-            )
-            item.pending_completion = pending
-            item.state = request.state
-            item.finished_at = now
-        self._cache.invalidate()
-        return item
+        """Freeze outcome and transfer/consume the exact durable admission read."""
+        while True:
+            async with self.db.transaction() as session:
+                result = await session.execute(text(_SELECT_MR_BY_IID_SQL), {"project_id": project_id, "iid": mr_iid})
+                row = result.mappings().one_or_none()
+                if row is None or (request.queue_id is not None and row["id"] != request.queue_id):
+                    return None
+                item = self._row_to_queue_item(row)
+                if item.pending_completion is not None:
+                    return item
+                now = next(
+                    (
+                        value
+                        for key, value in request.context.items()
+                        if key in ("merged_at", "failed_at", "removed_at") and isinstance(value, datetime)
+                    ),
+                    datetime.now(UTC),
+                )
+                admission, consumed = self._completion_admission(item, now)
+                payload = {
+                    "queue_id": item.queue_id,
+                    "request": asdict(request),
+                    "history": self._history_params(item, request, now),
+                    "finished_at": now.isoformat(),
+                    "comment_sent": False,
+                    "labels_removed": False,
+                    "label_events": [f"admission:{key}" for key in consumed],
+                    "consumed_admissions": consumed,
+                }
+                pending = json.dumps(payload, default=lambda value: value.isoformat())
+                result = await session.execute(
+                    text(
+                        "UPDATE merge_requests SET pending_completion = :pending, status = :status, finished_at = :finished, pending_notification = NULL, requeue_request = :admission WHERE id = :id AND pending_completion IS NULL AND (requeue_request = :previous OR (requeue_request IS NULL AND :previous IS NULL)) RETURNING id"
+                    ),
+                    {
+                        "pending": pending,
+                        "status": request.state,
+                        "finished": now.isoformat(),
+                        "id": item.queue_id,
+                        "admission": admission,
+                        "previous": item.requeue_request,
+                    },
+                )
+                if result.first() is None:
+                    continue
+                item.pending_completion = pending
+                item.requeue_request = admission
+                item.state = request.state
+                item.finished_at = now
+            self._cache.invalidate()
+            return item
 
     async def get_pending_completions(self, project_id: int) -> list[QueueItem]:
         async with self.db.session() as session:
@@ -963,7 +1014,9 @@ class QueueManager:
                 {"pending": json.dumps(payload), "project_id": project_id, "id": queue_id},
             )
 
-    async def defer_requeue(self, project_id: int, item: QueueItem, request: dict[str, Any]) -> bool:
+    async def defer_requeue(
+        self, project_id: int, item: QueueItem, request: dict[str, Any], *, allow_active: bool = False
+    ) -> bool:
         """Admit from the original row before HTTP; False means ownership changed."""
         params = {
             "project_id": project_id,
@@ -976,17 +1029,21 @@ class QueueManager:
             "labels": json.dumps(request.get("labels", item.labels)),
             "is_hotfix": int(request["is_hotfix"]),
         }
-        return await self._write_requeue(project_id, item.queue_id, {**request, "params": params})
+        return await self._write_requeue(
+            project_id, item.queue_id, {**request, "params": params}, allow_active=allow_active
+        )
 
-    async def _write_requeue(self, project_id: int, queue_id: int, incoming: dict[str, Any]) -> bool:
+    async def _write_requeue(
+        self, project_id: int, queue_id: int, incoming: dict[str, Any], *, allow_active: bool = False
+    ) -> bool:
         async with self.db.queue_intent_lock(project_id, queue_id):
             while True:
                 async with self.db.transaction() as session:
                     result = await session.execute(
                         text(
-                            "SELECT requeue_request FROM merge_requests WHERE project_id = :project_id AND id = :id AND pending_completion IS NOT NULL"
+                            "SELECT requeue_request FROM merge_requests WHERE project_id = :project_id AND id = :id AND (pending_completion IS NOT NULL OR (:allow_active = 1 AND status IN ('queued', 'rebasing', 'testing', 'merging')))"
                         ),
-                        {"project_id": project_id, "id": queue_id},
+                        {"project_id": project_id, "id": queue_id, "allow_active": int(allow_active)},
                     )
                     row = result.first()
                     if row is None:
@@ -1003,6 +1060,7 @@ class QueueManager:
                     if order == 0 and cancelling and previous and not previous.get("cancelled_events"):
                         return True
                     pending = self._merge_requeue(incoming, previous, order, cancelling)
+                    pending.pop("applied_at", None)
                     pending["token"] = uuid4().hex
                     pending["seen_messages"] = [
                         *previous.get("seen_messages", []),
@@ -1010,9 +1068,15 @@ class QueueManager:
                     ]
                     result = await session.execute(
                         text(
-                            "UPDATE merge_requests SET requeue_request = :pending WHERE project_id = :project_id AND id = :id AND pending_completion IS NOT NULL AND (requeue_request = :saved OR (requeue_request IS NULL AND :saved IS NULL)) RETURNING id"
+                            "UPDATE merge_requests SET requeue_request = :pending WHERE project_id = :project_id AND id = :id AND (pending_completion IS NOT NULL OR (:allow_active = 1 AND status IN ('queued', 'rebasing', 'testing', 'merging'))) AND (requeue_request = :saved OR (requeue_request IS NULL AND :saved IS NULL)) RETURNING id"
                         ),
-                        {"pending": json.dumps(pending), "project_id": project_id, "id": queue_id, "saved": saved},
+                        {
+                            "pending": json.dumps(pending),
+                            "project_id": project_id,
+                            "id": queue_id,
+                            "saved": saved,
+                            "allow_active": int(allow_active),
+                        },
                     )
                     if result.first() is not None:
                         return True
@@ -1052,6 +1116,7 @@ class QueueManager:
         *,
         precision_us: int = 1,
         message_id: str | None = None,
+        allow_active: bool = False,
     ) -> bool:
         return await self._write_requeue(
             project_id,
@@ -1062,6 +1127,7 @@ class QueueManager:
                 "message_id": message_id,
                 "cancelled": True,
             },
+            allow_active=allow_active,
         )
 
     async def _stage_completion_positions(
@@ -1132,7 +1198,12 @@ class QueueManager:
                     ),
                     {
                         "pending": json.dumps({"token": uuid4().hex, "status": "queued", "old_position": 0}),
-                        "ignored": json.dumps(payload["label_events"]),
+                        "ignored": json.dumps(
+                            [
+                                *payload["label_events"],
+                                *[f"admission:{key}" for key in self._admission_receipts(requeue)],
+                            ]
+                        ),
                         "project_id": project_id,
                         "iid": item.mr_iid,
                     },

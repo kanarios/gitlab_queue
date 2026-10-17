@@ -24,9 +24,10 @@ class QueueMetadataUpdater:
         *,
         expected_revision: tuple[int, int] | None = None,
         notify: bool = True,
+        admission_key: str | None = None,
     ) -> bool:
         async with self.queue_manager.metadata_lock(project_id):
-            updated = await self._refresh(project_id, mr_iid, labels, expected_revision)
+            updated = await self._refresh(project_id, mr_iid, labels, expected_revision, admission_key)
             if notify:
                 await self.retry_pending(project_id)
             return updated
@@ -41,6 +42,7 @@ class QueueMetadataUpdater:
         mr_iid: int,
         labels: list[str],
         expected_revision: tuple[int, int] | None,
+        admission_key: str | None = None,
     ) -> bool:
         item = await self.queue_manager.get_queue_item(project_id, mr_iid)
         if item is None or item.state not in ("queued", "rebasing", "testing", "merging"):
@@ -52,7 +54,7 @@ class QueueMetadataUpdater:
 
         is_hotfix = self.hotfix_label in labels
         priority_changed = item.is_hotfix != is_hotfix
-        if not priority_changed and set(item.labels) == set(labels):
+        if not priority_changed and set(item.labels) == set(labels) and admission_key is None:
             return False
 
         updated = await self.queue_manager.update_hotfix_status(
@@ -62,5 +64,6 @@ class QueueMetadataUpdater:
             labels,
             expected_revision=revision,
             notify_positions=priority_changed,
+            admission_key=admission_key,
         )
         return updated
