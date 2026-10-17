@@ -73,6 +73,7 @@ administrative writes. The common file/advisory gate serializes raw Alembic and
 programmatic migrations; it does **not** serialize application writers. Migration
 copy/delete, batch DDL, restore/acknowledgment and the revision marker share a real
 database transaction, including an explicit physical SQLite transaction.
+Administrative DDL outside that gate must also remain stopped during migration.
 
 Downgrade moves incompatible retry/DLQ rows to three same-database typed tables:
 `gq_retry_rollback_manifest_v1`, `gq_retry_rollback_rows_v1` and
@@ -109,6 +110,16 @@ insertion before any
 archive acknowledgment. Sequences never rewind and include archived/deleted
 high-water marks; PostgreSQL sequence advances can leave harmless gaps after a
 rolled-back migration. Interrupted transactions can be retried after reopening.
+
+The five mutation targets must resolve to the same ordinary permanent tables
+that are inspected: SQLite `main`, or PostgreSQL's connection inspection
+namespace. Same-name TEMP tables/views are refused on the actual supplied
+connection, including when the permanent archive has not been created yet.
+SQLite checks both main and TEMP trigger catalogs. PostgreSQL also refuses
+rewrite rules and inheritance in either direction; temporary, unlogged, foreign,
+view and partition targets are outside the supported profile. Durable identities
+are resolved again after intentional migration DDL before restore/ACK, so a
+legitimate rebuild need not retain its old OID or SQLite root page.
 
 Operational order:
 

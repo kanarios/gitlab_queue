@@ -138,20 +138,98 @@ def _check_shape(bind, name, columns, primary):
         raise RuntimeError(f"Rollback archive refuses foreign keys in {name}")
 
 
-def _check_mutation_safety(bind):
+def _check_relations(bind):
+    """Bind the five inspected durable tables to actual DML name resolution."""
     targets = {f"target{index}": name for index, name in enumerate((*SOURCES, *ARCHIVE_NAMES))}
     if bind.dialect.name == "sqlite":
+        shadows = (
+            "SELECT name FROM temp.sqlite_master WHERE type IN ('table', 'view') AND lower(name) IN "
+            f"({', '.join(':' + key for key in targets)})"
+        )
+        if bind.execute(sa.text(shadows), targets).first():
+            raise RuntimeError("Rollback archive refuses TEMP shadows of persistent relations")
+        for name in targets.values():
+            relation = (
+                bind.execute(
+                    sa.text(
+                        "SELECT name, type, sql FROM main.sqlite_master WHERE type IN ('table', 'view') AND lower(name) = :name"
+                    ),
+                    {"name": name},
+                )
+                .mappings()
+                .one_or_none()
+            )
+            if relation is None and name in ARCHIVE_NAMES:
+                continue
+            if (
+                relation is None
+                or relation["name"] != name
+                or relation["type"] != "table"
+                or not relation["sql"]
+                or relation["sql"].upper().startswith("CREATE VIRTUAL TABLE")
+            ):
+                raise RuntimeError("Rollback archive requires ordinary persistent relations in main")
+        return targets
+    schema = sa.inspect(bind).default_schema_name
+    if (
+        not schema
+        or schema.startswith("pg_temp_")
+        or bind.execute(sa.text("SELECT current_schema()")).scalar_one() != schema
+    ):
+        raise RuntimeError("Rollback archive refuses changed persistent relation namespace")
+    identities = {}
+    for key, name in targets.items():
+        durable = (
+            bind.execute(
+                sa.text(
+                    "SELECT c.oid, c.relkind::text AS relkind, c.relpersistence::text AS relpersistence "
+                    "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "WHERE n.nspname = :schema AND c.relname = :name"
+                ),
+                {"schema": schema, "name": name},
+            )
+            .mappings()
+            .one_or_none()
+        )
+        effective = bind.execute(sa.text("SELECT to_regclass(:name)::oid"), {"name": name}).scalar_one()
+        if durable is None and effective is None and name in ARCHIVE_NAMES:
+            identities[key] = None
+            continue
+        if (
+            durable is None
+            or durable["relkind"] != "r"
+            or durable["relpersistence"] != "p"
+            or durable["oid"] != effective
+        ):
+            raise RuntimeError("Rollback archive requires matching ordinary persistent relation identities")
+        identities[key] = durable["oid"]
+    placeholders = ", ".join(":" + key for key in identities)
+    inheritance = f"SELECT 1 FROM pg_inherits WHERE inhparent IN ({placeholders}) OR inhrelid IN ({placeholders})"
+    if bind.execute(sa.text(inheritance), identities).first():
+        raise RuntimeError("Rollback archive refuses inheritance of persistent relations")
+    return identities
+
+
+def _check_mutation_safety(bind):
+    targets = _check_relations(bind)
+    if bind.dialect.name == "sqlite":
         trigger_sql = (
-            "SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name IN "
+            "SELECT name FROM (SELECT name, tbl_name FROM main.sqlite_master WHERE type = 'trigger' "
+            "UNION ALL SELECT name, tbl_name FROM temp.sqlite_master WHERE type = 'trigger') "
+            "WHERE lower(tbl_name) IN "
             f"({', '.join(':' + key for key in targets)})"
         )
     else:
         trigger_sql = (
             "SELECT tgname FROM pg_trigger WHERE NOT tgisinternal AND tgrelid IN "
-            f"({', '.join('to_regclass(:' + key + ')' for key in targets)})"
+            f"({', '.join(':' + key for key in targets)})"
         )
     if bind.execute(sa.text(trigger_sql), targets).first():
         raise RuntimeError("Rollback archive refuses user triggers on mutation targets")
+    if bind.dialect.name == "postgresql":
+        rules_sql = f"SELECT rulename FROM pg_rewrite WHERE ev_class IN ({', '.join(':' + key for key in targets)})"
+        if bind.execute(sa.text(rules_sql), targets).first():
+            raise RuntimeError("Rollback archive refuses rewrite rules on mutation targets")
     if bind.dialect.name == "sqlite":
         inspector = sa.inspect(bind)
         referenced = any(
@@ -164,7 +242,7 @@ def _check_mutation_safety(bind):
         # archive ACK is a deletion boundary just like source capture.
         references_sql = (
             "SELECT conname FROM pg_constraint WHERE contype = 'f' AND confrelid IN "
-            f"({', '.join('to_regclass(:' + key + ')' for key in targets)})"
+            f"({', '.join(':' + key for key in targets)})"
         )
         referenced = bind.execute(sa.text(references_sql), targets).first() is not None
     if referenced:

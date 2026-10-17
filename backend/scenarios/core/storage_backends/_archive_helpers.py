@@ -72,6 +72,30 @@ async def snapshot(url, *, include_sequences=False):
                 (await connection.execute(text("SELECT name, seq FROM sqlite_sequence ORDER BY name"))).all()
             )
         else:
+            result["inheritance"] = list(
+                (
+                    await connection.execute(
+                        text(
+                            "SELECT pn.nspname, p.relname, cn.nspname, c.relname FROM pg_inherits i "
+                            "JOIN pg_class p ON p.oid = i.inhparent JOIN pg_namespace pn ON pn.oid = p.relnamespace "
+                            "JOIN pg_class c ON c.oid = i.inhrelid JOIN pg_namespace cn ON cn.oid = c.relnamespace "
+                            "WHERE pn.nspname = current_schema() OR cn.nspname = current_schema() "
+                            "ORDER BY pn.nspname, p.relname, cn.nspname, c.relname"
+                        )
+                    )
+                ).all()
+            )
+            result["rules"] = list(
+                (
+                    await connection.execute(
+                        text(
+                            "SELECT r.rulename, pg_get_ruledef(r.oid) FROM pg_rewrite r "
+                            "JOIN pg_class c ON c.oid = r.ev_class JOIN pg_namespace n ON n.oid = c.relnamespace "
+                            "WHERE n.nspname = current_schema() ORDER BY r.rulename"
+                        )
+                    )
+                ).all()
+            )
             result["triggers"] = list(
                 (
                     await connection.execute(
@@ -98,6 +122,52 @@ async def snapshot(url, *, include_sequences=False):
                     for name in names
                 }
         return result
+
+
+async def supplied_snapshot(url, connection):
+    """Record durable storage separately from same-connection TEMP objects."""
+    result = {"persistent": await snapshot(url, include_sequences=True)}
+    if connection.dialect.name == "sqlite":
+        objects = (
+            await connection.execute(text("SELECT type, name, sql FROM sqlite_temp_master ORDER BY type, name"))
+        ).all()
+        schema = "temp"
+    else:
+        schema = (
+            await connection.execute(text("SELECT nspname FROM pg_namespace WHERE oid = pg_my_temp_schema()"))
+        ).scalar()
+        objects = (
+            await connection.execute(
+                text(
+                    "SELECT c.relkind::text, c.relname, CASE WHEN c.relkind = 'v' THEN pg_get_viewdef(c.oid) END "
+                    "FROM pg_class c WHERE c.relnamespace = pg_my_temp_schema() AND c.relkind IN ('r', 'v') "
+                    "ORDER BY c.relkind, c.relname"
+                )
+            )
+        ).all()
+    result["temporary_definitions"] = list(objects)
+    quote = connection.dialect.identifier_preparer.quote
+    result["temporary_rows"] = {
+        name: sorted(
+            [
+                dict(row)
+                for row in (await connection.execute(text(f"SELECT * FROM {quote(schema)}.{quote(name)}"))).mappings()
+            ],
+            key=repr,
+        )
+        for kind, name, _ in objects
+        if kind in ("table", "view", "r", "v")
+    }
+    return result
+
+
+async def supplied_migration(url, connection, direction):
+    def migrate(sync):
+        config = _get_alembic_config(url)
+        config.attributes["connection"] = sync
+        getattr(command, direction)(config, "f6a7b8c9d0e1" if direction == "downgrade" else "head")
+
+    await connection.run_sync(migrate)
 
 
 async def observed_migration(url, direction, stage, mode="raise", marker=None, release=None):
