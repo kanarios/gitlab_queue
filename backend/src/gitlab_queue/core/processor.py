@@ -730,15 +730,7 @@ class MergeProcessor:
         updated_count = 0
         for mr in gitlab_mrs:
             if mr.iid not in queued_iids:
-                is_hotfix = self.settings.hotfix_label in mr.labels
-                await self.queue_manager.add_to_queue(self.settings.gitlab_project_id, mr, is_hotfix=is_hotfix)
-                log.info(
-                    "Added missing MR to queue",
-                    mr_iid=mr.iid,
-                    title=mr.title,
-                    is_hotfix=is_hotfix,
-                )
-                added_count += 1
+                added_count += await self._add_discovered_mr(mr)
             elif mr.iid in revisions and await updater.refresh(
                 self.settings.gitlab_project_id,
                 mr.iid,
@@ -760,6 +752,15 @@ class MergeProcessor:
         # Metadata changes can reorder the queue even when membership stays the same.
         if (added_count > 0 or updated_count > 0) and self._websocket_manager:
             await self._broadcast_queue_update()
+
+    async def _add_discovered_mr(self, mr: MergeRequest) -> bool:
+        """Add an absent MR without replacing a row whose terminal callback is in flight."""
+        if await self.queue_manager.get_queue_item(self.settings.gitlab_project_id, mr.iid) is not None:
+            return False
+        is_hotfix = self.settings.hotfix_label in mr.labels
+        await self.queue_manager.add_to_queue(self.settings.gitlab_project_id, mr, is_hotfix=is_hotfix)
+        log.info("Added missing MR to queue", mr_iid=mr.iid, title=mr.title, is_hotfix=is_hotfix)
+        return True
 
     async def _broadcast_queue_update(self) -> None:
         """Broadcast current queue state to all WebSocket clients."""

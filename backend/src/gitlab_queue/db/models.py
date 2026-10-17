@@ -62,6 +62,7 @@ class MergeRequestModel(Base):
         Index("idx_mr_queued_at", "queued_at"),
         Index("idx_mr_iid", "iid"),
         Index("idx_mr_finished_at", "finished_at"),
+        {"sqlite_autoincrement": True},
     )
 
     def __repr__(self) -> str:

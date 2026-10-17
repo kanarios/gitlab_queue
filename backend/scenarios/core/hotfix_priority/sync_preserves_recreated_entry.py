@@ -5,16 +5,27 @@ from scenarios.transports.responses import mr_response
 from vedro import given, params, scenario, then, when
 
 from gitlab_queue.core.processor import create_processor
+from gitlab_queue.db.migrations import run_migrations
 
 from ._helpers import queue_environment
 
 
-@scenario([params("poll"), params("startup")])
-async def sync_preserves_recreated_entry(entrypoint):
-    async with queue_environment() as env:
+@scenario(
+    [
+        params("poll", "head"),
+        params("startup", "head"),
+        params("poll", "d4e5f6a7b8c9"),
+        params("startup", "d4e5f6a7b8c9"),
+    ]
+)
+async def sync_preserves_recreated_entry(entrypoint, initial_revision):
+    async with queue_environment(initial_revision) as env:
         with given("an old sync snapshot of an ordinary queue entry"):
             await env.queue.add_to_queue(123, create_mr(iid=1))
             await env.queue.add_to_queue(123, create_mr(iid=3))
+            await env.queue.db.close()
+            await run_migrations(env.queue.db.database_url)
+            await env.queue.db.initialize()
             env.server.mrs = [mr_response(1, labels=["merge_queue"]), mr_response(3, labels=["merge_queue"])]
             entered, release = asyncio.Event(), asyncio.Event()
             env.server.barriers[("GET", "merge_queue")] = (entered, release)

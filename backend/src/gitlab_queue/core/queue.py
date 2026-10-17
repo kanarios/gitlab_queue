@@ -695,7 +695,7 @@ class QueueManager:
     ) -> bool:
         """Update the state of an MR in the queue.
 
-        Sets started_at automatically on first state change from 'queued'.
+        Sets started_at automatically when a queued MR begins processing.
         Sets finished_at automatically for terminal states (merged, failed, removed).
 
         Args:
@@ -723,7 +723,7 @@ class QueueManager:
         # Auto-set started_at if transitioning from queued
         set_clauses.append(
             "started_at = CASE "
-            "WHEN started_at IS NULL AND status = 'queued' AND :status != 'queued' "
+            "WHEN started_at IS NULL AND status = 'queued' AND :status IN ('rebasing', 'testing', 'merging') "
             "THEN :started_at ELSE started_at END"
         )
         params["started_at"] = now.isoformat()

@@ -33,7 +33,7 @@ class FakeNotifier:
     ) -> Note:
         return await self.notify(mr_iid, status, **context)
 
-    async def notify(self, mr_iid: int, status: str, **context: Any) -> Note:
+    async def notify(self, mr_iid: int, status: str, *, terminal_state: str | None = None, **context: Any) -> Note:
         if self.notify_error:
             raise self.notify_error
         self.notify_calls.append(

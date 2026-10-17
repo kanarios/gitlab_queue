@@ -4,18 +4,21 @@ import asyncio
 import json
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Any
 
 import httpx
 from scenarios.contexts.gitlab_client_factory import created_test_settings
-from scenarios.contexts.sqlite_client import initialized_test_database
-from scenarios.fakes import FakeWebSocketManager
+from scenarios.fakes import FakeWebSocket, FakeWebSocketManager
 
 from gitlab_queue.clients.gitlab import GitLabClient
 from gitlab_queue.core.notifier import MRNotifier
 from gitlab_queue.core.queue import QueueManager
 from gitlab_queue.core.queue_position_notifier import QueuePositionNotifier
 from gitlab_queue.core.scheduler import QueueScheduler
+from gitlab_queue.db.database import Database
+from gitlab_queue.db.migrations import run_migrations
 from gitlab_queue.models.retorts import parse_merge_request_event
 from gitlab_queue.webhooks.handlers import MRWebhookHandler
 
@@ -67,7 +70,10 @@ class GitLabServer:
             label = request.url.params["labels"]
             if label in self.label_snapshots:
                 return httpx.Response(200, json=self.label_snapshots[label])
-            return httpx.Response(200, json=[mr for mr in self.mrs if label in mr["labels"]])
+            return httpx.Response(
+                200,
+                json=[mr for mr in self.mrs if label in mr["labels"] and mr["state"] == request.url.params["state"]],
+            )
         matches = [mr for mr in self.mrs if request.url.path.endswith(f"/merge_requests/{mr['iid']}")]
         if matches:
             return httpx.Response(200, json=matches[0])
@@ -107,12 +113,27 @@ class ObservedQueue(QueueManager):
         return result
 
 
+@dataclass(eq=False)
+class CompletionSocket(FakeWebSocket):
+    entered: asyncio.Event = field(default_factory=asyncio.Event)
+    release: asyncio.Event = field(default_factory=asyncio.Event)
+
+    async def accept(self) -> None:
+        pass
+
+    async def send_json(self, data: dict[str, Any]) -> None:
+        await super().send_json(data)
+        if data["type"] == "mr:completed":
+            self.entered.set()
+            await self.release.wait()
+
+
 @asynccontextmanager
-async def queue_environment() -> AsyncIterator[QueueEnvironment]:
-    async with initialized_test_database() as db:
-        queue = QueueManager(db=db)
-        await queue.ensure_schema()
-        async with queue_services(queue, GitLabServer()) as env:
+async def queue_environment(revision: str = "head") -> AsyncIterator[QueueEnvironment]:
+    with TemporaryDirectory() as directory:
+        database_url = f"sqlite+aiosqlite:///{Path(directory) / 'queue.db'}"
+        await run_migrations(database_url, revision)
+        async with Database(database_url) as db, queue_services(QueueManager(db), GitLabServer()) as env:
             yield env
 
 
@@ -132,7 +153,7 @@ async def queue_services(queue: QueueManager, server: GitLabServer) -> AsyncIter
         await gitlab.close()
 
 
-def label_event(action: str, previous: list[str], current: list[str]) -> MergeRequestEvent:
+def label_event(action: str, previous: list[str], current: list[str], *, state: str = "opened") -> MergeRequestEvent:
     return parse_merge_request_event(
         {
             "object_kind": "merge_request",
@@ -140,7 +161,7 @@ def label_event(action: str, previous: list[str], current: list[str]) -> MergeRe
             "object_attributes": {
                 "iid": 3,
                 "title": "Urgent fix",
-                "state": "opened",
+                "state": state,
                 "action": action,
                 "source_branch": "urgent-fix",
                 "target_branch": "main",

@@ -276,10 +276,15 @@ class QueueScheduler:
             count=len(mrs_to_add),
             mr_iids=[mr.iid for mr in mrs_to_add],
         )
+        added_count = 0
         for mr in mrs_to_add:
+            # A terminal callback may still own this row until history is written.
+            if await self.queue_manager.get_queue_item(self.settings.gitlab_project_id, mr.iid) is not None:
+                continue
             await self._add_mr_to_queue(mr)
+            added_count += 1
 
-        return len(mrs_to_add)
+        return added_count
 
     async def _remove_orphaned_mrs(self, queue_items: list[QueueItem], gitlab_mr_iids: set[int]) -> int:
         """Remove MRs that are in queue but no longer in GitLab.

@@ -443,6 +443,8 @@ class MRNotifier:
         self,
         mr_iid: int,
         status: str,
+        *,
+        terminal_state: str | None = None,
         **context: Any,
     ) -> Note | None:
         """Update or create pinned comment for MR.
@@ -450,6 +452,8 @@ class MRNotifier:
         Args:
             mr_iid: Merge request internal ID.
             status: Template key (queued, rebasing, testing, etc.).
+            terminal_state: Persist completion after successful delivery, before
+                releasing comment ordering. Failed HTTP delivery remains retryable.
             **context: Template variables to render.
 
         Returns:
@@ -468,7 +472,10 @@ class MRNotifier:
                 **context,
             )
         async with self._notification_lock(mr_iid):
-            return await self._send_notification(mr_iid, status, **context)
+            note = await self._send_notification(mr_iid, status, **context)
+            if terminal_state is not None and self.queue_manager is not None:
+                await self.queue_manager.update_mr_state(self.gitlab_client.project_id, mr_iid, terminal_state)
+            return note
 
     async def _send_notification(self, mr_iid: int, status: str, **context: Any) -> Note:
         if status not in COMMENT_TEMPLATES:

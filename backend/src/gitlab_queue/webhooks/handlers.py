@@ -295,9 +295,16 @@ class MRWebhookHandler:
                 # Replicate on_enter_merged behavior manually.
                 duration = calculate_duration(queue_item.queued_at)
 
+                positions_before: dict[int, int] = {}
+                old_total: int = 0
+                if self.position_notifier:
+                    positions_before = await self.position_notifier.capture_queue_positions(event.project_id)
+                    old_total = await self.queue_manager.get_queue_length(event.project_id)
+
                 await self.notifier.notify(
                     mr_iid,
                     "merged",
+                    terminal_state="merged",
                     merged_at=datetime.now(UTC),
                     duration=duration,
                     target_branch=event.object_attributes.target_branch,
@@ -310,12 +317,6 @@ class MRWebhookHandler:
                         finished_at=datetime.now(UTC),
                         project_id=event.project_id,
                     )
-
-                positions_before: dict[int, int] = {}
-                old_total: int = 0
-                if self.position_notifier:
-                    positions_before = await self.position_notifier.capture_queue_positions(event.project_id)
-                    old_total = await self.queue_manager.get_queue_length(event.project_id)
 
                 await self.queue_manager.complete_mr(event.project_id, mr_iid, status="merged")
                 await self._remove_queue_label(mr_iid)

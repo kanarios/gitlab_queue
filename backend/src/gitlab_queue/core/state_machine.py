@@ -265,11 +265,14 @@ class MRStateMachine(StateMachine):
         queue_item = await self.queue_manager.get_queue_item(self._project_id, self.mr_iid)
         duration = self._calculate_duration(queue_item)
 
+        positions_before, old_total = await self._capture_queue_positions_if_enabled()
+
         now = datetime.now(UTC)
 
         await self.notifier.notify(
             self.mr_iid,
             "merged",
+            terminal_state="merged",
             merged_at=now,
             duration=duration,
             target_branch=self.target_branch,
@@ -283,8 +286,6 @@ class MRStateMachine(StateMachine):
                 finished_at=now,
                 project_id=self._project_id,
             )
-
-        positions_before, old_total = await self._capture_queue_positions_if_enabled()
 
         # Move MR to history table
         pipeline_duration = self._context.get("pipeline_duration_seconds")
@@ -307,6 +308,8 @@ class MRStateMachine(StateMachine):
             return
         log.debug("Entering failed state", mr_iid=self.mr_iid)
 
+        positions_before, old_total = await self._capture_queue_positions_if_enabled()
+
         failure_reason = self._context.get("failure_reason", "unknown")
         error_message = self._context.get("error_message")
 
@@ -315,6 +318,7 @@ class MRStateMachine(StateMachine):
             await self.notifier.notify(
                 self.mr_iid,
                 "conflict",
+                terminal_state="failed",
                 failed_at=datetime.now(UTC),
                 target_branch=self.target_branch,
                 conflicted_files=self._context.get("conflicted_files", []),
@@ -324,6 +328,7 @@ class MRStateMachine(StateMachine):
             await self.notifier.notify(
                 self.mr_iid,
                 "pipeline_failed",
+                terminal_state="failed",
                 pipeline_id=self._context.get("pipeline_id"),
                 pipeline_url=self._context.get("pipeline_url"),
                 failed_at=datetime.now(UTC),
@@ -336,6 +341,7 @@ class MRStateMachine(StateMachine):
             await self.notifier.notify(
                 self.mr_iid,
                 "timeout",
+                terminal_state="failed",
                 failed_at=datetime.now(UTC),
                 duration=self._calculate_duration(queue_item),
                 max_wait=max_wait_hours,
@@ -344,6 +350,7 @@ class MRStateMachine(StateMachine):
             await self.notifier.notify(
                 self.mr_iid,
                 "merge_failed",
+                terminal_state="failed",
                 failed_at=datetime.now(UTC),
                 error_message=error_message or "Unknown merge error",
             )
@@ -351,6 +358,7 @@ class MRStateMachine(StateMachine):
             await self.notifier.notify(
                 self.mr_iid,
                 "generic_failure",
+                terminal_state="failed",
                 failed_at=datetime.now(UTC),
                 error_message=error_message or "Unknown error",
             )
@@ -364,8 +372,6 @@ class MRStateMachine(StateMachine):
                 failure_reason=error_message,
                 project_id=self._project_id,
             )
-
-        positions_before, old_total = await self._capture_queue_positions_if_enabled()
 
         # Move MR to history table
         # Map internal failure_reason to history status
@@ -401,12 +407,15 @@ class MRStateMachine(StateMachine):
         removal_reason = self._context.get("removal_reason", "label_removed")
         position = await self.queue_manager.get_queue_position(self._project_id, self.mr_iid)
 
+        positions_before, old_total = await self._capture_queue_positions_if_enabled()
+
         if removal_reason == "timeout":
             queue_item = await self.queue_manager.get_queue_item(self._project_id, self.mr_iid)
             max_wait_hours = self._context.get("max_wait_hours", 2)
             await self.notifier.notify(
                 self.mr_iid,
                 "timeout",
+                terminal_state="removed",
                 failed_at=datetime.now(UTC),
                 duration=self._calculate_duration(queue_item),
                 max_wait=max_wait_hours,
@@ -415,6 +424,7 @@ class MRStateMachine(StateMachine):
             await self.notifier.notify(
                 self.mr_iid,
                 "removed_closed",
+                terminal_state="removed",
                 removed_at=datetime.now(UTC),
             )
         elif removal_reason == "external_merge":
@@ -423,6 +433,7 @@ class MRStateMachine(StateMachine):
             await self.notifier.notify(
                 self.mr_iid,
                 "merged",
+                terminal_state="removed",
                 merged_at=datetime.now(UTC),
                 duration=duration,
                 target_branch=self.target_branch,
@@ -432,6 +443,7 @@ class MRStateMachine(StateMachine):
             await self.notifier.notify(
                 self.mr_iid,
                 "removed_label",
+                terminal_state="removed",
                 removed_at=datetime.now(UTC),
                 position=position or 0,
                 previous_state=previous_state,
@@ -446,8 +458,6 @@ class MRStateMachine(StateMachine):
                 finished_at=datetime.now(UTC),
                 project_id=self._project_id,
             )
-
-        positions_before, old_total = await self._capture_queue_positions_if_enabled()
 
         # Move MR to history table
         if removal_reason == "timeout":
