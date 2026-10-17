@@ -5,11 +5,10 @@ import json
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Any
 
 import httpx
+from scenarios.contexts.database_backend import isolated_database_url
 from scenarios.contexts.gitlab_client_factory import created_test_settings
 from scenarios.fakes import FakeWebSocket, FakeWebSocketManager
 
@@ -183,8 +182,7 @@ class CompletionSocket(FakeWebSocket):
 
 @asynccontextmanager
 async def queue_environment(revision: str = "head") -> AsyncIterator[QueueEnvironment]:
-    with TemporaryDirectory() as directory:
-        database_url = f"sqlite+aiosqlite:///{Path(directory) / 'queue.db'}"
+    async with isolated_database_url() as database_url:
         await run_migrations(database_url, revision)
         async with Database(database_url) as db, queue_services(QueueManager(db), GitLabServer()) as env:
             yield env

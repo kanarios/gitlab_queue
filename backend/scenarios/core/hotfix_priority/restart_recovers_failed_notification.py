@@ -1,6 +1,4 @@
-from pathlib import Path
-from tempfile import TemporaryDirectory
-
+from scenarios.contexts.database_backend import isolated_database_url
 from scenarios.fakes import create_mr
 from scenarios.transports.responses import mr_response
 from vedro import given, params, scenario, then, when
@@ -15,8 +13,7 @@ from ._helpers import GitLabServer, label_event, queue_services
 
 @scenario([params(3), params(1)])
 async def restart_recovers_failed_notification(failed_iid):
-    with TemporaryDirectory() as directory:
-        database_url = f"sqlite+aiosqlite:///{Path(directory) / 'queue.db'}"
+    async with isolated_database_url() as database_url:
         server = GitLabServer()
         with given("a persisted priority change with an unavailable recipient before shutdown"):
             await run_migrations(database_url)

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -256,7 +256,7 @@ UPDATE merge_requests
 SET is_hotfix = :is_hotfix, labels = :labels, metadata_version = metadata_version + 1
 WHERE iid = :iid AND project_id = :project_id
   AND status IN ('queued', 'rebasing', 'testing', 'merging')
-  AND (:expected_id IS NULL OR (id = :expected_id AND metadata_version = :expected_version))
+  AND (CAST(:expected_id AS INTEGER) IS NULL OR (id = :expected_id AND metadata_version = :expected_version))
   AND (is_hotfix != :is_hotfix OR COALESCE(labels, '[]') != :labels)
 """
 
@@ -1232,7 +1232,7 @@ class QueueManager:
             result = await session.execute(
                 text(
                     "DELETE FROM merge_requests WHERE project_id = :project_id AND iid = :iid "
-                    "AND pending_completion IS NULL AND (:expected_id IS NULL OR id = :expected_id) RETURNING *"
+                    "AND pending_completion IS NULL AND (CAST(:expected_id AS INTEGER) IS NULL OR id = :expected_id) RETURNING *"
                 ),
                 {"project_id": project_id, "iid": mr_iid, "expected_id": expected_queue_id},
             )
@@ -1411,11 +1411,13 @@ class QueueManager:
         """
         log.debug("Checking for stale MRs", project_id=project_id, hours=hours)
 
+        sql = _SELECT_STALE_MRS_SQL
+        params: dict[str, Any] = {"hours_param": f"-{hours} hours", "project_id": project_id}
+        if self.db.engine.dialect.name == "postgresql":
+            sql = sql.replace("datetime('now', :hours_param)", ":cutoff")
+            params = {"cutoff": (datetime.now(UTC) - timedelta(hours=hours)).isoformat(), "project_id": project_id}
         async with self.db.session() as session:
-            result = await session.execute(
-                text(_SELECT_STALE_MRS_SQL),
-                {"hours_param": f"-{hours} hours", "project_id": project_id},
-            )
+            result = await session.execute(text(sql), params)
             rows = result.mappings().all()
             await session.commit()
 

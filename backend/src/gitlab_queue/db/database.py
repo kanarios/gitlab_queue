@@ -1,4 +1,4 @@
-"""Async SQLite database setup with SQLAlchemy.
+"""Async database setup with SQLAlchemy.
 
 Provides async database engine, session factory, and lifecycle management for
 the GitLab Merge Queue Bot. Uses SQLite in WAL mode for concurrent reads.
@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 from weakref import WeakValueDictionary
 
 from sqlalchemy import text
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -82,7 +83,7 @@ class DatabaseStatus:
 
 @dataclass
 class Database:
-    """Async SQLite database manager with WAL mode support.
+    """Async database manager with SQLite WAL mode support.
 
     Provides async engine, session factory, health checks, and graceful shutdown.
     Designed to be used as an async context manager for proper lifecycle management.
@@ -151,13 +152,9 @@ class Database:
 
     def _build_engine_kwargs(self, is_memory_db: bool) -> dict[str, Any]:
         """Build engine keyword arguments based on database type."""
-        kwargs: dict[str, Any] = {
-            "connect_args": {
-                "check_same_thread": False,
-                "timeout": 30.0,
-            },
-            "echo": self.echo,
-        }
+        kwargs: dict[str, Any] = {"echo": self.echo}
+        if make_url(self.database_url).get_backend_name() == "sqlite":
+            kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30.0}
 
         if not is_memory_db:
             kwargs.update(
@@ -209,13 +206,17 @@ class Database:
             self._engine = create_async_engine(self.database_url, **engine_kwargs)
 
             async with self._engine.begin() as conn:
-                actual_mode = await self._configure_sqlite_pragmas(conn, is_memory_db)
-                log.debug(
-                    "Database configuration verified",
-                    journal_mode=actual_mode,
-                    synchronous="FULL",
-                    foreign_keys=True,
-                )
+                if conn.dialect.name == "sqlite":
+                    actual_mode = await self._configure_sqlite_pragmas(conn, is_memory_db)
+                    log.debug(
+                        "Database configuration verified",
+                        journal_mode=actual_mode,
+                        synchronous="FULL",
+                        foreign_keys=True,
+                    )
+                else:
+                    await conn.execute(text("SELECT 1"))
+                    log.debug("Database connection verified", backend=conn.dialect.name)
 
             self._session_factory = async_sessionmaker(
                 self._engine,
@@ -236,7 +237,7 @@ class Database:
         Raises:
             DatabaseConfigurationError: If path is outside allowed directory.
         """
-        if ":///" not in self.database_url:
+        if make_url(self.database_url).get_backend_name() != "sqlite" or ":///" not in self.database_url:
             return
 
         # Extract path from SQLite URL (e.g., "sqlite+aiosqlite:///data/queue.db")
@@ -379,14 +380,13 @@ class Database:
                 # Check connection
                 await conn.execute(text("SELECT 1"))
 
-                # Check WAL mode
-                result = await conn.execute(text("PRAGMA journal_mode"))
-                journal_mode = result.scalar()
-                wal_enabled = journal_mode == "wal"
-
-                # Check foreign keys
-                result = await conn.execute(text("PRAGMA foreign_keys"))
-                fk_enabled = bool(result.scalar())
+                wal_enabled = False
+                fk_enabled = True  # PostgreSQL enforces declared foreign keys without a session pragma.
+                if conn.dialect.name == "sqlite":
+                    result = await conn.execute(text("PRAGMA journal_mode"))
+                    wal_enabled = result.scalar() == "wal"
+                    result = await conn.execute(text("PRAGMA foreign_keys"))
+                    fk_enabled = bool(result.scalar())
 
                 return DatabaseStatus(
                     connected=True,

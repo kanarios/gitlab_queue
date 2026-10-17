@@ -417,7 +417,7 @@ async def _run_migrations_unlocked(database_url: str, revision: str = "head") ->
         >>> async def startup():
         ...     await run_migrations("sqlite+aiosqlite:///data/queue.db")
     """
-    log.info("Checking database migrations", database_url=database_url[:50] + "...")
+    log.info("Checking database migrations", database_url=make_url(database_url).render_as_string(hide_password=True))
 
     # Stamp legacy databases that were created before Alembic was introduced
     await _stamp_legacy_database_if_needed(database_url)
