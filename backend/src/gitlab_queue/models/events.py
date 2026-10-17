@@ -42,6 +42,8 @@ class MergeRequestAttributes:
     has_conflicts: bool = False
     rebase_in_progress: bool = False
     web_url: str | None = None
+    updated_at: datetime | None = None
+    updated_at_precision_us: int = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +111,8 @@ class MergeRequestEvent:
     user_avatar: str | None = None
     labels: list[str] = field(default_factory=list)
     label_changes: LabelChanges | None = None
+    message_id: str | None = None
+    event_uuid: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

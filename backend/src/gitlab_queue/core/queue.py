@@ -7,18 +7,24 @@ FIFO ordering with hotfix priority support.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
 
+from gitlab_queue.db.time_sql import epoch_sql, utc_now
 from gitlab_queue.metrics import OPERATIONS_TOTAL
+from gitlab_queue.models.completion import CompletionRequest, requeue_is_cancelled
+from gitlab_queue.models.event_order import compare_event, definitely_before, preserve_uncertainty
 from gitlab_queue.models.queue_item import DashboardStats, QueueItem
 from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
+    from asyncio import Lock
+    from collections.abc import Callable
+
     from sqlalchemy import RowMapping
 
     from gitlab_queue.db.database import Database
@@ -43,75 +49,6 @@ _JSON_SERIALIZED_FIELDS = frozenset({"retried_jobs"})
 # =============================================================================
 # SQL Statements
 # =============================================================================
-
-_CREATE_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS merge_requests (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_id INTEGER NOT NULL DEFAULT 0,
-    iid INTEGER NOT NULL,
-    title TEXT NOT NULL,
-    author_name TEXT NOT NULL,
-    author_username TEXT NOT NULL,
-    author_avatar TEXT,
-    status TEXT NOT NULL DEFAULT 'queued',
-    is_hotfix INTEGER DEFAULT 0,
-    labels TEXT,
-    target_branch TEXT NOT NULL,
-    queued_at TEXT NOT NULL,
-    started_at TEXT,
-    finished_at TEXT,
-    pipeline_id INTEGER,
-    pipeline_status TEXT,
-    expected_sha TEXT,
-    retry_count INTEGER DEFAULT 0,
-    retried_jobs TEXT NOT NULL DEFAULT '{}',
-    last_error TEXT,
-    stale_warning_sent INTEGER DEFAULT 0,
-    processing_attempts INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(project_id, iid)
-)
-"""
-
-_CREATE_HISTORY_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS merge_requests_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_id INTEGER NOT NULL DEFAULT 0,
-    iid INTEGER NOT NULL,
-    title TEXT NOT NULL,
-    author_name TEXT NOT NULL,
-    author_username TEXT NOT NULL,
-    author_avatar TEXT,
-    status TEXT NOT NULL,
-    is_hotfix INTEGER DEFAULT 0 NOT NULL,
-    labels TEXT,
-    target_branch TEXT NOT NULL,
-    queued_at TEXT NOT NULL,
-    started_at TEXT,
-    finished_at TEXT NOT NULL,
-    wait_time_seconds INTEGER,
-    processing_time_seconds INTEGER,
-    failure_reason TEXT,
-    pipeline_id INTEGER,
-    pipeline_status TEXT,
-    pipeline_duration_seconds INTEGER,
-    pipeline_failed_jobs TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(project_id, iid)
-)
-"""
-
-_CREATE_INDEXES_SQL = [
-    "CREATE INDEX IF NOT EXISTS idx_mr_status ON merge_requests(status)",
-    "CREATE INDEX IF NOT EXISTS idx_mr_queued_at ON merge_requests(queued_at)",
-    "CREATE INDEX IF NOT EXISTS idx_mr_iid ON merge_requests(iid)",
-    "CREATE INDEX IF NOT EXISTS idx_mr_finished_at ON merge_requests(finished_at)",
-]
-
-_CREATE_HISTORY_INDEXES_SQL = [
-    "CREATE INDEX IF NOT EXISTS idx_history_finished_at ON merge_requests_history(finished_at)",
-    "CREATE INDEX IF NOT EXISTS idx_history_status ON merge_requests_history(status)",
-]
 
 _INSERT_MR_SQL = """
 INSERT INTO merge_requests (
@@ -173,14 +110,14 @@ _SELECT_QUEUE_STATS_GROUP_SQL = """GROUP BY status
 
 _CLEANUP_OLD_ENTRIES_SQL = """
 DELETE FROM merge_requests
-WHERE finished_at IS NOT NULL AND finished_at < datetime('now', :days_param) AND project_id = :project_id
+WHERE finished_at IS NOT NULL AND {finished_epoch} < :cutoff AND project_id = :project_id AND pending_completion IS NULL
 """
 
 _SELECT_STALE_MRS_SQL = """
 SELECT * FROM merge_requests
 WHERE status IN ('queued', 'rebasing', 'testing', 'merging')
 AND stale_warning_sent = 0
-AND queued_at < datetime('now', :hours_param)
+AND {queued_epoch} < :cutoff
 AND project_id = :project_id
 ORDER BY queued_at ASC
 """
@@ -200,7 +137,7 @@ AND finished_at IS NOT NULL
 _SELECT_RECENT_HISTORY_PROJECT_SQL = """AND project_id = :project_id
 """
 
-_SELECT_RECENT_HISTORY_TAIL_SQL = """ORDER BY finished_at DESC
+_SELECT_RECENT_HISTORY_TAIL_SQL = """ORDER BY {finished_epoch} DESC, id DESC
 LIMIT :limit
 """
 
@@ -209,13 +146,13 @@ SELECT
     SUM(CASE WHEN status = 'merged' THEN 1 ELSE 0 END) as merged_count,
     SUM(CASE WHEN status IN ('merged', 'failed', 'conflict', 'timeout') THEN 1 ELSE 0 END) as total_completed,
     AVG(CASE WHEN started_at IS NOT NULL AND queued_at IS NOT NULL THEN
-        (julianday(started_at) - julianday(queued_at)) * 86400 ELSE NULL END
+        ({started_epoch} - {queued_epoch}) ELSE NULL END
     ) as avg_wait_seconds,
     AVG(CASE WHEN finished_at IS NOT NULL AND started_at IS NOT NULL AND status = 'merged' THEN
-        (julianday(finished_at) - julianday(started_at)) * 86400 ELSE NULL END
+        ({finished_epoch} - {started_epoch}) ELSE NULL END
     ) as avg_processing_seconds
 FROM merge_requests_history
-WHERE finished_at >= datetime('now', :days_param)
+WHERE {finished_epoch} >= :cutoff
 """
 
 _SELECT_STATS_WINDOW_PROJECT_SQL = """AND project_id = :project_id
@@ -244,8 +181,11 @@ DELETE FROM merge_requests WHERE iid = :iid AND project_id = :project_id
 
 _UPDATE_HOTFIX_STATUS_SQL = """
 UPDATE merge_requests
-SET is_hotfix = :is_hotfix, labels = :labels
+SET is_hotfix = :is_hotfix, labels = :labels, metadata_version = metadata_version + 1
 WHERE iid = :iid AND project_id = :project_id
+  AND status IN ('queued', 'rebasing', 'testing', 'merging')
+  AND (CAST(:expected_id AS INTEGER) IS NULL OR (id = :expected_id AND metadata_version = :expected_version))
+  AND (is_hotfix != :is_hotfix OR COALESCE(labels, '[]') != :labels)
 """
 
 
@@ -349,7 +289,21 @@ class QueueManager:
     """
 
     db: Database
+    clock: Callable[[], datetime] = utc_now
     _cache: QueueCache = field(default_factory=QueueCache, init=False)
+
+    def metadata_lock(self, project_id: int) -> Lock:
+        """Serialize metadata changes and their feedback across all entrypoints."""
+        return self.db.queue_metadata_lock(project_id)
+
+    def notification_lock(self, project_id: int, mr_iid: int) -> Lock:
+        return self.db.queue_notification_lock(project_id, mr_iid)
+
+    def admission_lock(self, project_id: int, mr_iid: int) -> Lock:
+        return self.db.queue_admission_lock(project_id, mr_iid)
+
+    def completion_lock(self, project_id: int, mr_iid: int) -> Lock:
+        return self.db.queue_completion_lock(project_id, mr_iid)
 
     async def ensure_schema(self) -> None:
         """Create the merge_requests and history tables if they don't exist.
@@ -359,16 +313,7 @@ class QueueManager:
         """
         log.debug("Ensuring database schema exists")
 
-        async with self.db.transaction() as session:
-            # Create active queue table
-            await session.execute(text(_CREATE_TABLE_SQL))
-            for index_sql in _CREATE_INDEXES_SQL:
-                await session.execute(text(index_sql))
-
-            # Create history table
-            await session.execute(text(_CREATE_HISTORY_TABLE_SQL))
-            for index_sql in _CREATE_HISTORY_INDEXES_SQL:
-                await session.execute(text(index_sql))
+        await self.db.ensure_schema()
 
         log.info("Database schema ensured")
 
@@ -414,7 +359,7 @@ class QueueManager:
             existing = result.mappings().one_or_none()
 
             # If exists in terminal state, delete it first (should have been in history)
-            if existing and existing["status"] in terminal_states:
+            if existing and existing["status"] in terminal_states and existing["pending_completion"] is None:
                 log.info(
                     "Removing stale terminal-state MR before re-adding",
                     mr_iid=mr.iid,
@@ -680,7 +625,7 @@ class QueueManager:
     ) -> bool:
         """Update the state of an MR in the queue.
 
-        Sets started_at automatically on first state change from 'queued'.
+        Sets started_at automatically when a queued MR begins processing.
         Sets finished_at automatically for terminal states (merged, failed, removed).
 
         Args:
@@ -708,7 +653,7 @@ class QueueManager:
         # Auto-set started_at if transitioning from queued
         set_clauses.append(
             "started_at = CASE "
-            "WHEN started_at IS NULL AND status = 'queued' AND :status != 'queued' "
+            "WHEN started_at IS NULL AND status = 'queued' AND :status IN ('rebasing', 'testing', 'merging') "
             "THEN :started_at ELSE started_at END"
         )
         params["started_at"] = now.isoformat()
@@ -734,7 +679,7 @@ class QueueManager:
                 set_clauses.append("retry_count = :retry_count")
                 params["retry_count"] = max(rj.values()) if rj else 0
 
-        sql = f"UPDATE merge_requests SET {', '.join(set_clauses)} WHERE iid = :iid AND project_id = :project_id"
+        sql = f"UPDATE merge_requests SET {', '.join(set_clauses)} WHERE iid = :iid AND project_id = :project_id AND pending_completion IS NULL"
 
         async with self.db.transaction() as session:
             cursor_result = await session.execute(text(sql), params)
@@ -756,6 +701,10 @@ class QueueManager:
         mr_iid: int,
         is_hotfix: bool,
         labels: list[str],
+        *,
+        expected_revision: tuple[int, int] | None = None,
+        notify_positions: bool = False,
+        admission_key: str | None = None,
     ) -> bool:
         """Update the hotfix status and labels of an MR in the queue.
 
@@ -767,9 +716,11 @@ class QueueManager:
             mr_iid: The MR's internal ID.
             is_hotfix: New hotfix status.
             labels: Current labels on the MR.
+            expected_revision: Optional (row identity, metadata version) to compare atomically.
+            notify_positions: Persist feedback for the changed and displaced waiting MRs.
 
         Returns:
-            True if updated, False if MR not found.
+            True for the owner of an effective change; False for stale, duplicate or absent entries.
         """
         log.debug(
             "Updating MR hotfix status",
@@ -782,14 +733,46 @@ class QueueManager:
         labels_json = json.dumps(labels)
 
         async with self.db.transaction() as session:
+            before: dict[int, int] = {}
+            if notify_positions:
+                rows = await session.execute(
+                    text(_SELECT_ACTIVE_QUEUE_PROJECT_SQL + _SELECT_ACTIVE_QUEUE_ORDER_SQL),
+                    {"project_id": project_id},
+                )
+                before = {row["iid"]: pos for pos, row in enumerate(rows.mappings(), 1) if row["status"] == "queued"}
             params = {
                 "iid": mr_iid,
                 "project_id": project_id,
                 "is_hotfix": 1 if is_hotfix else 0,
                 "labels": labels_json,
+                "expected_id": expected_revision[0] if expected_revision else None,
+                "expected_version": expected_revision[1] if expected_revision else None,
             }
             cursor_result = await session.execute(text(_UPDATE_HOTFIX_STATUS_SQL), params)
             changed: bool = cursor_result.rowcount > 0  # type: ignore[attr-defined]
+            await self._acknowledge_active_admission(session, project_id, mr_iid, admission_key)
+            if changed and notify_positions:
+                rows = await session.execute(
+                    text(_SELECT_ACTIVE_QUEUE_PROJECT_SQL + _SELECT_ACTIVE_QUEUE_ORDER_SQL),
+                    {"project_id": project_id},
+                )
+                for pos, row in enumerate(rows.mappings(), 1):
+                    old_position = before.get(row["iid"])
+                    if row["status"] != "queued" or old_position is None:
+                        continue
+                    if row["iid"] != mr_iid and old_position == pos:
+                        continue
+                    pending = json.dumps(
+                        {
+                            "token": uuid4().hex,
+                            "status": "priority_changed" if row["iid"] == mr_iid else "position_changed_priority",
+                            "old_position": old_position,
+                        }
+                    )
+                    await session.execute(
+                        text("UPDATE merge_requests SET pending_notification = :pending WHERE id = :id"),
+                        {"pending": pending, "id": row["id"]},
+                    )
 
         if changed:
             self._cache.invalidate()
@@ -804,6 +787,352 @@ class QueueManager:
 
         return changed
 
+    async def clear_pending_notification(self, project_id: int, mr_iid: int, pending: str) -> None:
+        """Acknowledge only the intent that was sent, preserving newer changes."""
+        async with self.db.transaction() as session:
+            await session.execute(
+                text(
+                    "UPDATE merge_requests SET pending_notification = NULL "
+                    "WHERE project_id = :project_id AND iid = :iid AND pending_notification = :pending"
+                ),
+                {"project_id": project_id, "iid": mr_iid, "pending": pending},
+            )
+        self._cache.invalidate()
+
+    def _history_params(self, mr: QueueItem, request: CompletionRequest, finished: datetime) -> dict[str, Any]:
+        wait, processing = self._compute_timing(mr, finished)
+        return {
+            "project_id": mr.project_id,
+            "iid": mr.mr_iid,
+            "title": mr.title,
+            "author_name": mr.author_name,
+            "author_username": mr.author_username,
+            "author_avatar": mr.author_avatar,
+            "status": request.history_status,
+            "is_hotfix": int(mr.is_hotfix),
+            "labels": json.dumps(mr.labels) if mr.labels else None,
+            "target_branch": mr.target_branch,
+            "queued_at": mr.queued_at.isoformat(),
+            "started_at": mr.started_at.isoformat() if mr.started_at else None,
+            "finished_at": finished.isoformat(),
+            "wait_time_seconds": wait,
+            "processing_time_seconds": processing,
+            "failure_reason": request.failure_reason,
+            "pipeline_id": mr.pipeline_id,
+            "pipeline_status": mr.pipeline_status,
+            "pipeline_duration_seconds": request.pipeline_duration_seconds,
+            "pipeline_failed_jobs": json.dumps(request.pipeline_failed_jobs) if request.pipeline_failed_jobs else None,
+        }
+
+    async def _acknowledge_active_admission(self, session: Any, project_id: int, mr_iid: int, key: str | None) -> None:
+        if key is None:
+            return
+        result = await session.execute(text(_SELECT_MR_BY_IID_SQL), {"project_id": project_id, "iid": mr_iid})
+        row = result.mappings().one_or_none()
+        if row is None or row["pending_completion"] is not None or row["requeue_request"] is None:
+            return
+        admission = json.loads(row["requeue_request"])
+        if admission.get("admission_key") != key or admission.get("cancelled_events"):
+            return
+        if set(json.loads(row["labels"] or "[]")) != set(json.loads(admission["params"]["labels"])):
+            return
+        admission["applied_at"] = datetime.now(UTC).isoformat()
+        await session.execute(
+            text(
+                "UPDATE merge_requests SET requeue_request = :admission WHERE id = :id AND requeue_request = :previous AND pending_completion IS NULL"
+            ),
+            {"admission": json.dumps(admission), "id": row["id"], "previous": row["requeue_request"]},
+        )
+
+    def _completion_admission(self, item: QueueItem, finished: datetime) -> tuple[str | None, list[str]]:
+        if item.requeue_request is None:
+            return None, []
+        admission = json.loads(item.requeue_request)
+        source, applied = admission.get("requested_at"), admission.get("applied_at")
+        known_prior = applied is not None and datetime.fromisoformat(applied) <= finished
+        source_prior = source is not None and definitely_before(
+            datetime.fromisoformat(source), admission.get("precision_us", 1), finished
+        )
+        if not known_prior and not source_prior:
+            return item.requeue_request, []
+        return None, self._admission_receipts(admission)
+
+    def _admission_receipts(self, admission: dict[str, Any]) -> list[str]:
+        keys = [admission.get("admission_key"), *admission.get("seen_messages", [])]
+        return list(dict.fromkeys(key for key in keys if key is not None))
+
+    async def prepare_completion(self, project_id: int, mr_iid: int, request: CompletionRequest) -> QueueItem | None:
+        """Freeze outcome and transfer/consume the exact durable admission read."""
+        while True:
+            async with self.db.transaction() as session:
+                result = await session.execute(text(_SELECT_MR_BY_IID_SQL), {"project_id": project_id, "iid": mr_iid})
+                row = result.mappings().one_or_none()
+                if row is None or (request.queue_id is not None and row["id"] != request.queue_id):
+                    return None
+                item = self._row_to_queue_item(row)
+                if item.pending_completion is not None:
+                    return item
+                now = next(
+                    (
+                        value
+                        for key, value in request.context.items()
+                        if key in ("merged_at", "failed_at", "removed_at") and isinstance(value, datetime)
+                    ),
+                    datetime.now(UTC),
+                )
+                admission, consumed = self._completion_admission(item, now)
+                payload = {
+                    "queue_id": item.queue_id,
+                    "request": asdict(request),
+                    "history": self._history_params(item, request, now),
+                    "finished_at": now.isoformat(),
+                    "comment_sent": False,
+                    "labels_removed": False,
+                    "label_events": [f"admission:{key}" for key in consumed],
+                    "consumed_admissions": consumed,
+                }
+                pending = json.dumps(payload, default=lambda value: value.isoformat())
+                result = await session.execute(
+                    text(
+                        "UPDATE merge_requests SET pending_completion = :pending, status = :status, finished_at = :finished, pending_notification = NULL, requeue_request = :admission WHERE id = :id AND pending_completion IS NULL AND (requeue_request = :previous OR (requeue_request IS NULL AND :previous IS NULL)) RETURNING id"
+                    ),
+                    {
+                        "pending": pending,
+                        "status": request.state,
+                        "finished": now.isoformat(),
+                        "id": item.queue_id,
+                        "admission": admission,
+                        "previous": item.requeue_request,
+                    },
+                )
+                if result.first() is None:
+                    continue
+                item.pending_completion = pending
+                item.requeue_request = admission
+                item.state = request.state
+                item.finished_at = now
+            self._cache.invalidate()
+            return item
+
+    async def get_pending_completions(self, project_id: int) -> list[QueueItem]:
+        async with self.db.session() as session:
+            result = await session.execute(
+                text("SELECT * FROM merge_requests WHERE project_id = :project_id AND pending_completion IS NOT NULL"),
+                {"project_id": project_id},
+            )
+            items = [self._row_to_queue_item(row) for row in result.mappings()]
+            await session.commit()
+            return items
+
+    async def save_completion_progress(self, project_id: int, queue_id: int, payload: dict[str, Any]) -> None:
+        async with self.db.transaction() as session:
+            await session.execute(
+                text(
+                    "UPDATE merge_requests SET pending_completion = :pending "
+                    "WHERE project_id = :project_id AND id = :id AND pending_completion IS NOT NULL"
+                ),
+                {"pending": json.dumps(payload), "project_id": project_id, "id": queue_id},
+            )
+
+    async def defer_requeue(
+        self, project_id: int, item: QueueItem, request: dict[str, Any], *, allow_active: bool = False
+    ) -> bool:
+        """Admit from the original row before HTTP; False means ownership changed."""
+        params = {
+            "project_id": project_id,
+            "iid": item.mr_iid,
+            "title": request.get("title", item.title),
+            "author_name": item.author_name,
+            "author_username": item.author_username,
+            "author_avatar": item.author_avatar,
+            "target_branch": request.get("target_branch", item.target_branch),
+            "labels": json.dumps(request.get("labels", item.labels)),
+            "is_hotfix": int(request["is_hotfix"]),
+        }
+        return await self._write_requeue(
+            project_id, item.queue_id, {**request, "params": params}, allow_active=allow_active
+        )
+
+    async def _write_requeue(
+        self, project_id: int, queue_id: int, incoming: dict[str, Any], *, allow_active: bool = False
+    ) -> bool:
+        async with self.db.queue_intent_lock(project_id, queue_id):
+            while True:
+                async with self.db.transaction() as session:
+                    result = await session.execute(
+                        text(
+                            "SELECT requeue_request FROM merge_requests WHERE project_id = :project_id AND id = :id AND (pending_completion IS NOT NULL OR (:allow_active = 1 AND status IN ('queued', 'rebasing', 'testing', 'merging')))"
+                        ),
+                        {"project_id": project_id, "id": queue_id, "allow_active": int(allow_active)},
+                    )
+                    row = result.first()
+                    if row is None:
+                        return False
+                    saved = row[0]
+                    previous = json.loads(saved) if saved else {}
+                    message_id = incoming.get("message_id")
+                    if message_id is not None and message_id in previous.get("seen_messages", []):
+                        return True
+                    order = compare_event(incoming, previous)
+                    if order < 0:
+                        return True
+                    cancelling = incoming.get("cancelled", False)
+                    if order == 0 and cancelling and previous and not previous.get("cancelled_events"):
+                        return True
+                    pending = self._merge_requeue(incoming, previous, order, cancelling)
+                    pending.pop("applied_at", None)
+                    pending["token"] = uuid4().hex
+                    pending["seen_messages"] = [
+                        *previous.get("seen_messages", []),
+                        *([message_id] if message_id else []),
+                    ]
+                    result = await session.execute(
+                        text(
+                            "UPDATE merge_requests SET requeue_request = :pending WHERE project_id = :project_id AND id = :id AND (pending_completion IS NOT NULL OR (:allow_active = 1 AND status IN ('queued', 'rebasing', 'testing', 'merging'))) AND (requeue_request = :saved OR (requeue_request IS NULL AND :saved IS NULL)) RETURNING id"
+                        ),
+                        {
+                            "pending": json.dumps(pending),
+                            "project_id": project_id,
+                            "id": queue_id,
+                            "saved": saved,
+                            "allow_active": int(allow_active),
+                        },
+                    )
+                    if result.first() is not None:
+                        return True
+                # A separate writer changed the token. Reread and compare source
+                # order rather than acknowledging a zero-row conditional write.
+
+    def _merge_requeue(
+        self, incoming: dict[str, Any], previous: dict[str, Any], order: int, cancelling: bool
+    ) -> dict[str, Any]:
+        if cancelling:
+            pending = {**previous, **incoming, "cancelled_events": [incoming["requested_at"]]}
+        else:
+            pending = dict(incoming)
+            if order == 0 and previous and not previous.get("cancelled_events"):
+                preserve_uncertainty(pending, previous)
+                pending["triggers"] = list(dict.fromkeys([*previous["triggers"], *incoming["triggers"]]))
+                pending["params"]["is_hotfix"] = int(
+                    bool(previous["params"]["is_hotfix"] or incoming["params"]["is_hotfix"])
+                )
+                pending["params"]["labels"] = json.dumps(
+                    list(
+                        dict.fromkeys(
+                            [
+                                *json.loads(previous["params"]["labels"]),
+                                *json.loads(incoming["params"]["labels"]),
+                            ]
+                        )
+                    )
+                )
+        return pending
+
+    async def cancel_requeue(
+        self,
+        project_id: int,
+        queue_id: int,
+        event_at: datetime,
+        *,
+        precision_us: int = 1,
+        message_id: str | None = None,
+        allow_active: bool = False,
+    ) -> bool:
+        return await self._write_requeue(
+            project_id,
+            queue_id,
+            {
+                "requested_at": event_at.isoformat(),
+                "precision_us": precision_us,
+                "message_id": message_id,
+                "cancelled": True,
+            },
+            allow_active=allow_active,
+        )
+
+    async def _stage_completion_positions(
+        self, session: Any, project_id: int, positions: dict[str, int], old_total: int
+    ) -> None:
+        result = await session.execute(
+            text(_SELECT_ACTIVE_QUEUE_PROJECT_SQL + _SELECT_ACTIVE_QUEUE_ORDER_SQL), {"project_id": project_id}
+        )
+        rows = list(result.mappings())
+        for position, row in enumerate(rows, 1):
+            previous = positions.get(str(row["iid"]))
+            if row["status"] != "queued" or previous is None or row["pending_notification"] is not None:
+                continue
+            if previous == position and old_total == len(rows):
+                continue
+            pending = json.dumps(
+                {
+                    "token": uuid4().hex,
+                    "status": "position_changed" if previous != position else "total_changed",
+                    "old_position": previous,
+                    "old_total": old_total,
+                }
+            )
+            await session.execute(
+                text("UPDATE merge_requests SET pending_notification = :pending WHERE id = :id"),
+                {"pending": pending, "id": row["id"]},
+            )
+
+    async def stage_completion_positions(self, project_id: int, positions: dict[int, int], old_total: int) -> None:
+        async with self.db.transaction() as session:
+            await self._stage_completion_positions(
+                session, project_id, {str(k): v for k, v in positions.items()}, old_total
+            )
+
+    async def finalize_completion(self, project_id: int, item: QueueItem, payload: dict[str, Any]) -> bool:
+        """Archive and delete only this intent's incarnation; transfer any requeue atomically."""
+        async with (
+            self.admission_lock(project_id, item.mr_iid),
+            self.db.queue_intent_lock(project_id, item.queue_id),
+            self.db.transaction() as session,
+        ):
+            result = await session.execute(
+                text(
+                    "DELETE FROM merge_requests WHERE project_id = :project_id AND id = :id "
+                    "AND pending_completion = :pending AND (requeue_request = :requeue "
+                    "OR (requeue_request IS NULL AND :requeue IS NULL)) RETURNING id"
+                ),
+                {
+                    "project_id": project_id,
+                    "id": item.queue_id,
+                    "pending": json.dumps(payload),
+                    "requeue": item.requeue_request,
+                },
+            )
+            if result.first() is None:
+                return False
+            await session.execute(
+                text(_INSERT_HISTORY_SQL + " ON CONFLICT(project_id, iid) DO NOTHING"), payload["history"]
+            )
+            requeue = json.loads(item.requeue_request) if item.requeue_request is not None else None
+            if requeue is not None and not requeue_is_cancelled(requeue, payload["label_events"]):
+                await session.execute(
+                    text(_INSERT_MR_SQL), {**requeue["params"], "queued_at": datetime.now(UTC).isoformat()}
+                )
+                await session.execute(
+                    text(
+                        "UPDATE merge_requests SET pending_notification = :pending, ignored_label_events = :ignored WHERE project_id = :project_id AND iid = :iid"
+                    ),
+                    {
+                        "pending": json.dumps({"token": uuid4().hex, "status": "queued", "old_position": 0}),
+                        "ignored": json.dumps(
+                            [
+                                *payload["label_events"],
+                                *[f"admission:{key}" for key in self._admission_receipts(requeue)],
+                            ]
+                        ),
+                        "project_id": project_id,
+                        "iid": item.mr_iid,
+                    },
+                )
+            request = payload["request"]
+            await self._stage_completion_positions(session, project_id, request["positions"], request["old_total"])
+        self._cache.invalidate()
+        return True
+
     async def complete_mr(
         self,
         project_id: int,
@@ -812,112 +1141,30 @@ class QueueManager:
         failure_reason: str | None = None,
         pipeline_duration_seconds: int | None = None,
         pipeline_failed_jobs: list[str] | None = None,
+        *,
+        expected_queue_id: int | None = None,
     ) -> bool:
-        """Move MR from active queue to history table.
-
-        This is an atomic operation that:
-        1. Reads the MR from active queue
-        2. Creates history record with computed timing fields
-        3. Deletes from active queue
-
-        Should be called after MR reaches terminal state (merged, failed, removed).
-
-        Args:
-            project_id: The GitLab project ID.
-            mr_iid: MR internal ID.
-            status: Final status (merged, failed, conflict, timeout, removed).
-            failure_reason: Reason for failure if applicable.
-            pipeline_duration_seconds: Total pipeline duration.
-            pipeline_failed_jobs: List of failed job names.
-
-        Returns:
-            True if MR was moved to history, False if not found.
-        """
-        log.debug(
-            "Completing MR and moving to history",
-            project_id=project_id,
-            mr_iid=mr_iid,
-            status=status,
-            failure_reason=failure_reason,
+        """Atomically archive the requested incarnation, never an owned completion or replacement."""
+        request = CompletionRequest(
+            status, status, "", {}, failure_reason, pipeline_duration_seconds, pipeline_failed_jobs
         )
-
-        # First get the MR data
-        mr = await self.get_queue_item(project_id, mr_iid)
-        if not mr:
-            log.debug(
-                "MR not found for completion (already completed)",
-                mr_iid=mr_iid,
-                status=status,
+        async with self.db.transaction() as session:
+            result = await session.execute(
+                text(
+                    "DELETE FROM merge_requests WHERE project_id = :project_id AND iid = :iid "
+                    "AND pending_completion IS NULL AND (CAST(:expected_id AS INTEGER) IS NULL OR id = :expected_id) RETURNING *"
+                ),
+                {"project_id": project_id, "iid": mr_iid, "expected_id": expected_queue_id},
             )
-            # Invalidate cache in case it contains stale data for this MR
-            self._cache.invalidate()
-            return False
-
-        now = datetime.now(UTC)
-        finished_at = now.isoformat()
-
-        wait_time_seconds, processing_time_seconds = self._compute_timing(mr, now)
-
-        # Prepare history record params
-        history_params = {
-            "project_id": mr.project_id,
-            "iid": mr.mr_iid,
-            "title": mr.title,
-            "author_name": mr.author_name,
-            "author_username": mr.author_username,
-            "author_avatar": mr.author_avatar,
-            "status": status,
-            "is_hotfix": 1 if mr.is_hotfix else 0,
-            "labels": json.dumps(mr.labels) if mr.labels else None,
-            "target_branch": mr.target_branch,
-            "queued_at": mr.queued_at.isoformat() if mr.queued_at else finished_at,
-            "started_at": mr.started_at.isoformat() if mr.started_at else None,
-            "finished_at": finished_at,
-            "wait_time_seconds": wait_time_seconds,
-            "processing_time_seconds": processing_time_seconds,
-            "failure_reason": failure_reason,
-            "pipeline_id": mr.pipeline_id,
-            "pipeline_status": mr.pipeline_status,
-            "pipeline_duration_seconds": pipeline_duration_seconds,
-            "pipeline_failed_jobs": json.dumps(pipeline_failed_jobs) if pipeline_failed_jobs else None,
-        }
-
-        try:
-            async with self.db.transaction() as session:
-                # Insert into history
-                await session.execute(text(_INSERT_HISTORY_SQL), history_params)
-                # Delete from active queue
-                await session.execute(text(_DELETE_MR_SQL), {"iid": mr_iid, "project_id": project_id})
-        except IntegrityError as e:
-            # Only suppress the expected duplicate-key race condition on history table
-            error_msg = str(e).lower()
-            is_history_duplicate = "merge_requests_history" in error_msg and (
-                "unique constraint" in error_msg or "duplicate" in error_msg
-            )
-            if not is_history_duplicate:
-                # Unexpected integrity error - re-raise to avoid hiding real issues
-                raise
-
-            log.debug(
-                "MR completion race: already in history",
-                mr_iid=mr_iid,
-                status=status,
-            )
-            # Explicitly delete from active table in a separate transaction
-            async with self.db.transaction() as session:
-                await session.execute(text(_DELETE_MR_SQL), {"iid": mr_iid, "project_id": project_id})
-            self._cache.invalidate()
-            return False
-
+            row = result.mappings().one_or_none()
+            if row is None:
+                self._cache.invalidate()
+                return False
+            item = self._row_to_queue_item(row)
+            params = self._history_params(item, request, datetime.now(UTC))
+            await session.execute(text(_INSERT_HISTORY_SQL + " ON CONFLICT(project_id, iid) DO NOTHING"), params)
         self._cache.invalidate()
         OPERATIONS_TOTAL.labels(project_id=str(project_id), type="complete", status="success").inc()
-        log.info(
-            "MR completed and moved to history",
-            mr_iid=mr_iid,
-            status=status,
-            wait_time_seconds=wait_time_seconds,
-            processing_time_seconds=processing_time_seconds,
-        )
         return True
 
     async def get_queue_stats(self, project_id: int | None = None) -> dict[str, int]:
@@ -983,6 +1230,7 @@ class QueueManager:
             sql = _SELECT_RECENT_HISTORY_BASE_SQL + _SELECT_RECENT_HISTORY_TAIL_SQL
             params = {"limit": limit}
 
+        sql = sql.format(finished_epoch=epoch_sql("finished_at", self.db.engine.dialect.name))
         async with self.db.session() as session:
             result = await session.execute(text(sql), params)
             rows = result.mappings().all()
@@ -1012,11 +1260,20 @@ class QueueManager:
 
         if project_id is not None:
             sql = _SELECT_STATS_WINDOW_BASE_SQL + _SELECT_STATS_WINDOW_PROJECT_SQL
-            params: dict[str, Any] = {"days_param": f"-{days} days", "project_id": project_id}
+            params: dict[str, Any] = {
+                "cutoff": (self.clock() - timedelta(days=days)).timestamp(),
+                "project_id": project_id,
+            }
         else:
             sql = _SELECT_STATS_WINDOW_BASE_SQL
-            params = {"days_param": f"-{days} days"}
+            params = {"cutoff": (self.clock() - timedelta(days=days)).timestamp()}
 
+        backend = self.db.engine.dialect.name
+        sql = sql.format(
+            queued_epoch=epoch_sql("queued_at", backend),
+            started_epoch=epoch_sql("started_at", backend),
+            finished_epoch=epoch_sql("finished_at", backend),
+        )
         async with self.db.session() as session:
             result = await session.execute(text(sql), params)
             row = result.mappings().one()
@@ -1058,8 +1315,12 @@ class QueueManager:
 
         async with self.db.transaction() as session:
             cursor_result = await session.execute(
-                text(_CLEANUP_OLD_ENTRIES_SQL),
-                {"days_param": f"-{days} days", "project_id": project_id},
+                text(
+                    _CLEANUP_OLD_ENTRIES_SQL.format(
+                        finished_epoch=epoch_sql("finished_at", self.db.engine.dialect.name)
+                    )
+                ),
+                {"cutoff": (self.clock() - timedelta(days=days)).timestamp(), "project_id": project_id},
             )
             deleted_count: int = cursor_result.rowcount  # type: ignore[attr-defined]
 
@@ -1084,11 +1345,13 @@ class QueueManager:
         """
         log.debug("Checking for stale MRs", project_id=project_id, hours=hours)
 
+        sql = _SELECT_STALE_MRS_SQL.format(queued_epoch=epoch_sql("queued_at", self.db.engine.dialect.name))
+        params: dict[str, Any] = {
+            "cutoff": (self.clock() - timedelta(hours=hours)).timestamp(),
+            "project_id": project_id,
+        }
         async with self.db.session() as session:
-            result = await session.execute(
-                text(_SELECT_STALE_MRS_SQL),
-                {"hours_param": f"-{hours} hours", "project_id": project_id},
-            )
+            result = await session.execute(text(sql), params)
             rows = result.mappings().all()
             await session.commit()
 
@@ -1233,6 +1496,12 @@ class QueueManager:
             last_error=row.get("last_error"),
             stale_warning_sent=bool(row.get("stale_warning_sent", 0)),
             processing_attempts=row.get("processing_attempts", 0) or 0,
+            queue_id=row.get("id", 0),
+            metadata_version=row.get("metadata_version", 0),
+            pending_notification=row.get("pending_notification"),
+            pending_completion=row.get("pending_completion"),
+            requeue_request=row.get("requeue_request"),
+            ignored_label_events=json.loads(row.get("ignored_label_events") or "[]"),
         )
 
 

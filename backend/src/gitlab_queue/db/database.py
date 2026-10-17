@@ -1,4 +1,4 @@
-"""Async SQLite database setup with SQLAlchemy.
+"""Async database setup with SQLAlchemy.
 
 Provides async database engine, session factory, and lifecycle management for
 the GitLab Merge Queue Bot. Uses SQLite in WAL mode for concurrent reads.
@@ -20,8 +20,10 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from weakref import WeakValueDictionary
 
-from sqlalchemy import text
+from sqlalchemy import event, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -29,6 +31,9 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from gitlab_queue.db.migrations import _migration_lock
+from gitlab_queue.db.models import Base
+from gitlab_queue.db.time_sql import utc_epoch
 from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -79,9 +84,13 @@ class DatabaseStatus:
     error: str | None = None
 
 
+def _register_sqlite_functions(connection: Any, _record: Any) -> None:
+    connection.create_function("queue_epoch", 1, utc_epoch, deterministic=True)
+
+
 @dataclass
 class Database:
-    """Async SQLite database manager with WAL mode support.
+    """Async database manager with SQLite WAL mode support.
 
     Provides async engine, session factory, health checks, and graceful shutdown.
     Designed to be used as an async context manager for proper lifecycle management.
@@ -119,17 +128,43 @@ class Database:
     _session_factory: async_sessionmaker[AsyncSession] | None = field(default=None, init=False, repr=False)
     _initialized: bool = field(default=False, init=False, repr=False)
     _init_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
+    _queue_metadata_locks: dict[int, asyncio.Lock] = field(default_factory=dict, init=False, repr=False)
+    _queue_completion_locks: WeakValueDictionary[tuple[int, int], asyncio.Lock] = field(
+        default_factory=WeakValueDictionary, init=False, repr=False
+    )
+    _queue_admission_locks: WeakValueDictionary[tuple[int, int], asyncio.Lock] = field(
+        default_factory=WeakValueDictionary, init=False, repr=False
+    )
+    _queue_intent_locks: WeakValueDictionary[tuple[int, int], asyncio.Lock] = field(
+        default_factory=WeakValueDictionary, init=False, repr=False
+    )
+    _queue_notification_locks: WeakValueDictionary[tuple[int, int], asyncio.Lock] = field(
+        default_factory=WeakValueDictionary, init=False, repr=False
+    )
+
+    def queue_metadata_lock(self, project_id: int) -> asyncio.Lock:
+        return self._queue_metadata_locks.setdefault(project_id, asyncio.Lock())
+
+    def queue_notification_lock(self, project_id: int, mr_iid: int) -> asyncio.Lock:
+        return self._queue_notification_locks.setdefault((project_id, mr_iid), asyncio.Lock())
+
+    def queue_completion_lock(self, project_id: int, mr_iid: int) -> asyncio.Lock:
+        return self._queue_completion_locks.setdefault((project_id, mr_iid), asyncio.Lock())
+
+    def queue_admission_lock(self, project_id: int, mr_iid: int) -> asyncio.Lock:
+        return self._queue_admission_locks.setdefault((project_id, mr_iid), asyncio.Lock())
+
+    def queue_intent_lock(self, project_id: int, queue_id: int) -> asyncio.Lock:
+        return self._queue_intent_locks.setdefault((project_id, queue_id), asyncio.Lock())
 
     def _build_engine_kwargs(self, is_memory_db: bool) -> dict[str, Any]:
         """Build engine keyword arguments based on database type."""
-        kwargs: dict[str, Any] = {
-            "connect_args": {
-                "check_same_thread": False,
-                "timeout": 30.0,
-            },
-            "echo": self.echo,
-        }
+        kwargs: dict[str, Any] = {"echo": self.echo}
+        if make_url(self.database_url).get_backend_name() == "sqlite":
+            kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30.0}
 
+        if make_url(self.database_url).get_backend_name() == "postgresql":
+            kwargs["connect_args"] = {"server_settings": {"timezone": "UTC"}}
         if not is_memory_db:
             kwargs.update(
                 {
@@ -142,6 +177,15 @@ class Database:
             )
 
         return kwargs
+
+    async def ensure_schema(self) -> None:
+        """Create the complete current model schema; migrations reconcile existing tables."""
+        if make_url(self.database_url).database == ":memory:":
+            async with self._init_lock, self.engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+        else:
+            async with _migration_lock(self.database_url), self.engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
 
     async def _configure_sqlite_pragmas(self, conn: Any, is_memory_db: bool) -> str:
         """Configure SQLite pragmas and return journal mode."""
@@ -178,15 +222,21 @@ class Database:
             is_memory_db = ":memory:" in self.database_url
             engine_kwargs = self._build_engine_kwargs(is_memory_db)
             self._engine = create_async_engine(self.database_url, **engine_kwargs)
+            if self._engine.dialect.name == "sqlite":
+                event.listen(self._engine.sync_engine, "connect", _register_sqlite_functions)
 
             async with self._engine.begin() as conn:
-                actual_mode = await self._configure_sqlite_pragmas(conn, is_memory_db)
-                log.debug(
-                    "Database configuration verified",
-                    journal_mode=actual_mode,
-                    synchronous="FULL",
-                    foreign_keys=True,
-                )
+                if conn.dialect.name == "sqlite":
+                    actual_mode = await self._configure_sqlite_pragmas(conn, is_memory_db)
+                    log.debug(
+                        "Database configuration verified",
+                        journal_mode=actual_mode,
+                        synchronous="FULL",
+                        foreign_keys=True,
+                    )
+                else:
+                    await conn.execute(text("SELECT 1"))
+                    log.debug("Database connection verified", backend=conn.dialect.name)
 
             self._session_factory = async_sessionmaker(
                 self._engine,
@@ -207,7 +257,7 @@ class Database:
         Raises:
             DatabaseConfigurationError: If path is outside allowed directory.
         """
-        if ":///" not in self.database_url:
+        if make_url(self.database_url).get_backend_name() != "sqlite" or ":///" not in self.database_url:
             return
 
         # Extract path from SQLite URL (e.g., "sqlite+aiosqlite:///data/queue.db")
@@ -350,14 +400,13 @@ class Database:
                 # Check connection
                 await conn.execute(text("SELECT 1"))
 
-                # Check WAL mode
-                result = await conn.execute(text("PRAGMA journal_mode"))
-                journal_mode = result.scalar()
-                wal_enabled = journal_mode == "wal"
-
-                # Check foreign keys
-                result = await conn.execute(text("PRAGMA foreign_keys"))
-                fk_enabled = bool(result.scalar())
+                wal_enabled = False
+                fk_enabled = True  # PostgreSQL enforces declared foreign keys without a session pragma.
+                if conn.dialect.name == "sqlite":
+                    result = await conn.execute(text("PRAGMA journal_mode"))
+                    wal_enabled = result.scalar() == "wal"
+                    result = await conn.execute(text("PRAGMA foreign_keys"))
+                    fk_enabled = bool(result.scalar())
 
                 return DatabaseStatus(
                     connected=True,

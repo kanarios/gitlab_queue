@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 from gitlab_queue.models.events import MergeRequestEvent, PipelineEvent
 from gitlab_queue.models.retorts import parse_webhook_event
 from gitlab_queue.utils.logging import get_logger
+from gitlab_queue.webhooks.retry_manager import RetryItemNotFoundError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -201,6 +202,10 @@ class WebhookRetryProcessor:
                 attempt=item.attempt_count + 1,
             )
 
+        except RetryItemNotFoundError:
+            # Dispatch is at least once: another worker may already have
+            # acknowledged or moved the same source row.
+            log.debug("Retry source already finalized", retry_id=item.id)
         except Exception as e:
             # Failed - schedule next retry or move to DLQ
             moved_to_dlq = await self.retry_manager.mark_retry_failed(item.id, str(e), project_id=item.project_id)

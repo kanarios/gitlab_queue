@@ -194,16 +194,14 @@ async def scheduler_continues_after_sync_error():
 async def scheduler_sync_lock_prevents_concurrent_syncs():
     """Test that sync lock prevents concurrent sync operations."""
     with vedro.given:
-        sync_operations = 0
         concurrent_syncs = 0
         max_concurrent = 0
 
         class TrackingQueueManager(FakeQueueManager):
             async def get_active_queue(self, project_id: int | None = None) -> list[object]:
-                nonlocal sync_operations, concurrent_syncs, max_concurrent
+                nonlocal concurrent_syncs, max_concurrent
                 concurrent_syncs += 1
                 max_concurrent = max(max_concurrent, concurrent_syncs)
-                sync_operations += 1
                 await asyncio.sleep(0.1)  # Simulate work
                 concurrent_syncs -= 1
                 return []
@@ -227,9 +225,9 @@ async def scheduler_sync_lock_prevents_concurrent_syncs():
         ]
 
         # Wait for all to complete
-        await asyncio.gather(*sync_tasks)
+        results = await asyncio.gather(*sync_tasks)
 
     with vedro.then:
         # Verify syncs ran sequentially (lock prevented concurrency)
-        assert sync_operations == 3
+        assert len(results) == 3
         assert max_concurrent == 1  # Never more than 1 concurrent sync

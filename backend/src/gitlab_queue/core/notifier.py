@@ -6,15 +6,20 @@ Each state transition MUST trigger a notification to keep authors informed.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from asyncio import Lock
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
+from weakref import WeakValueDictionary
 
+from gitlab_queue.clients.gitlab import GitLabNotFoundError
+from gitlab_queue.models.retorts import parse_merge_request
 from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
     from gitlab_queue.clients.gitlab import GitLabClient
     from gitlab_queue.config import Settings
+    from gitlab_queue.core.protocols import QueueManagerProtocol
     from gitlab_queue.models.mr import Note
 
 log = get_logger(__name__)
@@ -26,6 +31,28 @@ log = get_logger(__name__)
 
 COMMENT_TEMPLATES: dict[str, str] = {
     # === QUEUE EVENTS ===
+    "priority_changed": """## 🤖 Merge Queue Bot
+
+**Status:** ⏳ {priority}
+
+**Position:** {position} of {total}
+
+**Estimated wait:** ~{estimated_minutes} min
+
+---
+_Current processing continues. Priority applies to the waiting queue._
+""",
+    "position_changed_priority": """## 🤖 Merge Queue Bot
+
+**Status:** ⏳ Waiting in queue
+
+**Position:** {position} of {total} _(was {old_position})_
+
+**Estimated wait:** ~{estimated_minutes} min
+
+---
+_Your position changed because an MR's hotfix priority changed._
+""",
     "queued": """## 🤖 Merge Queue Bot
 
 **Status:** ⏳ Added to queue
@@ -318,6 +345,18 @@ STATE_DESCRIPTIONS: dict[str, str] = {
     "merging": "being merged",
 }
 
+WAITING_STATUSES = frozenset(
+    {
+        "queued",
+        "priority_changed",
+        "position_changed_priority",
+        "position_changed",
+        "position_changed_hotfix",
+        "total_changed",
+        "total_changed_hotfix",
+    }
+)
+
 
 # =============================================================================
 # MRNotifier Class
@@ -353,13 +392,61 @@ class MRNotifier:
 
     gitlab_client: GitLabClient
     settings: Settings
+    queue_manager: QueueManagerProtocol | None = None
+    _notification_locks: WeakValueDictionary[int, Lock] = field(
+        default_factory=WeakValueDictionary, init=False, repr=False
+    )
+
+    def _notification_lock(self, mr_iid: int) -> Lock:
+        if self.queue_manager is not None:
+            return self.queue_manager.notification_lock(self.gitlab_client.project_id, mr_iid)
+        return self._notification_locks.setdefault(mr_iid, Lock())
+
+    async def notify_if_queued(
+        self,
+        project_id: int,
+        mr_iid: int,
+        status: str,
+        queue_manager: QueueManagerProtocol,
+        *,
+        pending: str | None = None,
+        **context: Any,
+    ) -> Note | None:
+        """Send waiting feedback only while it still describes the current queue.
+
+        Recheck intent and state after acquiring the same lock used by processing
+        comments. The acknowledgment stays inside that lock to exclude two drains.
+        """
+        async with queue_manager.notification_lock(project_id, mr_iid):
+            item = await queue_manager.get_queue_item(project_id, mr_iid)
+            if item is None or (pending is not None and item.pending_notification != pending):
+                return None
+            if item.state != "queued":
+                if pending is not None:
+                    await queue_manager.clear_pending_notification(project_id, mr_iid, pending)
+                return None
+            queue = await queue_manager.get_active_queue(project_id)
+            position = next((index for index, entry in enumerate(queue, 1) if entry.mr_iid == mr_iid), None)
+            if position is None:
+                return None
+            context.update(
+                position=position,
+                total=len(queue),
+                estimated_minutes=position * 15,
+                priority="Hotfix priority enabled" if item.is_hotfix else "Hotfix priority removed",
+                queued_at=item.queued_at,
+            )
+            note = await self._send_notification(mr_iid, status, **context)
+            if pending is not None:
+                await queue_manager.clear_pending_notification(project_id, mr_iid, pending)
+            return note
 
     async def notify(
         self,
         mr_iid: int,
         status: str,
         **context: Any,
-    ) -> Note:
+    ) -> Note | None:
         """Update or create pinned comment for MR.
 
         Args:
@@ -374,6 +461,19 @@ class MRNotifier:
             KeyError: If status is not a valid template key.
             GitLabAPIError: If comment update fails.
         """
+        if status in WAITING_STATUSES and self.queue_manager is not None:
+            return await self.notify_if_queued(
+                self.gitlab_client.project_id,
+                mr_iid,
+                status,
+                self.queue_manager,
+                **context,
+            )
+        async with self._notification_lock(mr_iid):
+            note = await self._send_notification(mr_iid, status, **context)
+            return note
+
+    async def _send_notification(self, mr_iid: int, status: str, **context: Any) -> Note:
         if status not in COMMENT_TEMPLATES:
             msg = f"Unknown notification status: {status}"
             raise KeyError(msg)
@@ -511,7 +611,18 @@ class MRNotifier:
         project_url = await self.gitlab_client.get_project_web_url()
         return f"{project_url}/-/pipelines/{pipeline_id}"
 
-    async def remove_queue_label(self, mr_iid: int) -> None:
+    async def completion_actor(self) -> dict[str, Any]:
+        """Authenticate provenance before starting a durable label mutation."""
+        user = await self.gitlab_client.get("/user", project_scoped=False)
+        return {
+            "id": user["id"],
+            "bot": bool(user.get("bot", False)),
+            "triggers": [self.settings.queue_label, self.settings.hotfix_label],
+        }
+
+    async def remove_queue_label(
+        self, mr_iid: int, *, strict: bool = False, operation_id: str | None = None
+    ) -> datetime | None:
         """Remove the queue label from an MR.
 
         Called when MR processing completes (merged, failed, removed)
@@ -521,9 +632,25 @@ class MRNotifier:
             mr_iid: Internal ID of the merge request.
         """
         try:
-            await self.gitlab_client.remove_mr_label(mr_iid, self.settings.queue_label)
+            labels = self.settings.queue_label
+            if strict:
+                labels = ",".join(dict.fromkeys((self.settings.queue_label, self.settings.hotfix_label)))
+            if operation_id is None:
+                mr = await self.gitlab_client.remove_mr_label(mr_iid, labels)
+            else:
+                response = await self.gitlab_client.put(
+                    f"/merge_requests/{mr_iid}",
+                    json={"remove_labels": labels},
+                    headers={"X-Gitlab-Event-UUID": operation_id},
+                )
+                mr = parse_merge_request(response)
             log.info("Queue label removed from MR", mr_iid=mr_iid, label=self.settings.queue_label)
+            return mr.updated_at
+        except GitLabNotFoundError:
+            return None
         except Exception as e:
+            if strict:
+                raise
             # Don't fail the whole operation if label removal fails
             log.warning(
                 "Failed to remove queue label from MR",
@@ -531,6 +658,19 @@ class MRNotifier:
                 label=self.settings.queue_label,
                 error=str(e),
             )
+
+        return None
+
+    async def restore_queue_labels(
+        self, mr_iid: int, labels: list[str], *, operation_id: str | None = None
+    ) -> datetime | None:
+        """Restore the explicit request only after the old lifecycle's cleanup."""
+        response = await self.gitlab_client.put(
+            f"/merge_requests/{mr_iid}",
+            json={"add_labels": ",".join(labels)},
+            headers={"X-Gitlab-Event-UUID": operation_id} if operation_id else None,
+        )
+        return parse_merge_request(response).updated_at
 
 
 __all__: list[str] = [

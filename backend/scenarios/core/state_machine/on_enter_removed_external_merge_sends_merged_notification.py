@@ -46,5 +46,5 @@ class Scenario(vedro.Scenario):
     def and_no_failure_reason_is_recorded(self):
         assert self.queue_manager.complete_calls[0]["failure_reason"] is None
 
-    def and_label_is_not_removed_again(self):
-        assert self.notifier.remove_label_calls == []
+    def and_trigger_labels_are_cleaned_up(self):
+        assert self.notifier.remove_label_calls == [123]

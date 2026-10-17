@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -22,6 +23,7 @@ class MockQueueItem:
     author_username: str = "testuser"
     target_branch: str = "master"
     is_hotfix: bool = False
+    pending_notification: str | None = None
 
 
 class _NotifyRecorder(CallRecorder):
@@ -40,6 +42,13 @@ class FakeRecordingNotifier:
 
     notify: _NotifyRecorder = field(default_factory=_NotifyRecorder)
 
+    async def notify_if_queued(self, project_id, mr_iid, status, queue_manager, **context):
+        queue = await queue_manager.get_active_queue(project_id)
+        position = next(index for index, item in enumerate(queue, 1) if item.mr_iid == mr_iid)
+        context.update(position=position, total=len(queue))
+        queue[position - 1].pending_notification = None
+        return await self.notify(mr_iid, status, **context)
+
 
 @dataclass
 class FakeRecordingQueueManager:
@@ -49,6 +58,18 @@ class FakeRecordingQueueManager:
 
     async def get_active_queue(self, project_id: int | None = None) -> list[MockQueueItem]:
         return self._queue_items
+
+    async def stage_completion_positions(self, project_id, positions, old_total):
+        for position, item in enumerate(self._queue_items, 1):
+            previous = positions.get(item.mr_iid)
+            if item.state == "queued" and previous is not None:
+                item.pending_notification = json.dumps(
+                    {
+                        "status": "position_changed" if previous != position else "total_changed",
+                        "old_position": previous,
+                        "old_total": old_total,
+                    }
+                )
 
 
 def create_mock_notifier() -> FakeRecordingNotifier:

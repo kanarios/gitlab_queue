@@ -10,11 +10,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from contextlib import contextmanager, nullcontext
 from logging.config import fileConfig
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from alembic import context
-from sqlalchemy import pool
+from filelock import FileLock
+from sqlalchemy import pool, text
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from gitlab_queue.config import load_settings
@@ -34,6 +37,32 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 logger = logging.getLogger(__name__)
+_MIGRATION_LOCK_ID = 0x4749544C414251
+_ARCHIVE_TABLES = frozenset(("gq_retry_rollback_manifest_v1", "gq_retry_rollback_rows_v1", "gq_dlq_rollback_rows_v1"))
+
+
+def include_name(name, type_, _parent_names):
+    """Keep only the frozen rollback archive outside model autogeneration."""
+    return type_ != "table" or name not in _ARCHIVE_TABLES
+
+
+@contextmanager
+def migration_gate(connection):
+    """Raw Alembic owns the same gate as the complete startup migration cycle."""
+    if config.attributes.get("_startup_migration_lock_held", False):
+        yield
+    elif connection.dialect.name == "sqlite":
+        path = connection.engine.url.database
+        if not path or path == ":memory:":
+            raise RuntimeError("Concurrent-safe migrations require a file-backed SQLite database")
+        lock_path = Path(path).resolve().with_suffix(Path(path).suffix + ".migration.lock")
+        with FileLock(lock_path, timeout=120):
+            yield
+    elif connection.dialect.name == "postgresql":
+        connection.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _MIGRATION_LOCK_ID})
+        yield
+    else:
+        raise RuntimeError("Rollback archive migrations support SQLite and PostgreSQL")
 
 
 def get_database_url() -> str:
@@ -86,6 +115,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         render_as_batch=True,  # Required for SQLite ALTER TABLE support
+        include_name=include_name,
     )
 
     with context.begin_transaction():
@@ -94,14 +124,23 @@ def run_migrations_offline() -> None:
 
 def do_run_migrations(connection: Connection) -> None:
     """Execute migrations within a connection context."""
-    context.configure(
-        connection=connection,
-        target_metadata=target_metadata,
-        render_as_batch=True,  # Required for SQLite ALTER TABLE support
-    )
-
-    with context.begin_transaction():
-        context.run_migrations()
+    transaction = nullcontext() if connection.in_transaction() else connection.begin()
+    with transaction, migration_gate(connection):
+        if connection.dialect.name == "sqlite":
+            # sqlite3 legacy transaction mode does not begin for DDL. A logical
+            # SQLAlchemy transaction alone therefore cannot protect batch ALTER.
+            driver = connection.connection.driver_connection
+            if not driver.in_transaction:
+                connection.exec_driver_sql("BEGIN IMMEDIATE")
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            render_as_batch=True,
+            transactional_ddl=True,
+            include_name=include_name,
+        )
+        with context.begin_transaction():
+            context.run_migrations()
 
 
 async def run_async_migrations() -> None:
@@ -131,7 +170,11 @@ def run_migrations_online() -> None:
 
     Wrapper to run async migrations in sync context.
     """
-    asyncio.run(run_async_migrations())
+    connection = config.attributes.get("connection")
+    if connection is not None:
+        do_run_migrations(connection)
+    else:
+        asyncio.run(run_async_migrations())
 
 
 if context.is_offline_mode():

@@ -53,7 +53,7 @@ class Scenario(vedro.Scenario):
 
     async def then_exactly_one_instance_should_apply_migrations(self):
         assert sorted(self.results) == [False, True]
-        assert await get_current_revision(self._database_url) == "c3d7f1a8b902"
+        assert await get_current_revision(self._database_url) == "a7b8c9d0e1f2"
 
     def and_queue_data_should_be_preserved_and_scoped(self):
         with sqlite3.connect(self._db_path) as connection:

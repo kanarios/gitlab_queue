@@ -7,6 +7,7 @@ Provides Retort instances for converting between:
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any
 
@@ -132,6 +133,7 @@ def parse_merge_request(data: dict[str, Any]) -> MergeRequest:
         merge_error=data.get("merge_error"),
         detailed_merge_status=data.get("detailed_merge_status"),
         diverged_commits_count=data.get("diverged_commits_count"),
+        updated_at=_parse_datetime(data.get("updated_at")),
     )
 
 
@@ -351,6 +353,8 @@ def parse_merge_request_event(data: dict[str, Any]) -> MergeRequestEvent:
             has_conflicts=attrs.get("has_conflicts", False),
             rebase_in_progress=attrs.get("rebase_in_progress", False),
             web_url=attrs.get("url"),
+            updated_at=_parse_datetime(attrs.get("updated_at")),
+            updated_at_precision_us=_timestamp_precision(attrs.get("updated_at")),
         ),
         user_id=user.get("id", 0),
         user_name=user.get("name", ""),
@@ -358,7 +362,17 @@ def parse_merge_request_event(data: dict[str, Any]) -> MergeRequestEvent:
         user_avatar=user.get("avatar_url"),
         labels=_extract_labels(data.get("labels", [])),
         label_changes=label_changes,
+        message_id=data.get("_queue_webhook", {}).get("message_id"),
+        event_uuid=data.get("_queue_webhook", {}).get("event_uuid"),
     )
+
+
+def _timestamp_precision(value: str | None) -> int:
+    """Preserve the uncertainty discarded when parsing a source timestamp."""
+    if value is None:
+        return 1
+    match = re.search(r"\d{2}:\d{2}:\d{2}\.(\d+)", value or "")
+    return 10 ** (6 - min(len(match[1]), 6)) if match else 1_000_000
 
 
 def parse_pipeline_event(data: dict[str, Any]) -> PipelineEvent:

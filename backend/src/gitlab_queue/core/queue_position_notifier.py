@@ -6,6 +6,7 @@ Handles notifications when MRs are added, removed, or positions shift.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -72,9 +73,11 @@ class QueuePositionNotifier:
 
         # Estimated time includes processing time for all MRs ahead plus this MR
         estimated_minutes = position * ESTIMATED_MINUTES_PER_POSITION
-        await self.notifier.notify(
+        await self.notifier.notify_if_queued(
+            project_id,
             mr_iid,
             "queued",
+            self.queue_manager,
             position=position,
             total=total,
             estimated_minutes=estimated_minutes,
@@ -98,6 +101,31 @@ class QueuePositionNotifier:
             if item.state == "queued":
                 positions[item.mr_iid] = i
         return positions
+
+    async def retry_pending(self, project_id: int) -> None:
+        """Repair durable priority feedback independently of metadata changes."""
+        queue = await self.queue_manager.get_active_queue(project_id)
+        pending_items = [item for item in queue if item.pending_notification is not None]
+        pending_items.sort(
+            key=lambda item: json.loads(item.pending_notification or "{}").get("status") != "priority_changed"
+        )
+        for item in pending_items:
+            pending = item.pending_notification
+            if pending is None:
+                continue
+            payload = json.loads(pending)
+            try:
+                await self.notifier.notify_if_queued(
+                    project_id,
+                    item.mr_iid,
+                    payload["status"],
+                    self.queue_manager,
+                    pending=pending,
+                    old_position=payload["old_position"],
+                    old_total=payload.get("old_total", 0),
+                )
+            except Exception as error:
+                log.warning("Failed to send pending priority notification", mr_iid=item.mr_iid, error=str(error))
 
     def _select_notification_template(
         self,
@@ -181,9 +209,11 @@ class QueuePositionNotifier:
                 context=log_context.strip() if log_context else None,
             )
 
-            await self.notifier.notify(
+            await self.notifier.notify_if_queued(
+                project_id,
                 item.mr_iid,
                 template,
+                self.queue_manager,
                 position=new_position,
                 total=total,
                 old_position=old_position,
@@ -211,13 +241,9 @@ class QueuePositionNotifier:
             positions_before: Positions captured before completion.
             old_total: Total queue size before the completion.
         """
-        notified_count = await self._notify_position_changes(
-            project_id=project_id,
-            excluded_mr_iid=completed_mr_iid,
-            positions_before=positions_before,
-            old_total=old_total,
-            log_context="",
-        )
+        await self.queue_manager.stage_completion_positions(project_id, positions_before, old_total)
+        await self.retry_pending(project_id)
+        notified_count = len(positions_before)
 
         if notified_count > 0:
             log.info(

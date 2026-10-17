@@ -1,8 +1,4 @@
-"""Test that on_enter_failed calls complete_mr BEFORE remove_queue_label.
-
-This prevents a race condition where the webhook from label removal
-could arrive before the MR is completed in the queue.
-"""
+"""The durable completion row must survive until mandatory label cleanup succeeds."""
 
 from datetime import UTC, datetime
 
@@ -17,7 +13,7 @@ from gitlab_queue.models.queue_item import QueueItem
 
 
 class Scenario(vedro.Scenario):
-    subject = "on_enter_failed completes MR before removing queue label"
+    subject = "on_enter_failed cleans up labels before archiving the owned completion"
 
     async def given_state_machine_in_rebasing(self):
         self.call_order: list[str] = []
@@ -48,5 +44,5 @@ class Scenario(vedro.Scenario):
             error_message="Merge conflict",
         )
 
-    def then_complete_mr_should_be_called_before_remove_label(self):
-        assert self.call_order == ["complete_mr", "remove_queue_label"]
+    def then_cleanup_should_finish_before_the_owned_row_is_archived(self):
+        assert self.call_order == ["remove_queue_label", "complete_mr"]

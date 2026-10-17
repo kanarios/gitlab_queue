@@ -30,9 +30,6 @@ class Scenario(vedro.Scenario):
             started_at=naive_started_at,
         )
 
-        # Fake session for transaction (execute is a no-op)
-        tx_session = FakeSession()
-
         # Fake session for get_queue_item — returns row data
         row_data = {
             "iid": 42,
@@ -58,20 +55,20 @@ class Scenario(vedro.Scenario):
         async def session_execute(sql, params=None):
             return FakeResult(_row_data=row_data)
 
-        read_session = FakeSession(execute_fn=session_execute)
+        tx_session = FakeSession(execute_fn=session_execute)
 
         self.db = FakeDatabase(
             _transaction_sessions=[tx_session],
-            _session_sessions=[read_session],
         )
         self.qm = QueueManager(db=self.db)
 
     async def when_complete_mr_is_called(self):
         self.error = None
         try:
-            await self.qm.complete_mr(99999, 42, status="merged")
+            self.result = await self.qm.complete_mr(99999, 42, status="merged")
         except TypeError as e:
             self.error = e
 
     def then_no_type_error_should_occur(self):
         assert self.error is None, f"complete_mr raised TypeError with naive datetime: {self.error}"
+        assert self.result is True

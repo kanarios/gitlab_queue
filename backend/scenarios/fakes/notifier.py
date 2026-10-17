@@ -23,6 +23,16 @@ class FakeNotifier:
     # Error injection
     notify_error: Exception | None = None
 
+    async def notify_if_queued(
+        self,
+        project_id: int,
+        mr_iid: int,
+        status: str,
+        queue_manager: Any,
+        **context: Any,
+    ) -> Note:
+        return await self.notify(mr_iid, status, **context)
+
     async def notify(self, mr_iid: int, status: str, **context: Any) -> Note:
         if self.notify_error:
             raise self.notify_error
@@ -38,7 +48,13 @@ class FakeNotifier:
     async def build_pipeline_url(self, pipeline_id: int) -> str:
         return self.pipeline_url_template.format(pipeline_id=pipeline_id)
 
-    async def remove_queue_label(self, mr_iid: int) -> None:
+    async def completion_actor(self):
+        return {"id": None, "bot": False, "triggers": ["merge_queue", "hotfix"]}
+
+    async def remove_queue_label(self, mr_iid: int, *, strict: bool = False, operation_id: str | None = None) -> None:
         self.remove_label_calls.append(mr_iid)
         if self.call_order_log is not None:
             self.call_order_log.append("remove_queue_label")
+
+    async def restore_queue_labels(self, mr_iid: int, labels: list[str], *, operation_id: str | None = None) -> None:
+        pass

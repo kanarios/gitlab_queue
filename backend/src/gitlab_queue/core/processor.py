@@ -25,6 +25,8 @@ from gitlab_queue.clients.gitlab import (
 )
 from gitlab_queue.core.handler_utils import interruptible_sleep, verify_mr_in_queue
 from gitlab_queue.core.polling import poll_until_done
+from gitlab_queue.core.queue_completion import QueueCompletion
+from gitlab_queue.core.queue_metadata import QueueMetadataUpdater
 from gitlab_queue.core.state_machine import create_state_machine_for_mr
 from gitlab_queue.core.types import ProcessingContext, ProcessingResult, RetrySignal, VerifyResult
 from gitlab_queue.metrics import MR_DURATION
@@ -150,6 +152,11 @@ class MergeProcessor:
 
         try:
             # Recovery on startup: clean up interrupted state and sync with GitLab
+            recovered = await QueueCompletion(
+                self.queue_manager, self.notifier, self.position_notifier, self._websocket_manager
+            ).recover_all(self.settings.gitlab_project_id)
+            if recovered:
+                await self._broadcast_queue_update()
             await self._recover_interrupted_state()
             await self._sync_missing_mrs_from_gitlab()
 
@@ -288,6 +295,10 @@ class MergeProcessor:
         queue_item_now = await self.queue_manager.get_queue_item(self.settings.gitlab_project_id, mr_iid)
         if queue_item_now is None:
             log.warning("MR no longer in queue during error recovery", mr_iid=mr_iid)
+            return
+
+        if queue_item_now.pending_completion is not None:
+            log.info("Completion remains pending for recovery", mr_iid=mr_iid)
             return
 
         attempts = queue_item_now.processing_attempts + 1
@@ -613,6 +624,7 @@ class MergeProcessor:
                         self.settings.gitlab_project_id,
                         item.mr_iid,
                         status="merged",
+                        expected_queue_id=item.queue_id,
                     )
                     log.info("MR was already merged", mr_iid=item.mr_iid)
 
@@ -623,6 +635,7 @@ class MergeProcessor:
                         item.mr_iid,
                         status="removed",
                         failure_reason="closed_during_recovery",
+                        expected_queue_id=item.queue_id,
                     )
                     log.info("MR was closed", mr_iid=item.mr_iid)
 
@@ -633,6 +646,7 @@ class MergeProcessor:
                         item.mr_iid,
                         status="removed",
                         failure_reason="label_removed",
+                        expected_queue_id=item.queue_id,
                     )
                     log.info("MR label was removed", mr_iid=item.mr_iid)
 
@@ -663,6 +677,7 @@ class MergeProcessor:
                     item.mr_iid,
                     status="removed",
                     failure_reason="not_found",
+                    expected_queue_id=item.queue_id,
                 )
                 log.warning("MR not found during recovery", mr_iid=item.mr_iid)
 
@@ -702,6 +717,8 @@ class MergeProcessor:
         skips sync and lets the scheduler handle it when GitLab recovers.
         """
         log.info("Syncing missing MRs from GitLab")
+        snapshot = await self.queue_manager.get_active_queue(self.settings.gitlab_project_id)
+        revisions = {item.mr_iid: (item.queue_id, item.metadata_version) for item in snapshot}
 
         queue_mrs = await self._fetch_mrs_by_label(self.settings.queue_label)
         hotfix_mrs = await self._fetch_mrs_by_label(self.settings.hotfix_label)
@@ -709,12 +726,13 @@ class MergeProcessor:
         # Merge without duplicates
         mrs_dict = {mr.iid: mr for mr in queue_mrs}
         for mr in hotfix_mrs:
-            if mr.iid not in mrs_dict:
-                mrs_dict[mr.iid] = mr
+            mrs_dict[mr.iid] = mr
         gitlab_mrs = list(mrs_dict.values())
+        updater = QueueMetadataUpdater(self.queue_manager, self.settings.hotfix_label, self.position_notifier)
 
         if not gitlab_mrs:
             log.info("No MRs found with queue or hotfix labels")
+            await updater.retry_pending(self.settings.gitlab_project_id)
             return
 
         # Get current queue IIDs
@@ -723,27 +741,41 @@ class MergeProcessor:
 
         # Add missing MRs to queue
         added_count = 0
+        updated_count = 0
         for mr in gitlab_mrs:
             if mr.iid not in queued_iids:
-                is_hotfix = self.settings.hotfix_label in mr.labels
-                await self.queue_manager.add_to_queue(self.settings.gitlab_project_id, mr, is_hotfix=is_hotfix)
-                log.info(
-                    "Added missing MR to queue",
-                    mr_iid=mr.iid,
-                    title=mr.title,
-                    is_hotfix=is_hotfix,
-                )
-                added_count += 1
+                added_count += await self._add_discovered_mr(mr)
+            elif mr.iid in revisions and await updater.refresh(
+                self.settings.gitlab_project_id,
+                mr.iid,
+                mr.labels,
+                expected_revision=revisions[mr.iid],
+                notify=False,
+            ):
+                updated_count += 1
+
+        await updater.retry_pending(self.settings.gitlab_project_id)
 
         log.info(
             "GitLab sync complete",
             gitlab_mrs_count=len(gitlab_mrs),
             added_count=added_count,
+            updated_count=updated_count,
         )
 
-        # Broadcast queue update if MRs were added
-        if added_count > 0 and self._websocket_manager:
+        # Metadata changes can reorder the queue even when membership stays the same.
+        if (added_count > 0 or updated_count > 0) and self._websocket_manager:
             await self._broadcast_queue_update()
+
+    async def _add_discovered_mr(self, mr: MergeRequest) -> bool:
+        """Add an absent MR without replacing a row whose terminal callback is in flight."""
+        existing = await self.queue_manager.get_queue_item(self.settings.gitlab_project_id, mr.iid)
+        if existing is not None and existing.pending_completion is not None:
+            return False
+        is_hotfix = self.settings.hotfix_label in mr.labels
+        await self.queue_manager.add_to_queue(self.settings.gitlab_project_id, mr, is_hotfix=is_hotfix)
+        log.info("Added missing MR to queue", mr_iid=mr.iid, title=mr.title, is_hotfix=is_hotfix)
+        return True
 
     async def _broadcast_queue_update(self) -> None:
         """Broadcast current queue state to all WebSocket clients."""

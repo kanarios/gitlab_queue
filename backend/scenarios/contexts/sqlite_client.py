@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 import vedro
 
 from gitlab_queue.db.database import Database
+from scenarios.contexts.database_backend import isolated_database_url
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -53,14 +54,10 @@ async def initialized_test_database() -> AsyncIterator[Database]:
         ...         # Use session for queries
         ...         await session.commit()
     """
-    db = Database(database_url="sqlite+aiosqlite:///:memory:")
-    await db.initialize()
-    health = await db.health_check()
-    assert health.connected, "Database should be connected after initialization"
-    try:
+    async with isolated_database_url(sqlite_in_memory=True) as database_url, Database(database_url) as db:
+        health = await db.health_check()
+        assert health.connected, "Database should be connected after initialization"
         yield db
-    finally:
-        await db.close()
 
 
 # Alias for backward compatibility

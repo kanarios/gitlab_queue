@@ -6,6 +6,10 @@ Provides immutable dataclass representation of GitLab merge requests.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from datetime import datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +69,7 @@ class MergeRequest:
     merge_error: str | None = None
     detailed_merge_status: str | None = None
     diverged_commits_count: int | None = None
+    updated_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -935,6 +935,7 @@ class GitLabClient:
         project_scoped: bool = True,
         json: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Make PUT request to GitLab API.
 
@@ -947,7 +948,9 @@ class GitLabClient:
         Returns:
             Parsed JSON response.
         """
-        response = await self._request("PUT", path, project_scoped=project_scoped, json=json, params=params)
+        response = await self._request(
+            "PUT", path, project_scoped=project_scoped, json=json, params=params, headers=headers
+        )
         result: dict[str, Any] = response.json()
         return result
 

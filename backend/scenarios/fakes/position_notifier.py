@@ -23,6 +23,9 @@ class FakePositionNotifier:
     notify_after_completion_calls: list[dict[str, Any]] = field(default_factory=list)
     notify_after_add_calls: list[dict[str, Any]] = field(default_factory=list)
 
+    async def retry_pending(self, project_id: int) -> None:
+        pass
+
     async def notify_initial_position(self, project_id: int, mr_iid: int) -> None:
         self.notify_initial_calls.append({"project_id": project_id, "mr_iid": mr_iid})
         if self.notify_initial_error is not None:
