@@ -219,6 +219,7 @@ class QueuePositionNotifier:
                 old_position=old_position,
                 old_total=old_total,
                 estimated_minutes=new_position * ESTIMATED_MINUTES_PER_POSITION,
+                position_change_reason="An MR was added ahead. Priority applies to the waiting queue.",
             )
             notified_count += 1
 

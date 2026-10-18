@@ -69,7 +69,7 @@ async def legacy_revision_markers_preserve_populated_queue_on_upgrade(revision):
                 assert stamped is True
                 assert detected == revision
                 assert sorted(upgraded) == [False, True]
-                assert current_revision == "a7b8c9d0e1f2"
+                assert current_revision == "b8c9d0e1f2a3"
                 assert current.queue_id == original.queue_id
                 assert current.queued_at == original.queued_at
                 assert current.state == original.state

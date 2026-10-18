@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from gitlab_queue.models.priority import effective_priority
+
 if TYPE_CHECKING:
     from gitlab_queue.core.protocols import QueueManagerProtocol
     from gitlab_queue.core.queue_position_notifier import QueuePositionNotifier
@@ -52,8 +54,10 @@ class QueueMetadataUpdater:
         if expected_revision is not None and expected_revision != revision:
             return False
 
-        is_hotfix = self.hotfix_label in labels
-        priority_changed = item.is_hotfix != is_hotfix
+        is_hotfix, is_automated = self.queue_manager.classify_labels(project_id, labels, self.hotfix_label in labels)
+        priority_changed = effective_priority(item.is_hotfix, item.is_automated) != effective_priority(
+            is_hotfix, is_automated
+        )
         if not priority_changed and set(item.labels) == set(labels) and admission_key is None:
             return False
 
@@ -65,5 +69,6 @@ class QueueMetadataUpdater:
             expected_revision=revision,
             notify_positions=priority_changed,
             admission_key=admission_key,
+            is_automated=is_automated,
         )
         return updated

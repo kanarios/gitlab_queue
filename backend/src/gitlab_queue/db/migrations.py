@@ -19,7 +19,7 @@ from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from filelock import FileLock
-from sqlalchemy import inspect, pool, text
+from sqlalchemy import Integer, inspect, pool, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -173,6 +173,14 @@ async def _stamp_legacy_database_if_needed(database_url: str, *, startup_lock_he
 
             def detect_revision(sync_conn: Connection) -> str:
                 inspector = inspect(sync_conn)
+                automation = next(
+                    (column for column in inspector.get_columns("merge_requests") if column["name"] == "is_automated"),
+                    None,
+                )
+                if automation is not None:
+                    default = str(automation.get("default", "")).strip("()'\" ")
+                    if not isinstance(automation["type"], Integer) or automation["nullable"] or default != "0":
+                        raise RuntimeError("Cannot stamp legacy database: noncanonical is_automated column")
                 tables = set(inspector.get_table_names())
                 main_tables = (
                     "merge_requests",

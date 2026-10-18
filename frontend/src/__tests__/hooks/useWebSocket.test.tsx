@@ -8,6 +8,7 @@ import { useWebSocket } from '../../hooks/useWebSocket';
 import { wsManager } from '../../api/websocket';
 import { setToken } from '../../auth/storage';
 import type { MergeRequest, QueueStatsFromWS } from '../../types';
+import { mockMergeRequest } from '../mocks/handlers';
 
 // Mock the wsManager module
 vi.mock('../../api/websocket', async (importOriginal) => {
@@ -46,18 +47,14 @@ describe('hooks/useWebSocket', () => {
     eventCallbacks = new Map();
 
     mockWsManager.getState.mockReturnValue('disconnected');
-    mockWsManager.onStateChange.mockImplementation(
-      (callback: (state: string) => void) => {
-        stateChangeCallback = callback;
-        return vi.fn();
-      }
-    );
-    mockWsManager.on.mockImplementation(
-      (eventType: string, callback: (data: unknown) => void) => {
-        eventCallbacks.set(eventType, callback);
-        return vi.fn();
-      }
-    );
+    mockWsManager.onStateChange.mockImplementation((callback: (state: string) => void) => {
+      stateChangeCallback = callback;
+      return vi.fn();
+    });
+    mockWsManager.on.mockImplementation((eventType: string, callback: (data: unknown) => void) => {
+      eventCallbacks.set(eventType, callback);
+      return vi.fn();
+    });
   });
 
   afterEach(() => {
@@ -89,6 +86,67 @@ describe('hooks/useWebSocket', () => {
   });
 
   describe('state updates', () => {
+    it('confirms freshness only with a full snapshot and keeps the last queue during reconnect', () => {
+      setToken('test-token');
+      const { result } = renderHook(() => useWebSocket(1));
+      const queue = [
+        {
+          mr_iid: 90,
+          title: 'Dependencies',
+          author: { name: 'Alice', username: 'alice', avatar_url: null },
+          status: 'queued',
+          labels: ['dependencies'],
+          is_hotfix: false,
+          priority: 'automated',
+          queued_at: '2025-01-01T10:00:00Z',
+          started_at: null,
+          finished_at: null,
+          target_branch: 'main',
+          pipeline: null,
+          failure_reason: null,
+        },
+      ];
+
+      expect(result.current.hasSnapshot).toBe(false);
+      expect(result.current.isSynchronized).toBe(false);
+      act(() => {
+        stateChangeCallback?.('connected');
+        eventCallbacks.get('mr:status_changed')?.({ project_id: 1, iid: 90, newStatus: 'testing' });
+      });
+      expect(result.current.hasSnapshot).toBe(false);
+      expect(result.current.isSynchronized).toBe(false);
+
+      act(() => {
+        eventCallbacks.get('queue:updated')?.({ project_id: 1, queue, stats: null });
+      });
+      expect(result.current.hasSnapshot).toBe(true);
+      expect(result.current.isSynchronized).toBe(true);
+
+      act(() => {
+        stateChangeCallback?.('disconnected');
+      });
+      expect(result.current.queue).toEqual(queue);
+      expect(result.current.hasSnapshot).toBe(true);
+      expect(result.current.isSynchronized).toBe(false);
+      act(() => {
+        stateChangeCallback?.('connecting');
+        stateChangeCallback?.('connected');
+      });
+      expect(result.current.queue).toEqual(queue);
+      expect(result.current.isSynchronized).toBe(false);
+      act(() => {
+        eventCallbacks.get('mr:status_changed')?.({ project_id: 1, iid: 90, newStatus: 'testing' });
+      });
+      expect(result.current.queue[0].priority).toBe('automated');
+      expect(result.current.isSynchronized).toBe(false);
+      act(() => {
+        eventCallbacks.get('queue:updated')?.({ project_id: 1, queue: [], stats: null });
+      });
+      expect(result.current.queue).toEqual([]);
+      expect(result.current.hasSnapshot).toBe(true);
+      expect(result.current.isSynchronized).toBe(true);
+    });
+
     it('updates state when connection state changes', () => {
       const { result } = renderHook(() => useWebSocket(1));
 
@@ -107,6 +165,48 @@ describe('hooks/useWebSocket', () => {
   });
 
   describe('queue:updated event', () => {
+    it('replaces priority, labels and order together, preserving them through status deltas and completion', () => {
+      const { result } = renderHook(() => useWebSocket(1));
+      const oldQueue: MergeRequest[] = [
+        { ...mockMergeRequest, mr_iid: 90, priority: 'ordinary' },
+        { ...mockMergeRequest, mr_iid: 10, priority: 'automated', labels: ['dependencies'] },
+      ];
+      const newQueue: MergeRequest[] = [
+        { ...oldQueue[1], priority: 'hotfix', labels: ['dependencies', 'hotfix'], is_hotfix: true },
+        oldQueue[0],
+      ];
+      act(() => {
+        eventCallbacks.get('queue:updated')?.({ project_id: 1, queue: oldQueue, stats: null });
+      });
+      act(() => {
+        eventCallbacks.get('queue:updated')?.({ project_id: 1, queue: newQueue, stats: null });
+      });
+      expect(result.current.queue).toEqual(newQueue);
+      act(() => {
+        eventCallbacks.get('mr:status_changed')?.({
+          project_id: 2,
+          iid: 10,
+          oldStatus: 'queued',
+          newStatus: 'testing',
+        });
+        eventCallbacks.get('mr:completed')?.({ project_id: 2, iid: 90, status: 'merged' });
+      });
+      expect(result.current.queue).toEqual(newQueue);
+      act(() => {
+        eventCallbacks.get('mr:status_changed')?.({
+          project_id: 1,
+          iid: 10,
+          oldStatus: 'queued',
+          newStatus: 'rebasing',
+        });
+      });
+      expect(result.current.queue).toEqual([{ ...newQueue[0], status: 'rebasing' }, newQueue[1]]);
+      act(() => {
+        eventCallbacks.get('mr:completed')?.({ project_id: 1, iid: 10, status: 'merged' });
+      });
+      expect(result.current.queue).toEqual([newQueue[1]]);
+    });
+
     it('updates queue and stats on queue:updated event', () => {
       const { result } = renderHook(() => useWebSocket(1));
 
@@ -290,39 +390,48 @@ describe('hooks/useWebSocket', () => {
 
     it('disconnects and clears queue state before connecting to the next project', () => {
       setToken('test-token');
-      const { result, rerender } = renderHook(
-        ({ projectId }) => useWebSocket(projectId),
-        { initialProps: { projectId: 1 as number | null } }
-      );
+      const { result, rerender } = renderHook(({ projectId }) => useWebSocket(projectId), {
+        initialProps: { projectId: 1 as number | null },
+      });
       const firstProjectQueue = eventCallbacks.get('queue:updated');
+      const firstProjectState = stateChangeCallback;
 
       act(() => {
         firstProjectQueue?.({
           project_id: 1,
-          queue: [{
-            mr_iid: 42,
-            title: 'Project one MR',
-            author: { name: 'Test', username: 'test', avatar_url: null },
-            status: 'queued',
-            labels: [],
-            is_hotfix: false,
-            queued_at: '2025-01-01T10:00:00Z',
-            started_at: null,
-            finished_at: null,
-            target_branch: 'main',
-            pipeline: null,
-            failure_reason: null,
-          }],
+          queue: [
+            {
+              mr_iid: 42,
+              title: 'Project one MR',
+              author: { name: 'Test', username: 'test', avatar_url: null },
+              status: 'queued',
+              labels: [],
+              is_hotfix: false,
+              priority: 'automated',
+              queued_at: '2025-01-01T10:00:00Z',
+              started_at: null,
+              finished_at: null,
+              target_branch: 'main',
+              pipeline: null,
+              failure_reason: null,
+            },
+          ],
           stats: { queued: 1, rebasing: 0, testing: 0, merging: 0 },
         });
       });
       expect(result.current.queue).toHaveLength(1);
+      expect(result.current.hasSnapshot).toBe(true);
+      expect(result.current.isSynchronized).toBe(true);
 
+      const firstProjectSnapshot = result.current.queue;
       rerender({ projectId: 2 });
 
       expect(mockWsManager.disconnect).toHaveBeenCalled();
       expect(mockWsManager.connect).toHaveBeenLastCalledWith(2);
       expect(result.current.queue).toEqual([]);
+      expect(result.current.stats).toBeNull();
+      expect(result.current.hasSnapshot).toBe(false);
+      expect(result.current.isSynchronized).toBe(false);
       const secondProjectQueue = eventCallbacks.get('queue:updated');
       act(() => {
         secondProjectQueue?.({
@@ -332,6 +441,18 @@ describe('hooks/useWebSocket', () => {
         });
       });
       expect(result.current.queue).toEqual([]);
+      act(() => {
+        firstProjectQueue?.({
+          project_id: 1,
+          queue: firstProjectSnapshot,
+          stats: null,
+        });
+        firstProjectState?.('connected');
+      });
+      expect(result.current.queue).toEqual([]);
+      expect(result.current.state).toBe('connecting');
+      expect(result.current.hasSnapshot).toBe(false);
+      expect(result.current.isSynchronized).toBe(false);
     });
   });
 

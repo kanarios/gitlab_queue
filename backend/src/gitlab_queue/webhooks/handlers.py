@@ -174,10 +174,19 @@ class MRWebhookHandler:
         added = self._was_queue_label_added(event) or self._was_hotfix_label_added(event)
         if added and event.object_attributes.state == "opened":
             return await self._defer_completion_requeue(event, item, allow_active=allow_active)
-        if event.object_attributes.updated_at is None:
-            return True
         removed = self._was_queue_label_removed(event) or self._was_hotfix_label_removed(event)
         if not removed and event.object_attributes.state == "opened":
+            if event.label_changes is not None:
+                return await self.queue_manager.refresh_requeue_labels(
+                    event.project_id,
+                    item.queue_id,
+                    event.labels,
+                    event.object_attributes.updated_at,
+                    precision_us=event.object_attributes.updated_at_precision_us,
+                    allow_active=allow_active,
+                )
+            return True
+        if event.object_attributes.updated_at is None:
             return True
         if self._has_queue_trigger(event.labels) and event.object_attributes.state == "opened":
             return await self._defer_completion_requeue(event, item, allow_active=allow_active)
@@ -305,6 +314,13 @@ class MRWebhookHandler:
         hotfix_label_added = self._was_hotfix_label_added(event)
 
         if not queue_label_added and not hotfix_label_added:
+            delta = event.label_changes
+            added_labels = set(delta.current) - set(delta.previous) if delta else set()
+            _, automation_added = self.queue_manager.classify_labels(event.project_id, list(added_labels))
+            if automation_added:
+                item = await self.queue_manager.get_queue_item(event.project_id, event.object_attributes.iid)
+                if item is not None and item.state in ("queued", "rebasing", "testing", "merging"):
+                    await self._refresh_queue_item_metadata(event.project_id, event.object_attributes.iid, event)
             log.debug(
                 "Neither queue nor hotfix label added, ignoring",
                 mr_iid=event.object_attributes.iid,
@@ -679,6 +695,7 @@ class MRWebhookHandler:
                         "target_branch": item.target_branch,
                         "status": item.state,
                         "is_hotfix": item.is_hotfix,
+                        "priority": item.priority,
                         "labels": item.labels,
                         "queued_at": item.queued_at.isoformat(),
                         "started_at": item.started_at.isoformat() if item.started_at else None,

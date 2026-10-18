@@ -29,6 +29,6 @@ async def removing_hotfix_restores_fifo(action):
 
         with then("the author and affected MRs see the updated priority and positions"):
             assert [iid for iid, body in env.server.comments] == [3, 1, 2]
-            assert "Hotfix priority removed" in env.server.comments[0][1]
+            assert "Ordinary priority" in env.server.comments[0][1]
             assert "**Position:** 3 of 3" in env.server.comments[0][1]
             assert [item["mr_iid"] for item in env.websocket.broadcast_calls[0]["queue"]] == [1, 2, 3]

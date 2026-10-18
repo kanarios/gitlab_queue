@@ -16,6 +16,28 @@ describe('api/queue', () => {
   });
 
   describe('getQueue', () => {
+    it('preserves effective priorities, metadata and server order in active snapshots', async () => {
+      const items = [
+        {
+          ...mockMergeRequest,
+          mr_iid: 102,
+          priority: 'hotfix',
+          is_hotfix: true,
+          labels: ['hotfix', 'dependencies'],
+        },
+        { ...mockMergeRequest, mr_iid: 90, priority: 'automated', status: 'testing' },
+        { ...mockMergeRequest, mr_iid: 80, priority: 'ordinary', labels: ['merge_queue'] },
+      ];
+      server.use(
+        http.get('/api/projects/1/queue/active', () =>
+          HttpResponse.json({ items, count: items.length })
+        )
+      );
+      const result = await getQueue(1);
+      expect(result.success).toBe(true);
+      if (result.success) expect(result.data).toEqual(items);
+    });
+
     it('returns queue data', async () => {
       const result = await getQueue(1);
 
@@ -43,10 +65,7 @@ describe('api/queue', () => {
     it('returns error on server error', async () => {
       server.use(
         http.get('/api/projects/1/queue/active', () => {
-          return HttpResponse.json(
-            { detail: 'Internal server error' },
-            { status: 500 }
-          );
+          return HttpResponse.json({ detail: 'Internal server error' }, { status: 500 });
         })
       );
 
@@ -72,10 +91,7 @@ describe('api/queue', () => {
     it('returns error on server error', async () => {
       server.use(
         http.get('/api/projects/1/queue/stats', () => {
-          return HttpResponse.json(
-            { detail: 'Internal server error' },
-            { status: 500 }
-          );
+          return HttpResponse.json({ detail: 'Internal server error' }, { status: 500 });
         })
       );
 

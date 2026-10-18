@@ -448,7 +448,7 @@ Use either `GITLAB_QUEUE_PROJECTS` or the two legacy single-project variables. E
 
 ```bash
 export GITLAB_QUEUE_PROJECTS='[
-  {"project_id": 123, "token": "glpat-project-one", "target_branch": "main"},
+  {"project_id": 123, "token": "glpat-project-one", "target_branch": "main", "automation_labels": ["dependencies", "renovate"]},
   {"project_id": 456, "token": "glpat-project-two", "queue_label": "merge_queue", "hotfix_label": "hotfix"}
 ]'
 ```
@@ -462,6 +462,44 @@ keep `GITLAB_QUEUE_GITLAB_PROJECT_ID` set to the former project ID for the first
 migration run. The migration uses it only to assign existing queue, history,
 analytics and retry rows; it must also appear in `GITLAB_QUEUE_PROJECTS`. If the
 owner cannot be determined safely, startup stops instead of hiding legacy rows.
+
+### Приоритет автоматизированных MR
+
+очередь выбирает ожидающие MR в порядке hotfix → ordinary → automated. Внутри
+каждой группы сохраняется FIFO по исходному ID строки очереди. Уже работающий MR
+заканчивает свой workflow, даже если он automated и в это время пришёл hotfix
+
+`automation_labels` задаётся отдельно для каждого проекта в `GITLAB_QUEUE_PROJECTS`.
+Достаточно любого точного совпадения имени, автор MR ни на что не влияет.
+Например, обычный пользователь с `dependencies` попадёт в automated, а бот без
+такого лейбла останется ordinary. Настройка читается при старте, редактора в UI нет
+
+Сам automation label не добавляет MR в очередь и не удерживает его после удаления
+последнего queue/hotfix trigger. Можно включить `hotfix_label` или `queue_label`
+в список automation. Hotfix всё равно выше остальных, а совпадение с queue label
+сделает все queue-admitted MR без hotfix автоматизированными
+
+Имена чувствительны к регистру и сохраняют Unicode и пробелы внутри. Нужен JSON
+массив строк без пустых имён, внешних пробелов и точных дубликатов. Отсутствующее
+поле и `[]` сохраняют старое поведение. Legacy single-project env-переменные
+по-прежнему работают с отключённой automation policy
+
+Relabel ожидающего MR пересчитывает приоритет без новой строки или времени
+постановки. Webhook, полный polling и startup применяют ту же policy. При рестарте
+локальный backfill заканчивается до intake, retry, recovery и processing. Он
+сохраняет известный hotfix при неизвестных saved labels и не выдаёт недоступный
+GitLab за свежий remote snapshot. Ошибка страницы или неполный labels snapshot
+не запускают destructive reconciliation, лимит pagination тоже даёт явный отказ
+
+Dashboard показывает badges Hotfix/Automated и серверный порядок ожидания.
+Активная карточка остаётся отдельно. Active REST и каждый полный WebSocket snapshot
+содержат `priority = hotfix | ordinary | automated`, `is_hotfix` сохранён.
+История в этой версии не получает новое поле приоритета
+
+При непрерывном потоке ordinary автоматизированный MR может ждать долго. Aging
+или гарантии времени ожидания здесь нет. Подробный design и acceptance находятся
+в [плане реализации](docs/plans/automated-mr-priority-system-design.md)
+и [отчёте о проверках и замерах](docs/plans/automated-mr-priority-validation.md)
 
 ### GitLab Connection
 

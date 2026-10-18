@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 from alembic import command
 from scenarios.contexts.database_backend import isolated_database_url
 from scenarios.fakes import create_mr
-from scenarios.integration.repositories._helpers import create_test_history_model, create_test_mr_model
+from scenarios.integration.repositories._helpers import create_test_history_model
 from sqlalchemy import inspect, null, text
 from vedro import given, scenario, then, when
 
@@ -12,8 +12,21 @@ from gitlab_queue.core.queue import QueueManager
 from gitlab_queue.db.database import Database
 from gitlab_queue.db.migrations import _get_alembic_config, run_migrations
 from gitlab_queue.db.models import WebhookDLQModel, WebhookRetryModel
-from gitlab_queue.db.repositories import HistoryRepository, MergeRequestRepository
+from gitlab_queue.db.repositories import HistoryRepository
 from gitlab_queue.webhooks.retry_manager import WebhookRetryManager
+
+
+async def seed_legacy_queue(database, project_id, iid, created_at="CURRENT_TIMESTAMP"):
+    """Use the actual f6 writer shape without columns introduced by later revisions."""
+    async with database.transaction() as session:
+        await session.execute(
+            text(
+                "INSERT INTO merge_requests "
+                "(project_id, iid, title, author_name, author_username, target_branch, status, labels, queued_at, created_at) "
+                "VALUES (:project, :iid, 'Legacy MR', 'User', 'user', 'master', 'queued', '[\"merge_queue\"]', :queued, :created)"
+            ),
+            {"project": project_id, "iid": iid, "queued": datetime.now(UTC).isoformat(), "created": created_at},
+        )
 
 
 @scenario()
@@ -25,8 +38,9 @@ async def timestamp_defaults_and_identity_preserve_legacy_data_without_rewriting
             valid = "2026-10-16T23:15:00.123456+05:00"
             async with Database(database_url) as database:
                 queue = QueueManager(database)
-                await queue.add_to_queue(123, create_mr(iid=1))
-                removed = await queue.add_to_queue(123, create_mr(iid=2))
+                await seed_legacy_queue(database, 123, 1)
+                await seed_legacy_queue(database, 123, 2)
+                removed = await queue.get_queue_item(123, 2)
                 await queue.complete_mr(123, 2, "merged")
                 manager = WebhookRetryManager(database, max_attempts=1, base_delay_seconds=0)
                 async with database.transaction() as session:
@@ -57,11 +71,9 @@ async def timestamp_defaults_and_identity_preserve_legacy_data_without_rewriting
                     )
                     old_history.project_id = 123
                     session.add_all([bad_retry, optional, bad_dead, old_history])
-                    valid_mr = create_test_mr_model(iid=9)
-                    valid_mr.created_at = valid
-                    await MergeRequestRepository(session, project_id=202).add(valid_mr)
                     await session.flush()
                     history_high = old_history.id
+                await seed_legacy_queue(database, 202, 9, valid)
                 source = await manager.add_to_retry_queue("merge_request", {"project": {"id": 123}}, "temporary", 123)
                 await manager.mark_retry_failed(source, "final", 123)
                 dead_high = max(

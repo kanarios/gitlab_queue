@@ -20,6 +20,10 @@ interface UseWebSocketResult {
   queue: MergeRequest[];
   /** Queue statistics by state. */
   stats: QueueStatsFromWS | null;
+  /** Whether this project has received a full queue snapshot. */
+  hasSnapshot: boolean;
+  /** Whether the current connection has received a full queue snapshot. */
+  isSynchronized: boolean;
   /** Manually trigger reconnection. */
   reconnect: () => void;
 }
@@ -45,6 +49,8 @@ export function useWebSocket(projectId: number | null): UseWebSocketResult {
   );
   const [queue, setQueue] = useState<MergeRequest[]>([]);
   const [stats, setStats] = useState<QueueStatsFromWS | null>(null);
+  const [hasSnapshot, setHasSnapshot] = useState(false);
+  const [isSynchronized, setIsSynchronized] = useState(false);
 
   // Handle queue:updated event - full queue replacement
   const handleQueueUpdated = useCallback(
@@ -52,6 +58,8 @@ export function useWebSocket(projectId: number | null): UseWebSocketResult {
       if (data.project_id === projectId) {
         setQueue(data.queue);
         setStats(data.stats);
+        setHasSnapshot(true);
+        setIsSynchronized(true);
       }
     },
     [projectId]
@@ -75,7 +83,13 @@ export function useWebSocket(projectId: number | null): UseWebSocketResult {
 
   // Handle mr:completed event - remove MR from queue
   const handleCompleted = useCallback(
-    (data: { project_id: number; iid: number; status: string; finishedAt: string; failureReason: string | null }) => {
+    (data: {
+      project_id: number;
+      iid: number;
+      status: string;
+      finishedAt: string;
+      failureReason: string | null;
+    }) => {
       if (data.project_id === projectId) {
         setQueue((prev) => prev.filter((mr) => mr.mr_iid !== data.iid));
       }
@@ -85,32 +99,48 @@ export function useWebSocket(projectId: number | null): UseWebSocketResult {
 
   // Reconnect handler for UI
   const reconnect = useCallback(() => {
-    if (projectId !== null) wsManager.reconnect(projectId);
+    if (projectId !== null) {
+      setIsSynchronized(false);
+      wsManager.reconnect(projectId);
+    }
   }, [projectId]);
 
   useEffect(() => {
     setQueue([]);
     setStats(null);
+    setHasSnapshot(false);
+    setIsSynchronized(false);
     setState(projectId === null || !hasToken() ? 'disconnected' : 'connecting');
 
     if (projectId === null) {
       return;
     }
 
+    // Ignore callbacks already queued by a subscription that has been disposed.
+    let active = true;
     // Subscribe to state changes
     const unsubState = wsManager.onStateChange((newState) => {
+      if (!active) return;
       setState(newState);
+      if (newState !== 'connected') setIsSynchronized(false);
     });
 
     // Subscribe to events
-    const unsubQueueUpdated = wsManager.on('queue:updated', handleQueueUpdated);
-    const unsubStatusChanged = wsManager.on('mr:status_changed', handleStatusChanged);
-    const unsubCompleted = wsManager.on('mr:completed', handleCompleted);
+    const unsubQueueUpdated = wsManager.on('queue:updated', (data) => {
+      if (active) handleQueueUpdated(data);
+    });
+    const unsubStatusChanged = wsManager.on('mr:status_changed', (data) => {
+      if (active) handleStatusChanged(data);
+    });
+    const unsubCompleted = wsManager.on('mr:completed', (data) => {
+      if (active) handleCompleted(data);
+    });
 
     // Connect if authenticated
     if (hasToken()) wsManager.connect(projectId);
 
     return () => {
+      active = false;
       unsubState();
       unsubQueueUpdated();
       unsubStatusChanged();
@@ -123,6 +153,8 @@ export function useWebSocket(projectId: number | null): UseWebSocketResult {
     state,
     queue,
     stats,
+    hasSnapshot,
+    isSynchronized,
     reconnect,
   };
 }

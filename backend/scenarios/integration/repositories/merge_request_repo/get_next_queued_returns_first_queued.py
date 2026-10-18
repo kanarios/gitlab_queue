@@ -22,7 +22,7 @@ class Scenario(vedro.Scenario):
         - iid=10 with queued_at 5 minutes before now
         - iid=20 with queued_at 10 minutes before now
 
-        This establishes state for testing selection of the oldest queued merge request.
+        This verifies original row-ID FIFO even when timestamps suggest the reverse order.
         """
         self._db_ctx = initialized_test_database()
         self.db = await self._db_ctx.__aenter__()
@@ -54,17 +54,17 @@ class Scenario(vedro.Scenario):
         repo = MergeRequestRepository(session)
         self.result = await repo.get_next_queued()
 
-    def then_result_should_be_the_oldest_queued_mr(self):
+    def then_result_should_be_the_first_admitted_queued_mr(self):
         """
-        Verify that the fetched merge request is the oldest queued MR.
+        Verify that the fetched merge request owns the first admitted row.
 
-        Asserts that `self.result` is not None and that its `iid` equals 20.
+        Asserts that `self.result` is not None and that its `iid` equals 10.
 
         Raises:
-            AssertionError: If `self.result` is None or its `iid` is not 20.
+            AssertionError: If `self.result` is None or its `iid` is not 10.
         """
         assert self.result is not None
-        assert self.result.iid == 20
+        assert self.result.iid == 10
 
     async def do_cleanup(self):
         """

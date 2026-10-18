@@ -191,6 +191,7 @@ class ProjectConfig:
     target_branch: str = "master"
     queue_label: str = "merge_queue"
     hotfix_label: str = "hotfix"
+    automation_labels: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         """Reject invalid values even when constructed outside JSON parsing."""
@@ -204,6 +205,21 @@ class ProjectConfig:
             value = getattr(self, field_name)
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{field_name} must be a non-empty string")
+
+        _validate_automation_labels(self.project_id, self.automation_labels)
+
+
+def _validate_automation_labels(project_id: int, labels: tuple[str, ...]) -> None:
+    """Validate exact configured names without normalizing their identity."""
+    if not isinstance(labels, tuple):
+        raise ValueError(f"automation_labels for project {project_id} must be an immutable tuple")
+    for label in labels:
+        if not isinstance(label, str) or not label or label != label.strip():
+            raise ValueError(
+                f"automation_labels for project {project_id} require nonblank names without outer whitespace"
+            )
+    if len(set(labels)) != len(labels):
+        raise ValueError(f"automation_labels for project {project_id} contain duplicate names")
 
 
 @environ.config(prefix="GITLAB_QUEUE")
@@ -409,6 +425,7 @@ def _parse_project_entry(
         target_branch=entry.get("target_branch", default_target_branch),
         queue_label=entry.get("queue_label", default_queue_label),
         hotfix_label=entry.get("hotfix_label", default_hotfix_label),
+        automation_labels=_automation_labels_from_json(entry.get("automation_labels", []), project_id),
     )
 
 
@@ -418,13 +435,19 @@ def _validate_project_entry_shape(entry: Any) -> dict[str, Any]:
         msg = f"Each project entry must be a JSON object, got: {type(entry).__name__}"
         raise ValueError(msg)
 
-    allowed_fields = {"project_id", "token", "target_branch", "queue_label", "hotfix_label"}
+    allowed_fields = {"project_id", "token", "target_branch", "queue_label", "hotfix_label", "automation_labels"}
     unknown_fields = sorted(set(entry) - allowed_fields)
     if unknown_fields:
         msg = f"Unknown project field(s): {', '.join(unknown_fields)}"
         raise ValueError(msg)
 
     return entry
+
+
+def _automation_labels_from_json(value: Any, project_id: int) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        raise ValueError(f"automation_labels for project {project_id} must be a JSON array")
+    return tuple(value)
 
 
 def _validate_project_entry_values(entry: dict[str, Any]) -> tuple[int, str]:

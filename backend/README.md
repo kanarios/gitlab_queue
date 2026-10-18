@@ -26,7 +26,7 @@ To repeat this check locally, set `GITLAB_QUEUE_TEST_POSTGRES_URL` to an isolate
 PostgreSQL admin database whose disposable role has `CREATEDB`, then run:
 
 ```bash
-uv run vedro run scenarios/core/hotfix_priority/ scenarios/core/database_migrations/ scenarios/core/storage_backends/ scenarios/integration/retry_manager/ scenarios/integration/repositories/ --verbose --fail-fast
+uv run vedro run scenarios/core/hotfix_priority/ scenarios/core/automation_priority/ scenarios/core/database_migrations/ scenarios/core/storage_backends/ scenarios/integration/retry_manager/ scenarios/integration/repositories/ --verbose --fail-fast
 ```
 
 Each context creates a uniquely named `gq_test_*` database, applies real Alembic
@@ -145,3 +145,50 @@ The migration scenarios cover populated previous revisions and legacy schema
 markers, concurrent startup, full reversal and Alembic model consistency. Fresh
 schema helpers create the complete model schema; existing tables are upgraded
 through migrations.
+
+### Automation priority и безопасный откат
+
+новая revision `b8c9d0e1f2a3` идёт после a7 и добавляет только active
+`merge_requests.is_automated`. History и frozen completion/history/retry archive
+форматы не расширяются. Direct replacement вычисляет class из принятых итоговых
+labels и текущей project policy, включая старые raw requeue payloads
+
+Локальный startup bulk читает один before/final order на проект и сохраняет
+итоговые notification intents. Он не делает GitLab HTTP и не запускает N обычных
+feedback drains. В логе есть fingerprint/count policy, scanned/changed/skipped,
+unknown snapshots, class counts и duration. Remote sync остаётся отдельным этапом
+
+Неполные/invalid remote labels не равны пустому списку. Label discovery собирает
+все страницы обоих trigger lists до любых metadata/orphan mutations. Последняя
+полученная полная копия MR выигрывает dedup, а queue ID/version CAS защищает более
+новый webhook и replacement. Cap в50 страниц даёт ошибку вместо silent partial
+sweep. Это не обещание атомарного snapshot всего GitLab или remote freshness
+при его недоступности
+
+Самый быстрый fallback оставляет новый binary и schema
+
+1. Задайте `automation_labels: []` в каждом нужном проекте
+2. Перезапустите новый binary. Локальная activation вернёт старые waiting bands
+   до запуска consumers, сохранив IDs, queued_at и уже известный hotfix
+
+Для возврата к предыдущему binary порядок другой
+
+1. Остановите intake, processors, retry, scheduler и административные записи.
+   Сохраните и проверьте полный backup
+2. **Новым checkout** выполните `uv run alembic downgrade a7b8c9d0e1f2` и проверьте
+   revision. Очередь, labels, история, timestamps и durable payloads остаются,
+   удаляется только производный automation bit
+3. Полностью удалите ключ `automation_labels` из project JSON, даже если он был
+   `[]`. Старый строгий config parser не знает ключ, старый Alembic не знает b8
+4. Запустите старый binary. Во время такого отката действуют прежние hotfix/FIFO
+   правила. Для возврата снова остановите writers, используйте новый checkout,
+   выполните `uv run alembic upgrade head` и запустите новую конфигурацию
+
+Fresh schema helpers создают current model. Startup проверяет уже существующую
+automation column перед legacy stamp, затем выполняет недостающие migrations.
+Это не blind stamp в head. SQLite queue high-water сохраняется на том же physical
+DDL connection, в том числе после удаления максимальной строки и старого batch
+rebuild. PG sequence не перематывается
+
+Граница a7↔f6 и все ограничения retry/DLQ archive выше остаются прежними. Новый
+bit не делает полный downgrade до base lossless для остальных managed tables
