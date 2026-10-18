@@ -55,11 +55,46 @@ reversal снимает derived automation bit, сохранённые labels и
 
 ## Итоговые проверки
 
-итоговые counts и команды будут записаны после завершения текущих общих прогонов и enabled commit hooks. промежуточные targeted результаты не подменяют full suite
+проверенный source checkpoint — `e3f5d58d2569405a0bd3c02e217166d441a9e10d`. последующее обновление этого отчёта меняет только документацию и measurement metadata
+
+| Проверка | Фактический результат |
+| --- | --- |
+| Full backend, default file/in-memory SQLite 3.50.4 и DB-free tests | 1412/1412 PASS, 0 failed, 0 skipped, 3m51s |
+| PostgreSQL CI-equivalent selector, PG 16.15 / asyncpg 0.31.0 | 415/415 PASS, 0 failed, 0 skipped, 7m35s. из них 388 используют настоящую БД, 27 — config/transport/other DB-free cases |
+| Final affected R3 contracts и четыре legacy fixture/oracle updates | 139/139 на каждой БД, 0 skip |
+| Legacy best-effort pagination | 17/17 PASS |
+| Frontend | 157 tests PASS, type-check/lint/build PASS. 8 прежних lint warnings и прежние bundle/index.css warnings остаются |
+| Normal commit hooks | Ruff, formatter, mypy, pyscn и backend-tests PASS. selector содержит 1145 scenarios по отдельной discovery-only проверке, она не считается runtime прогоном |
+| Отдельные quality checks | Ruff PASS, 1238 Python files formatted, mypy65 PASS, complexity/deadcode pyscn PASS |
+| Controlled races | 140 actual executions на SQLite и 140 на PG, по 14 сценариев с десятью seeds. выполнены до выделения pure helpers, финальный affected suite повторно проверил их контракты на обеих БД |
+| Focused mutants | 8 backend mutants killed в isolated SQLite copy. отдельно killed frontend client-sort mutant |
+| Actual old-binary rehearsal | PASS на обеих БД с окончательным `label_snapshot` payload, old parser reject нового ключа даже при `[]`, old read/write после удаления ключа, exact intents и reupgrade classification |
+
+backend mutants нарушали hotfix override, SQL hotfix band, strict pagination completeness, atomic metadata version CAS, startup barrier, older label source protection, independent label clock и missing-label guard. каждый пойман поведенческой assertion, import/runtime setup error не считался kill. сами guarded predicates после выделения pure helpers не менялись
+
+diagnostic full до legacy fixture updates дал SQLite 1406 PASS / 6 failures из 1412 и PG 411 PASS / 4 failures из 415. это не итоговые PASS. failures относились к восстановленному неполному test payload, старому f6 writer shape, timestamp-based FIFO oracle и SQLite TEMP-view exception boundary новой migration. fixtures обновлены под явные контракты, assertions exact data/history/high-water/refusal сохранены. окончательные общие прогоны в таблице выполнены после этих правок
+
+команды выполнялись из `backend`, `.venv` использует Python 3.13.7, SQLAlchemy 2.0.44 и Alembic 1.17.2
+
+```sh
+# default SQLite, без opt-in PostgreSQL environment
+.venv/bin/vedro run --verbose --fail-fast
+
+# PostgreSQL URL предоставлен безопасно через GITLAB_QUEUE_TEST_POSTGRES_URL
+# fixture создаёт и удаляет собственную gq_test_UUID database на каждый context
+.venv/bin/vedro run scenarios/core/hotfix_priority/ scenarios/core/automation_priority/ scenarios/core/database_migrations/ scenarios/core/storage_backends/ scenarios/integration/retry_manager/ scenarios/integration/repositories/ --verbose --fail-fast
+
+.venv/bin/ruff check src scenarios migrations
+.venv/bin/ruff format --check src scenarios migrations
+.venv/bin/mypy src
+pyscn check --select complexity,deadcode --skip-clones src/
+```
+
+normal Git commit вызвал существующий `backend/.pre-commit-config.yaml`, без bypass. frontend owner выполнил `npm run test:run`, `npm run type-check`, `npm run lint` и `npm run build`. финальные 69 frontend file hashes совпали с проверенной frozen копией. CI selector дополнен automation module, стандартный runner уже обнаруживает его через `scenarios/core/`
 
 ## Что реально измерено
 
-сырые measurements и emitted-SQL EXPLAIN сохранены в [JSON отчёте](evidence/automated-mr-priority-performance.json). host macOS 26.0.1 arm64, Python 3.13.7, file SQLite с WAL/FULL и PostgreSQL 16.15 arm64 в Docker. baseline извлечён из точного commit `c6b93df`, candidate — working tree фичи до двух R2 corrections и последующего поведения-сохраняющего выделения pure helpers для обязательного complexity gate. label-source merge и parser corrections лежат вне измеренных read/bulk/feedback workloads
+сырые measurements и emitted-SQL EXPLAIN сохранены в [JSON отчёте](evidence/automated-mr-priority-performance.json). host macOS 26.0.1 arm64, Python 3.13.7, file SQLite с WAL/FULL и PostgreSQL 16.15 arm64 в Docker. baseline извлечён из точного commit `c6b93df`, candidate — working tree фичи до двух R2 corrections и последующего выделения pure helpers без смены поведения для обязательного complexity gate. label-source merge и parser corrections лежат вне измеренных read/bulk/feedback workloads
 
 общий read matrix содержит N=0/1/10/100/101/201/1000 при P=1 и N=1000 при P=10, один heavy project и девять с одним MR. на каждую комбинацию active/next/no-op/ORM position собрано по 25 samples. candidate использует `automation_labels=[]` для сопоставления с прежним behavior. startup bulk C=0/1/N и pure classifier L/A=0/1/10/100 измерены отдельно, без выдачи setup/BEGIN/COMMIT за queries операции
 

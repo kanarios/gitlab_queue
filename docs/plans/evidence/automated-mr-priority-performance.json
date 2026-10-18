@@ -6251,7 +6251,6 @@
   "final_bulk_budget": {
     "sqlite": {
       "N": 1000,
-      "source_manifest": "/tmp/gq-automation-r3-source-hashes.json",
       "bulk": [
         {
           "N": 1000,
@@ -6332,11 +6331,17 @@
           "delivery": "not started by local activation"
         }
       ],
-      "purpose": "Verify SQL budget after pure activation-plan extraction, not a new baseline latency comparison"
+      "purpose": "Verify SQL budget after pure activation-plan extraction, not a new baseline latency comparison",
+      "source_commit": "e3f5d58d2569405a0bd3c02e217166d441a9e10d",
+      "source_sha256": {
+        "backend/src/gitlab_queue/config.py": "1f66e0d882b1747dab82cbe4e1245e632724ee7b071edae7531f9f3504d0e307",
+        "backend/src/gitlab_queue/core/queue.py": "b217d47fab060d50a31059d54c4f67de753e82831ebef5dc4ff62f6dd363b2de",
+        "backend/src/gitlab_queue/core/processor.py": "6fc66e54eec517b89f5f03e9269fc6a8a927fb9c9472b0dbeb1e7714b6c7b2eb",
+        "backend/src/gitlab_queue/clients/gitlab.py": "4b4ea5e0df363e73fb702786ade3b1a9e098bcf0c4d514d7d4e444df7343f111"
+      }
     },
     "pg": {
       "N": 1000,
-      "source_manifest": "/tmp/gq-automation-r3-source-hashes.json",
       "bulk": [
         {
           "N": 1000,
@@ -6417,7 +6422,14 @@
           "delivery": "not started by local activation"
         }
       ],
-      "purpose": "Verify SQL budget after pure activation-plan extraction, not a new baseline latency comparison"
+      "purpose": "Verify SQL budget after pure activation-plan extraction, not a new baseline latency comparison",
+      "source_commit": "e3f5d58d2569405a0bd3c02e217166d441a9e10d",
+      "source_sha256": {
+        "backend/src/gitlab_queue/config.py": "1f66e0d882b1747dab82cbe4e1245e632724ee7b071edae7531f9f3504d0e307",
+        "backend/src/gitlab_queue/core/queue.py": "b217d47fab060d50a31059d54c4f67de753e82831ebef5dc4ff62f6dd363b2de",
+        "backend/src/gitlab_queue/core/processor.py": "6fc66e54eec517b89f5f03e9269fc6a8a927fb9c9472b0dbeb1e7714b6c7b2eb",
+        "backend/src/gitlab_queue/clients/gitlab.py": "4b4ea5e0df363e73fb702786ade3b1a9e098bcf0c4d514d7d4e444df7343f111"
+      }
     }
   }
 }
