@@ -46,18 +46,18 @@ _Current processing continues. Priority applies to the waiting queue._
 
 **Status:** ⏳ Waiting in queue
 
-**Position:** {position} of {total} _(was {old_position})_
+{priority_line}**Position:** {position} of {total} _(was {old_position})_
 
 **Estimated wait:** ~{estimated_minutes} min
 
 ---
-_Your position changed because an MR's hotfix priority changed._
+_Your position changed because an MR's queue priority changed._
 """,
     "queued": """## 🤖 Merge Queue Bot
 
 **Status:** ⏳ Added to queue
 
-**Position:** {position} of {total}
+{priority_line}**Position:** {position} of {total}
 
 **Estimated wait:** ~{estimated_minutes} min
 
@@ -71,18 +71,18 @@ _Remove `{queue_label}` label to exit queue._
 
 **Status:** ⏳ Waiting in queue
 
-**Position:** {position} of {total} _(was {old_position})_
+{priority_line}**Position:** {position} of {total} _(was {old_position})_
 
 **Estimated wait:** ~{estimated_minutes} min
 
 ---
-_Your position changed because MRs ahead were processed._
+_{position_change_reason}_
 """,
     "position_changed_hotfix": """## 🤖 Merge Queue Bot
 
 **Status:** ⏳ Waiting in queue
 
-**Position:** {position} of {total} _(was {old_position})_
+{priority_line}**Position:** {position} of {total} _(was {old_position})_
 
 **Estimated wait:** ~{estimated_minutes} min
 
@@ -93,7 +93,7 @@ _Your position changed because a hotfix MR was inserted ahead._
 
 **Status:** ⏳ Waiting in queue
 
-**Position:** {position} of {total} _(queue size changed from {old_total})_
+{priority_line}**Position:** {position} of {total} _(queue size changed from {old_total})_
 
 **Estimated wait:** ~{estimated_minutes} min
 
@@ -104,7 +104,7 @@ _A new MR was added to the queue._
 
 **Status:** ⏳ Waiting in queue
 
-**Position:** {position} of {total} _(queue size changed from {old_total})_
+{priority_line}**Position:** {position} of {total} _(queue size changed from {old_total})_
 
 **Estimated wait:** ~{estimated_minutes} min
 
@@ -433,7 +433,11 @@ class MRNotifier:
                 position=position,
                 total=len(queue),
                 estimated_minutes=position * 15,
-                priority="Hotfix priority enabled" if item.is_hotfix else "Hotfix priority removed",
+                priority={
+                    "hotfix": "Hotfix priority enabled",
+                    "ordinary": "Ordinary priority",
+                    "automated": "Automated priority — after ordinary waiting MRs",
+                }[item.priority],
                 queued_at=item.queued_at,
             )
             note = await self._send_notification(mr_iid, status, **context)
@@ -509,6 +513,8 @@ class MRNotifier:
         # Add common context from settings
         full_context: dict[str, Any] = {
             "queue_label": self.settings.queue_label,
+            "priority_line": f"**Priority:** {context['priority']}\n\n" if context.get("priority") else "",
+            "position_change_reason": "Your position changed because MRs ahead were processed.",
             **context,
         }
 

@@ -61,12 +61,22 @@ def _extract_labels(labels: list[Any]) -> list[str]:
 
         if value is None:
             continue
-        value = value.strip()
-        if not value:
+        if not value.strip():
             continue
         extracted.append(value)
 
     return extracted
+
+
+def parse_labels_snapshot(labels: object) -> list[str]:
+    """Parse a complete authoritative label snapshot without dropping invalid members."""
+    if not isinstance(labels, list):
+        raise ValueError("A complete labels snapshot must be an array")
+    for label in labels:
+        value = label.get("name") or label.get("title") if isinstance(label, dict) else label
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("A complete labels snapshot contains an invalid name")
+    return _extract_labels(labels)
 
 
 # Retort for parsing GitLab API responses into dataclass models
@@ -323,15 +333,19 @@ def parse_merge_request_event(data: dict[str, Any]) -> MergeRequestEvent:
     """
     attrs = data["object_attributes"]
     user = data.get("user", {})
+    labels = _extract_labels(data.get("labels", []))
 
     # Extract label changes if present
     label_changes = None
     if "changes" in data and "labels" in data["changes"]:
         changes = data["changes"]["labels"]
         label_changes = LabelChanges(
-            previous=_extract_labels(changes.get("previous", [])),
-            current=_extract_labels(changes.get("current", [])),
+            previous=parse_labels_snapshot(changes.get("previous")),
+            current=parse_labels_snapshot(changes.get("current")),
         )
+        labels = parse_labels_snapshot(data.get("labels", changes["current"]))
+    elif attrs.get("action") in ("labeled", "unlabeled", "update"):
+        labels = parse_labels_snapshot(data.get("labels"))
 
     # Get SHA from last_commit if available
     last_commit = attrs.get("last_commit")
@@ -360,7 +374,7 @@ def parse_merge_request_event(data: dict[str, Any]) -> MergeRequestEvent:
         user_name=user.get("name", ""),
         user_username=user.get("username", ""),
         user_avatar=user.get("avatar_url"),
-        labels=_extract_labels(data.get("labels", [])),
+        labels=labels,
         label_changes=label_changes,
         message_id=data.get("_queue_webhook", {}).get("message_id"),
         event_uuid=data.get("_queue_webhook", {}).get("event_uuid"),

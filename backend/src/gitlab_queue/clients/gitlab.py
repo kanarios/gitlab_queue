@@ -31,7 +31,13 @@ from tenacity import (
 )
 
 from gitlab_queue.metrics import API_LATENCY, normalize_endpoint
-from gitlab_queue.models.retorts import parse_job, parse_merge_request, parse_note, parse_pipeline
+from gitlab_queue.models.retorts import (
+    parse_job,
+    parse_labels_snapshot,
+    parse_merge_request,
+    parse_note,
+    parse_pipeline,
+)
 from gitlab_queue.utils.circuit_breaker import (
     CircuitBreaker,
     CircuitOpenError,
@@ -841,6 +847,7 @@ class GitLabClient:
         params: dict[str, Any] | None = None,
         per_page: int = 100,
         max_pages: int = 50,
+        require_complete: bool = False,
     ) -> list[dict[str, Any]]:
         """Fetch all pages from a paginated GitLab API endpoint.
 
@@ -873,29 +880,21 @@ class GitLabClient:
             all_items.extend(items)
             fetched_pages += 1
 
-            next_page = response.headers.get("x-next-page", "")
+            header = response.headers.get("x-next-page")
+            # A missing pagination header on a full page is not evidence of completion.
+            next_page = (
+                str(page + 1) if require_complete and header is None and len(items) >= per_page else header or ""
+            )
             if not next_page:
                 break
-            try:
-                parsed_next_page = int(next_page)
-            except ValueError:
-                log.warning(
-                    "Non-numeric x-next-page header, stopping pagination",
-                    path=path,
-                    next_page=next_page,
-                )
-                break
-            if parsed_next_page <= page:
-                log.warning(
-                    "Non-advancing x-next-page, stopping pagination",
-                    path=path,
-                    current_page=page,
-                    next_page=parsed_next_page,
-                )
+            parsed_next_page = self._pagination_next_page(path, next_page, page, require_complete)
+            if parsed_next_page is None:
                 break
             page = parsed_next_page
 
         if fetched_pages >= max_pages and next_page:
+            if require_complete:
+                raise GitLabAPIError("Incomplete label discovery: pagination safety cap reached")
             log.warning(
                 "Pagination safety cap reached",
                 path=path,
@@ -904,6 +903,26 @@ class GitLabClient:
             )
 
         return all_items
+
+    def _pagination_next_page(self, path: str, header: str, page: int, require_complete: bool) -> int | None:
+        """Validate source progression, preserving legacy best-effort pagination."""
+        try:
+            next_page = int(header)
+        except ValueError:
+            if require_complete:
+                raise GitLabAPIError("Incomplete label discovery: invalid x-next-page header") from None
+            log.warning("Non-numeric x-next-page header, stopping pagination", path=path, next_page=header)
+            return None
+        if next_page <= page:
+            if require_complete:
+                raise GitLabAPIError("Incomplete label discovery: non-advancing x-next-page header")
+            log.warning(
+                "Non-advancing x-next-page, stopping pagination", path=path, current_page=page, next_page=next_page
+            )
+            return None
+        if require_complete and next_page != page + 1:
+            raise GitLabAPIError("Incomplete label discovery: skipped pagination page")
+        return next_page
 
     async def post(
         self,
@@ -998,7 +1017,7 @@ class GitLabClient:
         if include_diverged_commits_count:
             params["include_diverged_commits_count"] = "true"
         data = await self.get(f"/merge_requests/{iid}", params=params)
-        mr = parse_merge_request(data)
+        mr = self._parse_mr_snapshot(data)
         log.debug(
             "Fetched merge request",
             mr_iid=mr.iid,
@@ -1028,22 +1047,33 @@ class GitLabClient:
         """
         log.debug("Listing merge requests with label", label=label, state=state)
         self._project_access_verified = False
-        data = await self.get_list(
+        data = await self.get_all_pages(
             "/merge_requests",
+            require_complete=True,
             params={
                 "labels": label,
                 "state": state,
-                "per_page": 100,  # Max allowed by GitLab
             },
         )
         self._project_access_verified = True
-        mrs = [parse_merge_request(mr_data) for mr_data in data]
+        mrs = [self._parse_mr_snapshot(mr_data) for mr_data in data]
         log.debug(
             "Found merge requests with label",
             label=label,
             count=len(mrs),
         )
         return mrs
+
+    @staticmethod
+    def _parse_mr_snapshot(data: Any) -> MergeRequest:
+        """Classification/removal requires an explicit complete labels snapshot."""
+        if not isinstance(data, dict) or not isinstance(data.get("labels"), list):
+            raise GitLabAPIError("GitLab MR response has no complete labels snapshot")
+        try:
+            parse_labels_snapshot(data["labels"])
+        except ValueError as error:
+            raise GitLabAPIError("GitLab MR response has an invalid labels snapshot") from error
+        return parse_merge_request(data)
 
     async def rebase_mr(self, iid: int) -> bool:
         """Initiate a rebase operation for a merge request.

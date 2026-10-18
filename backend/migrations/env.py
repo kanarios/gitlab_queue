@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 from alembic import context
 from filelock import FileLock
-from sqlalchemy import pool, text
+from sqlalchemy import inspect, pool, text
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from gitlab_queue.config import load_settings
@@ -122,6 +122,35 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+def queue_high_water(connection: Connection) -> int | None:
+    """A current helper may already have issued IDs before legacy stamping."""
+    if connection.dialect.name != "sqlite" or not inspect(connection).has_table("sqlite_sequence"):
+        return None
+    return connection.execute(text("SELECT MAX(seq) FROM sqlite_sequence WHERE name = 'merge_requests'")).scalar()
+
+
+def restore_queue_high_water(connection: Connection, previous: int | None) -> None:
+    """Preserve issued queue identities across older batch rebuilds, in the DDL transaction."""
+    if previous is None:
+        return
+    definition = connection.execute(
+        text("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'merge_requests'")
+    ).scalar()
+    if definition is None or "AUTOINCREMENT" not in definition.upper():
+        return
+    connection.execute(
+        text(
+            "INSERT INTO sqlite_sequence(name, seq) SELECT 'merge_requests', :previous "
+            "WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = 'merge_requests')"
+        ),
+        {"previous": previous},
+    )
+    connection.execute(
+        text("UPDATE sqlite_sequence SET seq = MAX(seq, :previous) WHERE name = 'merge_requests'"),
+        {"previous": previous},
+    )
+
+
 def do_run_migrations(connection: Connection) -> None:
     """Execute migrations within a connection context."""
     transaction = nullcontext() if connection.in_transaction() else connection.begin()
@@ -140,7 +169,9 @@ def do_run_migrations(connection: Connection) -> None:
             include_name=include_name,
         )
         with context.begin_transaction():
+            previous_queue_id = queue_high_water(connection)
             context.run_migrations()
+            restore_queue_high_water(connection, previous_queue_id)
 
 
 async def run_async_migrations() -> None:

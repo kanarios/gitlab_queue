@@ -30,7 +30,7 @@ async def reversible_schema_matches_models():
                 health = await database.health_check()
 
         with then("the only migration head is restored without model drift or leftover application tables"):
-            assert heads == ["a7b8c9d0e1f2"]
+            assert heads == ["b8c9d0e1f2a3"]
             assert remaining == ["alembic_version"]
             assert current == heads[0]
             assert health.connected is True

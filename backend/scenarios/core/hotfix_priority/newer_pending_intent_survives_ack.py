@@ -30,7 +30,7 @@ async def newer_pending_intent_survives_ack():
                 await asyncio.wait_for(asyncio.gather(old_drain, removal), 5)
 
         with then("the newer intent repairs the comment to the current priority"):
-            assert "Hotfix priority removed" in env.server.notes[3]
+            assert "Ordinary priority" in env.server.notes[3]
             assert env.server.comment_methods == ["POST", "PUT"]
             item = await env.queue.get_queue_item(123, 3)
             assert item.is_hotfix is False

@@ -691,14 +691,14 @@ class MergeProcessor:
 
         log.info("State recovery complete")
 
-    async def _fetch_mrs_by_label(self, label: str) -> list[MergeRequest]:
+    async def _fetch_mrs_by_label(self, label: str) -> list[MergeRequest] | None:
         """Fetch open MRs with a given label, gracefully handling GitLab errors.
 
         Args:
             label: GitLab label to filter by.
 
         Returns:
-            List of MRs, empty if GitLab is unavailable.
+            Complete list of MRs, or None when discovery is incomplete/unavailable.
         """
         try:
             return await self.gitlab_client.list_mrs_with_label(label, state="opened")
@@ -706,7 +706,7 @@ class MergeProcessor:
             log.warning("GitLab circuit open, skipping label sync", label=label)
         except GitLabAPIError as e:
             log.warning("Failed to fetch MRs from GitLab during sync", label=label, error=str(e))
-        return []
+        return None
 
     async def _sync_missing_mrs_from_gitlab(self) -> None:
         """Add MRs that have the queue label in GitLab but aren't in the queue.
@@ -722,11 +722,15 @@ class MergeProcessor:
 
         queue_mrs = await self._fetch_mrs_by_label(self.settings.queue_label)
         hotfix_mrs = await self._fetch_mrs_by_label(self.settings.hotfix_label)
+        if queue_mrs is None or hotfix_mrs is None:
+            log.warning("Incomplete startup label discovery, preserving saved queue metadata")
+            await QueueMetadataUpdater(
+                self.queue_manager, self.settings.hotfix_label, self.position_notifier
+            ).retry_pending(self.settings.gitlab_project_id)
+            return
 
         # Merge without duplicates
-        mrs_dict = {mr.iid: mr for mr in queue_mrs}
-        for mr in hotfix_mrs:
-            mrs_dict[mr.iid] = mr
+        mrs_dict = {mr.iid: mr for mr in [*queue_mrs, *hotfix_mrs]}
         gitlab_mrs = list(mrs_dict.values())
         updater = QueueMetadataUpdater(self.queue_manager, self.settings.hotfix_label, self.position_notifier)
 
@@ -801,6 +805,7 @@ class MergeProcessor:
                         "target_branch": item.target_branch,
                         "status": item.state,
                         "is_hotfix": item.is_hotfix,
+                        "priority": item.priority,
                         "labels": item.labels,
                         "queued_at": item.queued_at.isoformat(),
                         "started_at": item.started_at.isoformat() if item.started_at else None,

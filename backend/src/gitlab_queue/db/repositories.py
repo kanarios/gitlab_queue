@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import and_, case, delete, func, select
+from sqlalchemy import Integer, and_, case, delete, func, literal_column, or_, select
 
 from gitlab_queue.db.models import (
     AnalyticsDailyModel,
@@ -27,6 +27,7 @@ from gitlab_queue.db.models import (
     MergeRequestModel,
 )
 from gitlab_queue.db.time_sql import TimestampEpoch
+from gitlab_queue.models.priority import PRIORITY_RANK_SQL, effective_priority, parse_saved_labels
 from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -39,6 +40,7 @@ if TYPE_CHECKING:
 
 
 log = get_logger(__name__)
+_QUEUE_PRIORITY_RANK = literal_column(PRIORITY_RANK_SQL, type_=Integer())
 
 
 # =============================================================================
@@ -162,7 +164,7 @@ class MergeRequestRepository:
     async def get_all_active(self) -> Sequence[MergeRequestModel]:
         """Get all MRs in active queue states.
 
-        Returns MRs ordered by hotfix priority (DESC) then queued_at (ASC).
+        Returns effective priority bands with original queue identity FIFO.
         """
         stmt = (
             select(MergeRequestModel)
@@ -170,7 +172,7 @@ class MergeRequestRepository:
                 MergeRequestModel.project_id == self._project_id,
                 MergeRequestModel.status.in_(ACTIVE_STATES),
             )
-            .order_by(MergeRequestModel.is_hotfix.desc(), MergeRequestModel.queued_at.asc())
+            .order_by(_QUEUE_PRIORITY_RANK, MergeRequestModel.id.asc())
         )
         result = await self._session.execute(stmt)
         return result.scalars().all()
@@ -183,7 +185,7 @@ class MergeRequestRepository:
         stmt = (
             select(MergeRequestModel)
             .where(MergeRequestModel.project_id == self._project_id, MergeRequestModel.status == "queued")
-            .order_by(MergeRequestModel.is_hotfix.desc(), MergeRequestModel.queued_at.asc())
+            .order_by(_QUEUE_PRIORITY_RANK, MergeRequestModel.id.asc())
             .limit(1)
         )
         result = await self._session.execute(stmt)
@@ -266,6 +268,10 @@ class MergeRequestRepository:
         if mr is None or mr.status not in ACTIVE_STATES:
             return None
 
+        rank = {"hotfix": 0, "ordinary": 1, "automated": 2}[
+            effective_priority(bool(mr.is_hotfix), bool(mr.is_automated))
+        ]
+
         # Count MRs ahead of this one
         stmt = (
             select(func.count())
@@ -274,10 +280,9 @@ class MergeRequestRepository:
                 and_(
                     MergeRequestModel.status.in_(ACTIVE_STATES),
                     MergeRequestModel.project_id == self._project_id,
-                    # Hotfixes come first, then by queued_at
-                    (
-                        (MergeRequestModel.is_hotfix > mr.is_hotfix)
-                        | ((MergeRequestModel.is_hotfix == mr.is_hotfix) & (MergeRequestModel.queued_at < mr.queued_at))
+                    or_(
+                        rank > _QUEUE_PRIORITY_RANK,
+                        and_(_QUEUE_PRIORITY_RANK.in_([rank]), MergeRequestModel.id < mr.id),
                     ),
                 )
             )
@@ -1124,12 +1129,7 @@ class ModelConverter:
         started_at = datetime.fromisoformat(mr.started_at) if mr.started_at else None
         finished_at = datetime.fromisoformat(mr.finished_at) if mr.finished_at else None
 
-        labels: list[str] = []
-        if mr.labels:
-            try:
-                labels = json.loads(mr.labels)
-            except (json.JSONDecodeError, TypeError):
-                labels = []
+        labels = parse_saved_labels(mr.labels) or []
 
         return QI(
             mr_iid=mr.iid,
@@ -1141,6 +1141,7 @@ class ModelConverter:
             queued_at=queued_at,
             project_id=mr.project_id,
             is_hotfix=bool(mr.is_hotfix),
+            is_automated=bool(mr.is_automated),
             author_avatar=mr.author_avatar,
             labels=labels,
             started_at=started_at,
@@ -1161,12 +1162,7 @@ class ModelConverter:
         started_at = datetime.fromisoformat(history.started_at) if history.started_at else None
         finished_at = datetime.fromisoformat(history.finished_at) if history.finished_at else None
 
-        labels: list[str] = []
-        if history.labels:
-            try:
-                labels = json.loads(history.labels)
-            except (json.JSONDecodeError, TypeError):
-                labels = []
+        labels = parse_saved_labels(history.labels) or []
 
         return QI(
             mr_iid=history.iid,

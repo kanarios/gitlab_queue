@@ -192,6 +192,9 @@ class FakeQueueManager:
                 setattr(item, key, value)
         return True
 
+    def classify_labels(self, project_id: int, labels: list[str], is_hotfix: bool = False) -> tuple[bool, bool]:
+        return is_hotfix, False
+
     async def update_hotfix_status(
         self,
         project_id: int,
@@ -202,6 +205,7 @@ class FakeQueueManager:
         expected_revision: tuple[int, int] | None = None,
         notify_positions: bool = False,
         admission_key: str | None = None,
+        is_automated: bool | None = None,
     ) -> bool:
         self.update_hotfix_calls.append(
             {
@@ -217,6 +221,7 @@ class FakeQueueManager:
         if expected_revision is not None and expected_revision != (item.queue_id, item.metadata_version):
             return False
         item.is_hotfix = is_hotfix
+        item.is_automated = bool(is_automated)
         item.labels = labels
         item.metadata_version += 1
         return True

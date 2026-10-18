@@ -34,6 +34,9 @@ async def supplied_connection_shadows_cannot_capture_or_ack_in_nondurable_relati
             original = await raw_rows(url, "webhook_retry_queue")
             if direction == "upgrade":
                 await asyncio.to_thread(command.downgrade, config, "f6a7b8c9d0e1")
+            else:
+                # Exercise the frozen archive boundary before introducing unsupported TEMP views.
+                await asyncio.to_thread(command.downgrade, config, "a7b8c9d0e1f2")
             engine = create_async_engine(url, poolclass=NullPool)
 
         try:

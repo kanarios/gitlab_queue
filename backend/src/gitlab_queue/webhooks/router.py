@@ -28,6 +28,7 @@ from gitlab_queue.api.routes import (
     history_router,
     projects_router,
 )
+from gitlab_queue.api.schemas import ActiveQueueItemSchema, ActiveQueueResponseSchema, QueueStatusResponseSchema
 from gitlab_queue.api.websocket import WebSocketManager, ws_router
 from gitlab_queue.auth.middleware import AuthenticationMiddleware
 from gitlab_queue.auth.routes import auth_router
@@ -844,8 +845,8 @@ def _dlq_stats_to_dict(stats: DLQStats) -> dict[str, Any]:
 queue_router = APIRouter(prefix="/api/queue", tags=["queue"])
 
 
-@queue_router.get("")
-@projects_router.get("/{project_id}/queue")
+@queue_router.get("", response_model=QueueStatusResponseSchema)
+@projects_router.get("/{project_id}/queue", response_model=QueueStatusResponseSchema)
 async def get_queue_status(request: Request) -> dict[str, Any]:
     """Get complete queue status for dashboard.
 
@@ -869,13 +870,13 @@ async def get_queue_status(request: Request) -> dict[str, Any]:
 
     return {
         "queue": [_queue_item_to_dict(item, position=idx + 1) for idx, item in enumerate(active_queue)],
-        "history": [_queue_item_to_dict(item) for item in recent_history],
+        "history": [_queue_item_to_dict(item, include_priority=False) for item in recent_history],
         "stats": _dashboard_stats_to_dict(dashboard_stats, current_stats),
     }
 
 
-@queue_router.get("/active")
-@projects_router.get("/{project_id}/queue/active")
+@queue_router.get("/active", response_model=ActiveQueueResponseSchema)
+@projects_router.get("/{project_id}/queue/active", response_model=ActiveQueueResponseSchema)
 async def get_active_queue(request: Request) -> dict[str, Any]:
     """Get only the active queue items.
 
@@ -920,8 +921,8 @@ async def get_queue_statistics(request: Request) -> dict[str, Any]:
     return _dashboard_stats_to_dict(dashboard_stats, current_stats)
 
 
-@queue_router.get("/{mr_iid}")
-@projects_router.get("/{project_id}/queue/{mr_iid}")
+@queue_router.get("/{mr_iid}", response_model=ActiveQueueItemSchema)
+@projects_router.get("/{project_id}/queue/{mr_iid}", response_model=ActiveQueueItemSchema)
 async def get_queue_item(request: Request, mr_iid: int) -> dict[str, Any]:
     """Get a specific MR's queue status.
 
@@ -948,7 +949,9 @@ async def get_queue_item(request: Request, mr_iid: int) -> dict[str, Any]:
     return _queue_item_to_dict(item, position=position)
 
 
-def _queue_item_to_dict(item: QueueItem, position: int | None = None) -> dict[str, Any]:
+def _queue_item_to_dict(
+    item: QueueItem, position: int | None = None, *, include_priority: bool = True
+) -> dict[str, Any]:
     """Convert QueueItem to dict for JSON response.
 
     Args:
@@ -977,6 +980,8 @@ def _queue_item_to_dict(item: QueueItem, position: int | None = None) -> dict[st
     }
 
     # Add position for active queue items
+    if include_priority:
+        result["priority"] = item.priority
     if position is not None:
         result["position"] = position
 

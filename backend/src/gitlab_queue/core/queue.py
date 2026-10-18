@@ -7,8 +7,12 @@ FIFO ordering with hotfix priority support.
 from __future__ import annotations
 
 import json
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
+from time import monotonic
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -18,15 +22,18 @@ from gitlab_queue.db.time_sql import epoch_sql, utc_now
 from gitlab_queue.metrics import OPERATIONS_TOTAL
 from gitlab_queue.models.completion import CompletionRequest, requeue_is_cancelled
 from gitlab_queue.models.event_order import compare_event, definitely_before, preserve_uncertainty
+from gitlab_queue.models.priority import PRIORITY_RANK_SQL, effective_priority, parse_saved_labels
 from gitlab_queue.models.queue_item import DashboardStats, QueueItem
 from gitlab_queue.utils.logging import get_logger
 
 if TYPE_CHECKING:
     from asyncio import Lock
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping, Sequence
 
     from sqlalchemy import RowMapping
+    from sqlalchemy.ext.asyncio import AsyncSession
 
+    from gitlab_queue.config import ProjectConfig
     from gitlab_queue.db.database import Database
     from gitlab_queue.models.mr import MergeRequest
 
@@ -53,11 +60,11 @@ _JSON_SERIALIZED_FIELDS = frozenset({"retried_jobs"})
 _INSERT_MR_SQL = """
 INSERT INTO merge_requests (
     project_id, iid, title, author_name, author_username, author_avatar,
-    status, is_hotfix, labels, target_branch, queued_at
+    status, is_hotfix, is_automated, labels, target_branch, queued_at
 )
 VALUES (
     :project_id, :iid, :title, :author_name, :author_username, :author_avatar,
-    'queued', :is_hotfix, :labels, :target_branch, :queued_at
+    'queued', :is_hotfix, :is_automated, :labels, :target_branch, :queued_at
 )
 ON CONFLICT(project_id, iid) DO NOTHING
 """
@@ -77,13 +84,18 @@ _SELECT_ACTIVE_QUEUE_PROJECT_SQL = (
 """
 )
 
-_SELECT_ACTIVE_QUEUE_ORDER_SQL = """ORDER BY is_hotfix DESC, id ASC
-"""
+_SELECT_ACTIVE_QUEUE_ORDER_SQL = f"ORDER BY {PRIORITY_RANK_SQL}, id ASC\n"
 
-_SELECT_NEXT_MR_SQL = """
+_SELECT_PRIORITY_METADATA_SQL = (
+    "SELECT id, iid, status, is_hotfix, is_automated, labels, metadata_version, pending_completion "
+    "FROM merge_requests WHERE project_id = :project_id "
+    "AND status IN ('queued', 'rebasing', 'testing', 'merging') " + _SELECT_ACTIVE_QUEUE_ORDER_SQL
+)
+
+_SELECT_NEXT_MR_SQL = f"""
 SELECT * FROM merge_requests
 WHERE status = 'queued' AND project_id = :project_id
-ORDER BY is_hotfix DESC, id ASC
+ORDER BY {PRIORITY_RANK_SQL}, id ASC
 LIMIT 1
 """
 
@@ -181,11 +193,11 @@ DELETE FROM merge_requests WHERE iid = :iid AND project_id = :project_id
 
 _UPDATE_HOTFIX_STATUS_SQL = """
 UPDATE merge_requests
-SET is_hotfix = :is_hotfix, labels = :labels, metadata_version = metadata_version + 1
+SET is_hotfix = :is_hotfix, is_automated = :is_automated, labels = :labels, metadata_version = metadata_version + 1
 WHERE iid = :iid AND project_id = :project_id
   AND status IN ('queued', 'rebasing', 'testing', 'merging')
   AND (CAST(:expected_id AS INTEGER) IS NULL OR (id = :expected_id AND metadata_version = :expected_version))
-  AND (is_hotfix != :is_hotfix OR COALESCE(labels, '[]') != :labels)
+  AND (is_hotfix != :is_hotfix OR is_automated != :is_automated OR COALESCE(labels, '[]') != :labels)
 """
 
 
@@ -290,7 +302,130 @@ class QueueManager:
 
     db: Database
     clock: Callable[[], datetime] = utc_now
+    project_policies: Mapping[int, ProjectConfig] | None = field(default=None, repr=False)
+    _automation_labels: dict[int, frozenset[str]] = field(default_factory=dict, init=False, repr=False)
     _cache: QueueCache = field(default_factory=QueueCache, init=False)
+
+    def __post_init__(self) -> None:
+        if self.project_policies is not None:
+            self.project_policies = MappingProxyType(dict(self.project_policies))
+            self._automation_labels = {
+                project_id: frozenset(policy.automation_labels) for project_id, policy in self.project_policies.items()
+            }
+
+    def classify_labels(self, project_id: int, labels: list[str], is_hotfix: bool = False) -> tuple[bool, bool]:
+        """Resolve current project facts without I/O; standalone legacy callers retain explicit hotfix."""
+        if self.project_policies is None:
+            return is_hotfix, False
+        policy = self.project_policies.get(project_id)
+        if policy is None:
+            raise ValueError(f"No priority policy configured for project {project_id}")
+        names = self._automation_labels[project_id]
+        return policy.hotfix_label in labels, bool(names) and any(label in names for label in labels)
+
+    async def activate_priorities(self, project_id: int) -> dict[str, Any]:
+        """Apply the startup policy locally, staging feedback only for the final order.
+
+        All runtime writers must remain behind the application startup barrier.
+        Saved labels may be incomplete, so known hotfix facts are preserved.
+        """
+        if self.project_policies is None or project_id not in self.project_policies:
+            raise ValueError(f"No priority policy configured for project {project_id}")
+        started = monotonic()
+        names = self._automation_labels[project_id]
+        async with self.metadata_lock(project_id), self.db.transaction() as session:
+            result = await session.execute(text(_SELECT_PRIORITY_METADATA_SQL), {"project_id": project_id})
+            before_rows = result.mappings().all()
+            before = {row["iid"]: pos for pos, row in enumerate(before_rows, 1) if row["status"] == "queued"}
+            before_classes = Counter(
+                effective_priority(bool(row["is_hotfix"]), bool(row["is_automated"])) for row in before_rows
+            )
+            updates, changed_priority, unknown, skipped = self._activation_plan(before_rows, names)
+            for values in updates:
+                updated = await session.execute(
+                    text(
+                        "UPDATE merge_requests SET is_automated = :automated, metadata_version = metadata_version + 1 "
+                        "WHERE project_id = :project_id AND id = :id AND metadata_version = :version "
+                        "AND pending_completion IS NULL"
+                    ),
+                    {**values, "project_id": project_id},
+                )
+                if updated.rowcount != 1:  # type: ignore[attr-defined]
+                    raise QueueError("Priority activation conflicted with a runtime writer")
+            result = await session.execute(text(_SELECT_PRIORITY_METADATA_SQL), {"project_id": project_id})
+            after_rows = result.mappings().all()
+            await self._stage_priority_feedback(session, project_id, before, after_rows, changed_priority)
+            after_classes = Counter(
+                effective_priority(bool(row["is_hotfix"]), bool(row["is_automated"])) for row in after_rows
+            )
+        changed = len(updates)
+        if changed:
+            self._cache.invalidate()
+        summary = {
+            "policy_label_count": len(names),
+            "policy_fingerprint": sha256(json.dumps(sorted(names)).encode()).hexdigest()[:12],
+            "scanned": len(before_rows),
+            "changed": changed,
+            "skipped": skipped,
+            "unknown_snapshots": unknown,
+            "before": dict(before_classes),
+            "after": dict(after_classes),
+            "duration_seconds": monotonic() - started,
+        }
+        log.info("Local project priority activation complete", project_id=project_id, **summary)
+        return summary
+
+    def _activation_plan(
+        self, rows: Sequence[RowMapping], names: frozenset[str]
+    ) -> tuple[list[dict[str, Any]], set[int], int, int]:
+        """Classify one saved snapshot before any writes; preserve hotfix and terminal ownership."""
+        updates = []
+        changed_priority: set[int] = set()
+        unknown = skipped = 0
+        for row in rows:
+            if row["pending_completion"] is not None:
+                skipped += 1
+                continue
+            labels = parse_saved_labels(row["labels"])
+            if labels is None:
+                unknown += 1
+                labels = []
+            automated = bool(names) and any(label in names for label in labels)
+            if bool(row["is_automated"]) == automated:
+                continue
+            updates.append({"automated": int(automated), "id": row["id"], "version": row["metadata_version"]})
+            if not row["is_hotfix"]:
+                changed_priority.add(row["iid"])
+        return updates, changed_priority, unknown, skipped
+
+    async def _stage_priority_feedback(
+        self,
+        session: AsyncSession,
+        project_id: int,
+        before: dict[int, int],
+        after: Sequence[RowMapping],
+        changed_priority: set[int],
+    ) -> None:
+        for position, row in enumerate(after, 1):
+            previous = before.get(row["iid"])
+            if row["status"] != "queued" or previous is None:
+                continue
+            if row["iid"] not in changed_priority and previous == position:
+                continue
+            pending = json.dumps(
+                {
+                    "token": uuid4().hex,
+                    "status": "priority_changed" if row["iid"] in changed_priority else "position_changed_priority",
+                    "old_position": previous,
+                }
+            )
+            await session.execute(
+                text(
+                    "UPDATE merge_requests SET pending_notification = :pending "
+                    "WHERE project_id = :project_id AND id = :id"
+                ),
+                {"pending": pending, "project_id": project_id, "id": row["id"]},
+            )
 
     def metadata_lock(self, project_id: int) -> Lock:
         """Serialize metadata changes and their feedback across all entrypoints."""
@@ -339,6 +474,7 @@ class QueueManager:
         """
         now = datetime.now(UTC)
         labels_json = json.dumps(mr.labels)
+        is_hotfix, is_automated = self.classify_labels(project_id, mr.labels, is_hotfix)
 
         log.debug(
             "Adding MR to queue",
@@ -383,6 +519,7 @@ class QueueManager:
                         "author_username": mr.author.username,
                         "author_avatar": mr.author.avatar_url,
                         "is_hotfix": 1 if is_hotfix else 0,
+                        "is_automated": int(is_automated),
                         "labels": labels_json,
                         "target_branch": mr.target_branch,
                         "queued_at": now.isoformat(),
@@ -705,6 +842,7 @@ class QueueManager:
         expected_revision: tuple[int, int] | None = None,
         notify_positions: bool = False,
         admission_key: str | None = None,
+        is_automated: bool | None = None,
     ) -> bool:
         """Update the hotfix status and labels of an MR in the queue.
 
@@ -731,6 +869,9 @@ class QueueManager:
         )
 
         labels_json = json.dumps(labels)
+        is_hotfix, automated = self.classify_labels(project_id, labels, is_hotfix)
+        if self.project_policies is None and is_automated is not None:
+            automated = is_automated
 
         async with self.db.transaction() as session:
             before: dict[int, int] = {}
@@ -744,6 +885,7 @@ class QueueManager:
                 "iid": mr_iid,
                 "project_id": project_id,
                 "is_hotfix": 1 if is_hotfix else 0,
+                "is_automated": int(automated),
                 "labels": labels_json,
                 "expected_id": expected_revision[0] if expected_revision else None,
                 "expected_version": expected_revision[1] if expected_revision else None,
@@ -756,23 +898,7 @@ class QueueManager:
                     text(_SELECT_ACTIVE_QUEUE_PROJECT_SQL + _SELECT_ACTIVE_QUEUE_ORDER_SQL),
                     {"project_id": project_id},
                 )
-                for pos, row in enumerate(rows.mappings(), 1):
-                    old_position = before.get(row["iid"])
-                    if row["status"] != "queued" or old_position is None:
-                        continue
-                    if row["iid"] != mr_iid and old_position == pos:
-                        continue
-                    pending = json.dumps(
-                        {
-                            "token": uuid4().hex,
-                            "status": "priority_changed" if row["iid"] == mr_iid else "position_changed_priority",
-                            "old_position": old_position,
-                        }
-                    )
-                    await session.execute(
-                        text("UPDATE merge_requests SET pending_notification = :pending WHERE id = :id"),
-                        {"pending": pending, "id": row["id"]},
-                    )
+                await self._stage_priority_feedback(session, project_id, before, rows.mappings().all(), {mr_iid})
 
         if changed:
             self._cache.invalidate()
@@ -1003,6 +1129,77 @@ class QueueManager:
                 # A separate writer changed the token. Reread and compare source
                 # order rather than acknowledging a zero-row conditional write.
 
+    async def refresh_requeue_labels(
+        self,
+        project_id: int,
+        queue_id: int,
+        labels: list[str],
+        event_at: datetime | None,
+        *,
+        precision_us: int = 1,
+        allow_active: bool = False,
+    ) -> bool:
+        """Refresh an admitted generation's labels without renewing its admission.
+
+        Cleanup may temporarily remove its desired triggers from GitLab. Those
+        remain owned by the explicit request. An overlapping source interval
+        retains both label snapshots, like the existing enqueue merge contract.
+        """
+        source = {"requested_at": event_at.isoformat() if event_at is not None else None, "precision_us": precision_us}
+        async with self.db.queue_intent_lock(project_id, queue_id):
+            while True:
+                async with self.db.transaction() as session:
+                    result = await session.execute(
+                        text(
+                            "SELECT requeue_request FROM merge_requests WHERE project_id = :project_id AND id = :id AND (pending_completion IS NOT NULL OR (:allow_active = 1 AND status IN ('queued', 'rebasing', 'testing', 'merging')))"
+                        ),
+                        {"project_id": project_id, "id": queue_id, "allow_active": int(allow_active)},
+                    )
+                    row = result.first()
+                    if row is None:
+                        return False
+                    saved = row[0]
+                    if saved is None:
+                        return True
+                    pending = json.loads(saved)
+                    if pending.get("cancelled_events"):
+                        return True
+                    previous_source = pending.get("label_snapshot", pending)
+                    order = compare_event(source, previous_source)
+                    if order < 0:
+                        return True
+                    merged, clock = self._refresh_label_snapshot(pending, labels, source, previous_source, order)
+                    pending["params"]["labels"] = json.dumps(merged)
+                    pending["label_snapshot"] = clock
+                    encoded = json.dumps(pending)
+                    if encoded == saved:
+                        return True
+                    result = await session.execute(
+                        text(
+                            "UPDATE merge_requests SET requeue_request = :pending WHERE project_id = :project_id AND id = :id AND requeue_request = :saved AND (pending_completion IS NOT NULL OR (:allow_active = 1 AND status IN ('queued', 'rebasing', 'testing', 'merging'))) RETURNING id"
+                        ),
+                        {
+                            "pending": encoded,
+                            "project_id": project_id,
+                            "id": queue_id,
+                            "saved": saved,
+                            "allow_active": int(allow_active),
+                        },
+                    )
+                    if result.first() is not None:
+                        return True
+
+    def _refresh_label_snapshot(
+        self, pending: dict[str, Any], labels: list[str], source: dict[str, Any], previous: dict[str, Any], order: int
+    ) -> tuple[list[str], dict[str, Any]]:
+        """Merge an automation-only snapshot without renewing desired admission triggers."""
+        merged = list(dict.fromkeys([*pending["triggers"], *labels]))
+        clock = dict(source)
+        if order == 0:
+            merged = list(dict.fromkeys([*json.loads(pending["params"]["labels"]), *merged]))
+            preserve_uncertainty(clock, previous)
+        return merged, clock
+
     def _merge_requeue(
         self, incoming: dict[str, Any], previous: dict[str, Any], order: int, cancelling: bool
     ) -> dict[str, Any]:
@@ -1010,23 +1207,40 @@ class QueueManager:
             pending = {**previous, **incoming, "cancelled_events": [incoming["requested_at"]]}
         else:
             pending = dict(incoming)
+            pending["params"] = dict(incoming["params"])
             if order == 0 and previous and not previous.get("cancelled_events"):
                 preserve_uncertainty(pending, previous)
                 pending["triggers"] = list(dict.fromkeys([*previous["triggers"], *incoming["triggers"]]))
                 pending["params"]["is_hotfix"] = int(
                     bool(previous["params"]["is_hotfix"] or incoming["params"]["is_hotfix"])
                 )
-                pending["params"]["labels"] = json.dumps(
-                    list(
-                        dict.fromkeys(
-                            [
-                                *json.loads(previous["params"]["labels"]),
-                                *json.loads(incoming["params"]["labels"]),
-                            ]
-                        )
-                    )
-                )
+            labels, clock = self._requeue_label_snapshot(incoming, previous)
+            pending["params"]["labels"] = json.dumps(list(dict.fromkeys([*pending["triggers"], *labels])))
+            pending["label_snapshot"] = clock
         return pending
+
+    def _requeue_label_snapshot(
+        self, incoming: dict[str, Any], previous: dict[str, Any]
+    ) -> tuple[list[str], dict[str, Any]]:
+        """Order full labels independently from explicit admission provenance."""
+        source = incoming.get("label_snapshot", incoming)
+        clock = {"requested_at": source.get("requested_at"), "precision_us": source.get("precision_us", 1)}
+        labels: list[str] = json.loads(incoming["params"]["labels"])
+        if previous.get("params") is None or previous.get("cancelled_events"):
+            return labels, clock
+
+        old_source = previous.get("label_snapshot", previous)
+        order = compare_event(source, old_source)
+        if order < 0:
+            labels = json.loads(previous["params"]["labels"])
+            clock = {
+                "requested_at": old_source.get("requested_at"),
+                "precision_us": old_source.get("precision_us", 1),
+            }
+        elif order == 0:
+            labels = list(dict.fromkeys([*json.loads(previous["params"]["labels"]), *labels]))
+            preserve_uncertainty(clock, old_source)
+        return labels, clock
 
     async def cancel_requeue(
         self,
@@ -1109,9 +1323,12 @@ class QueueManager:
             )
             requeue = json.loads(item.requeue_request) if item.requeue_request is not None else None
             if requeue is not None and not requeue_is_cancelled(requeue, payload["label_events"]):
-                await session.execute(
-                    text(_INSERT_MR_SQL), {**requeue["params"], "queued_at": datetime.now(UTC).isoformat()}
+                params = dict(requeue["params"])
+                hotfix, automated = self.classify_labels(
+                    project_id, json.loads(params["labels"]), bool(params["is_hotfix"])
                 )
+                params.update(is_hotfix=int(hotfix), is_automated=int(automated))
+                await session.execute(text(_INSERT_MR_SQL), {**params, "queued_at": datetime.now(UTC).isoformat()})
                 await session.execute(
                     text(
                         "UPDATE merge_requests SET pending_notification = :pending, ignored_label_events = :ignored WHERE project_id = :project_id AND iid = :iid"
@@ -1445,23 +1662,11 @@ class QueueManager:
             finished_at = datetime.fromisoformat(finished_at)
 
         labels_raw = row.get("labels")
-        labels: list[str]
-        if labels_raw is None:
+        labels = parse_saved_labels(labels_raw)
+        if labels is None:
+            if labels_raw:
+                log.warning("Unknown saved labels snapshot, using empty list", mr_iid=row.get("iid"))
             labels = []
-        elif isinstance(labels_raw, str):
-            if not labels_raw:
-                labels = []
-            else:
-                try:
-                    labels = json.loads(labels_raw)
-                except json.JSONDecodeError:
-                    log.warning(
-                        "Invalid JSON in labels column, using empty list",
-                        mr_iid=row.get("iid"),
-                    )
-                    labels = []
-        else:
-            labels = labels_raw
 
         retried_jobs_raw = row.get("retried_jobs")
         retried_jobs: dict[str, int]
@@ -1484,6 +1689,7 @@ class QueueManager:
             queued_at=queued_at,
             project_id=row.get("project_id", 0),
             is_hotfix=bool(row.get("is_hotfix", 0)),
+            is_automated=bool(row.get("is_automated", 0)),
             author_avatar=row.get("author_avatar"),
             labels=labels,
             started_at=started_at,

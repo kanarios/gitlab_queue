@@ -38,6 +38,7 @@ class MergeRequestModel(Base):
     author_avatar: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="queued", server_default="queued")
     is_hotfix: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    is_automated: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     labels: Mapped[str | None] = mapped_column(Text, nullable=True)
     metadata_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     pending_notification: Mapped[str | None] = mapped_column(Text, nullable=True)

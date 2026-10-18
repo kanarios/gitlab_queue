@@ -40,5 +40,5 @@ async def already_at_head_startup_waits_for_raw_downgrade_then_restores():
             with then("one common gate protects classification through DDL without self-deadlock"):
                 assert premature is None
                 assert upgraded is True
-                assert revision == "a7b8c9d0e1f2"
+                assert revision == "b8c9d0e1f2a3"
                 assert restored == original

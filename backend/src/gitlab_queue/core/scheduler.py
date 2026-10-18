@@ -368,6 +368,7 @@ class QueueScheduler:
                         "target_branch": item.target_branch,
                         "status": item.state,
                         "is_hotfix": item.is_hotfix,
+                        "priority": item.priority,
                         "labels": item.labels,
                         "queued_at": item.queued_at.isoformat(),
                         "started_at": item.started_at.isoformat() if item.started_at else None,

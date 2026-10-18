@@ -8,6 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from gitlab_queue.models.priority import QueuePriority, effective_priority
+
 if TYPE_CHECKING:
     from datetime import datetime
 
@@ -59,6 +61,7 @@ class QueueItem:
     # Optional fields (with defaults)
     project_id: int = 0
     is_hotfix: bool = False
+    is_automated: bool = False
     author_avatar: str | None = None
     labels: list[str] = field(default_factory=list)
     started_at: datetime | None = None
@@ -77,6 +80,10 @@ class QueueItem:
     pending_completion: str | None = None
     requeue_request: str | None = None
     ignored_label_events: list[str] = field(default_factory=list)
+
+    @property
+    def priority(self) -> QueuePriority:
+        return effective_priority(self.is_hotfix, self.is_automated)
 
     def get_max_job_retry_count(self) -> int:
         """Return the highest retry count across all retried jobs.

@@ -19,7 +19,7 @@ import asyncio
 import contextlib
 import sys
 from dataclasses import dataclass
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import environ
 import uvicorn
@@ -46,6 +46,9 @@ from gitlab_queue.webhooks.retry_manager import WebhookRetryManager
 from gitlab_queue.webhooks.retry_processor import WebhookRetryProcessor, create_retry_processor
 
 log = get_logger(__name__)
+
+if TYPE_CHECKING:
+    import httpx
 
 
 # Exit codes
@@ -181,7 +184,9 @@ async def initialize_database_with_retry(
             delay = min(delay * 2, max_delay)
 
 
-async def create_application(settings: Settings) -> Application:
+async def create_application(
+    settings: Settings, *, gitlab_transport: httpx.AsyncBaseTransport | None = None
+) -> Application:
     """Initialize all application components with graceful degradation.
 
     Components are initialized in dependency order:
@@ -234,7 +239,10 @@ async def create_application(settings: Settings) -> Application:
     await run_migrations(settings.database_url)
 
     # 4. Initialize shared queue manager
-    queue_manager = QueueManager(db=database)
+    queue_manager = QueueManager(db=database, project_policies={p.project_id: p for p in project_configs})
+    # No intake, retry, completion recovery or processing task may see a partially activated policy.
+    for project_config in project_configs:
+        await queue_manager.activate_priorities(project_config.project_id)
 
     # 5. Initialize per-project components
     project_components: dict[int, ProjectComponents] = {}
@@ -245,6 +253,7 @@ async def create_application(settings: Settings) -> Application:
             settings=settings,
             queue_manager=queue_manager,
             shutdown_manager=shutdown_manager,
+            gitlab_transport=gitlab_transport,
         )
         project_components[project_config.project_id] = pc
         health.gitlab_by_project[project_config.project_id] = pc.health
@@ -301,6 +310,7 @@ async def _create_project_components(
     settings: Settings,
     queue_manager: QueueManager,
     shutdown_manager: ShutdownManager,
+    gitlab_transport: httpx.AsyncBaseTransport | None = None,
 ) -> ProjectComponents:
     """Create per-project components (GitLabClient, processor, scheduler).
 
@@ -318,7 +328,7 @@ async def _create_project_components(
     runtime_settings = cast("Settings", project_settings)
 
     # Create per-project GitLab client
-    gitlab_client = GitLabClient.for_project(project_config, settings)
+    gitlab_client = GitLabClient.for_project(project_config, settings, transport=gitlab_transport)
     shutdown_manager.register_component(f"gitlab_client_p{pid}", gitlab_client.close)
 
     # Verify GitLab access

@@ -20,6 +20,8 @@ export interface PipelineInfo {
   status: string | null;
 }
 
+export type QueuePriority = 'hotfix' | 'ordinary' | 'automated';
+
 export interface MergeRequest {
   project_id?: number;
   mr_iid: number;
@@ -28,6 +30,8 @@ export interface MergeRequest {
   status: MRStatus;
   labels: string[];
   is_hotfix: boolean;
+  /** Effective priority from active snapshots. Optional for legacy servers and history. */
+  priority?: QueuePriority;
   queued_at: string;
   started_at: string | null;
   finished_at: string | null;
@@ -65,9 +69,24 @@ export type WebSocketState = 'connecting' | 'connected' | 'disconnected' | 'erro
  * Note: Backend uses camelCase for field names (oldStatus, newStatus, finishedAt, failureReason).
  */
 export type WSEvent =
-  | { type: 'queue:updated'; data: { project_id: number; queue: MergeRequest[]; stats: QueueStatsFromWS } }
-  | { type: 'mr:status_changed'; data: { project_id: number; iid: number; oldStatus: string; newStatus: string } }
-  | { type: 'mr:completed'; data: { project_id: number; iid: number; status: string; finishedAt: string; failureReason: string | null } };
+  | {
+      type: 'queue:updated';
+      data: { project_id: number; queue: MergeRequest[]; stats: QueueStatsFromWS };
+    }
+  | {
+      type: 'mr:status_changed';
+      data: { project_id: number; iid: number; oldStatus: string; newStatus: string };
+    }
+  | {
+      type: 'mr:completed';
+      data: {
+        project_id: number;
+        iid: number;
+        status: string;
+        finishedAt: string;
+        failureReason: string | null;
+      };
+    };
 
 export function isQueueUpdatedEvent(
   event: WSEvent

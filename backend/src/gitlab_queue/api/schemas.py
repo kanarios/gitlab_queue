@@ -12,9 +12,11 @@ Example:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, NotRequired, TypedDict, cast
 
 from adaptix import Retort
+
+from gitlab_queue.models.priority import QueuePriority
 
 if TYPE_CHECKING:
     from gitlab_queue.models.queue_item import QueueItem
@@ -50,6 +52,36 @@ class PaginationSchema:
     per_page: int
     total: int
     total_pages: int
+
+
+class ActiveQueueItemSchema(TypedDict):
+    mr_iid: int
+    project_id: int
+    title: str
+    author: AuthorSchema
+    target_branch: str
+    state: str
+    is_hotfix: bool
+    priority: QueuePriority
+    labels: list[str]
+    queued_at: str
+    started_at: str | None
+    finished_at: str | None
+    position: NotRequired[int]
+    pipeline: NotRequired[PipelineInfoSchema]
+    last_error: NotRequired[str]
+    retry_count: NotRequired[int]
+
+
+class ActiveQueueResponseSchema(TypedDict):
+    items: list[ActiveQueueItemSchema]
+    count: int
+
+
+class QueueStatusResponseSchema(TypedDict):
+    queue: list[ActiveQueueItemSchema]
+    history: list[dict[str, Any]]
+    stats: dict[str, Any]
 
 
 # =============================================================================
@@ -372,6 +404,8 @@ def dump_failure_reasons(
 
 __all__: list[str] = [
     # Schemas
+    "ActiveQueueItemSchema",
+    "ActiveQueueResponseSchema",
     "AnalyticsSummarySchema",
     "AuthorSchema",
     "FailureReasonSchema",
@@ -384,6 +418,8 @@ __all__: list[str] = [
     "PaginatedHistoryResponse",
     "PaginationSchema",
     "PipelineInfoSchema",
+    "QueuePriority",
+    "QueueStatusResponseSchema",
     # Retort
     "api_retort",
     # Serialization functions

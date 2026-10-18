@@ -1,7 +1,9 @@
 import asyncio
+from datetime import UTC, datetime
 
 from scenarios.fakes import create_mr
 from scenarios.transports.responses import mr_response
+from sqlalchemy import text
 from vedro import given, params, scenario, then, when
 
 from gitlab_queue.core.processor import create_processor
@@ -21,8 +23,18 @@ from ._helpers import queue_environment
 async def sync_preserves_recreated_entry(entrypoint, initial_revision):
     async with queue_environment(initial_revision) as env:
         with given("an old sync snapshot of an ordinary queue entry"):
-            await env.queue.add_to_queue(123, create_mr(iid=1))
-            await env.queue.add_to_queue(123, create_mr(iid=3))
+            # Emulate the deployed old writer without requiring the current
+            # QueueManager's newly added columns in the previous schema.
+            async with env.queue.db.transaction() as session:
+                await session.execute(
+                    text(
+                        "INSERT INTO merge_requests (project_id, iid, title, author_name, author_username, "
+                        "target_branch, status, is_hotfix, labels, queued_at) "
+                        "VALUES (123, :iid, 'Old entry', 'Author', 'author', 'main', 'queued', 0, "
+                        "'[\"merge_queue\"]', :queued_at)"
+                    ),
+                    [{"iid": iid, "queued_at": datetime.now(UTC).isoformat()} for iid in (1, 3)],
+                )
             await env.queue.db.close()
             await run_migrations(env.queue.db.database_url)
             await env.queue.db.initialize()

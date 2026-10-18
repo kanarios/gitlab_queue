@@ -171,7 +171,7 @@ async def supplied_migration(url, connection, direction):
     await connection.run_sync(migrate)
 
 
-async def observed_migration(url, direction, stage, mode="raise", marker=None, release=None):
+async def observed_migration(url, direction, stage, mode="raise", marker=None, release=None, *, version_target=None):
     engine = create_async_engine(url)
     hit = False
     try:
@@ -197,6 +197,10 @@ async def observed_migration(url, direction, stage, mode="raise", marker=None, r
                     nonlocal hit
                     if hit or not " ".join(statement.split()).upper().startswith(target):
                         return
+                    if stage == "version":
+                        expected = version_target or {"downgrade": "f6a7b8c9d0e1", "upgrade": "a7b8c9d0e1f2"}[direction]
+                        if f"SETVERSION_NUM='{expected.upper()}'" not in "".join(statement.split()).upper():
+                            return
                     hit = True
                     if marker:
                         Path(marker).write_text("reached")

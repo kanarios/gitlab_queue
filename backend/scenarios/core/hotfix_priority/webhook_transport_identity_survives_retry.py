@@ -33,6 +33,7 @@ async def webhook_transport_identity_survives_retry(identity_header):
             "target_branch": "main",
             "updated_at": "2026-10-17 08:31:04 UTC",
         }
+        saved["labels"] = []
         replay = parse_merge_request_event(saved)
 
     with then("retry parsing preserves trusted message identity and source precision"):
